@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { cn } from "@/shared/lib/utils";
 import type { Key } from "../keys";
-import type { TemplateId } from "./types";
+import { MATRIX_WIZARD, type MenuAction, type TemplateId } from "./types";
 
 /**
  * The templates key's palette: a grid of 2D templates in the handheld's
@@ -47,7 +47,9 @@ const Grid = ({ n, m }: { n: number; m: number }) => (
   </span>
 );
 
-type Cell = { label: string; id?: TemplateId; glyph: ReactNode };
+type Wizard = Extract<MenuAction, { kind: "wizard" }>;
+/** A cell inserts a template, or opens a dialog that asks for its size first. */
+type Cell = { label: string; id?: TemplateId; wizard?: Wizard; glyph: ReactNode };
 
 export const PALETTE: Cell[] = [
   { label: "Fraction", id: "frac", glyph: <Frac top={<B />} bottom={<B />} /> },
@@ -167,6 +169,7 @@ export const PALETTE: Cell[] = [
   },
   {
     label: "Row matrix",
+    id: "rowmatrix",
     glyph: (
       <Bracket>
         <Grid n={1} m={2} />
@@ -175,6 +178,7 @@ export const PALETTE: Cell[] = [
   },
   {
     label: "Column matrix",
+    id: "colmatrix",
     glyph: (
       <Bracket>
         <Grid n={2} m={1} />
@@ -183,6 +187,7 @@ export const PALETTE: Cell[] = [
   },
   {
     label: "Matrix, m by n",
+    wizard: MATRIX_WIZARD,
     glyph: (
       <Bracket>
         <Grid n={3} m={3} />
@@ -340,14 +345,21 @@ export function gridMove(index: number, key: Key, n: number, cols: number): numb
   }
 }
 
-/** A key while the palette is open: the new selection, or a template to insert, or null to close. */
-export function paletteKeyPress(index: number, key: Key): { index: number | null; insert?: TemplateId } {
+export type PalettePick = { index: number | null; insert?: TemplateId; wizard?: Wizard };
+
+/** Picking a cell: close and insert its template or open its dialog; a cell with neither stays selected. */
+export function pickCell(index: number): PalettePick {
+  const c = PALETTE[index];
+  if (c?.id) return { index: null, insert: c.id };
+  if (c?.wizard) return { index: null, wizard: c.wizard };
+  return { index };
+}
+
+/** A key while the palette is open: the new selection, a pick, or null to close. */
+export function paletteKeyPress(index: number, key: Key): PalettePick {
   const r = gridMove(index, key, PALETTE.length, COLS);
   if (r === "esc") return { index: null };
-  if (r === "enter") {
-    const id = PALETTE[index]?.id;
-    return id ? { index: null, insert: id } : { index };
-  }
+  if (r === "enter") return pickCell(index);
   return { index: r };
 }
 
@@ -398,7 +410,7 @@ export function CellGrid({
   );
 }
 
-export const TEMPLATE_CELLS: GridCell[] = PALETTE.map((c) => ({ label: c.label, glyph: c.glyph, enabled: Boolean(c.id) }));
+export const TEMPLATE_CELLS: GridCell[] = PALETTE.map((c) => ({ label: c.label, glyph: c.glyph, enabled: Boolean(c.id || c.wizard) }));
 export const PALETTE_COLS = COLS;
 
 export function TemplatePalette({ index, onPick }: { index: number; onPick: (i: number) => void }) {

@@ -218,6 +218,11 @@ export function wizardInsert(s: E.EditState, built: string): E.EditState {
     const rows = Array.from({ length: n }, () => []);
     return E.insertNodes(opened, [{ t: "system", rows }, ...chars(`,{${vars}}`)], { offset: 0, slot: "s.0" });
   }
+  if (kind === "matrix") {
+    // Whole numbers from 1 to 12, as the screen fits; anything else falls back to 2.
+    const size = (v: string | undefined) => Math.max(1, Math.min(12, Math.round(Number(v)) || 2));
+    return E.insertMatrix(s, size(parts[0]), size(parts[1]));
+  }
   if (kind === "polyroots") return E.insertText(s, parts[1] === "Complex" ? "cPolyRoots(" : "polyRoots(");
   if (kind === "derivat") {
     const [v = "x", at = "", order = ""] = parts;
