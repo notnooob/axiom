@@ -1689,6 +1689,24 @@ export function CasApp() {
                     assign(name, value, final);
                     if (final) say(`${name} = ${value}`);
                   }}
+                  onSliderTyped={async (name, text) => {
+                    // A number as typed, or worked out (π/4, 1/3); the range widens to take it.
+                    let value = Number(text.replace(/−/g, "-"));
+                    if (!Number.isFinite(value) && engine.current) {
+                      try {
+                        value = Number((await engine.current.giac(`evalf(${translate(parse(text), settings).giac})`)).trim());
+                      } catch {
+                        value = NaN;
+                      }
+                    }
+                    if (!Number.isFinite(value)) {
+                      setError("Error: Enter a number");
+                      return;
+                    }
+                    setSlider(name, (sl) => ({ ...sl, value, min: Math.min(sl.min, value), max: Math.max(sl.max, value) }));
+                    assign(name, value, true);
+                    say(`${name} = ${value}`);
+                  }}
                   onSliderPlace={(name, at) => setSlider(name, (sl) => ({ ...sl, at }))}
                   onSliderAction={(name, action) => {
                     const sl = page.sliders?.find((x) => x.name === name);

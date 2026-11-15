@@ -63,6 +63,7 @@ export function GraphsApp({
   onEditPar,
   onDESettings,
   onSlider,
+  onSliderTyped,
   onSliderAction,
   onSliderPlace,
   onCursor,
@@ -91,6 +92,8 @@ export function GraphsApp({
   onDESettings: () => void;
   /** A slider moved; final when the drag or step has finished. */
   onSlider: (name: string, value: number, final: boolean) => void;
+  /** A value typed into a slider, as text. */
+  onSliderTyped: (name: string, text: string) => void;
   /** A choice from a slider's right-click menu (Move is handled here). */
   onSliderAction: (name: string, action: "settings" | "animate" | "minimize" | "delete") => void;
   /** Move put a slider somewhere, as fractions of the graph's width and height. */
@@ -525,6 +528,10 @@ export function GraphsApp({
             onValue={(v, final) => {
               setUsedSlider(sl.name);
               onSlider(sl.name, v, final);
+            }}
+            onTyped={(text) => {
+              setUsedSlider(sl.name);
+              onSliderTyped(sl.name, text);
             }}
             onMenu={(x, y) => {
               const r = box.current!.getBoundingClientRect();

@@ -15,8 +15,8 @@ export type CalcEffect = { evaluate: "exact" | "approx" } | null;
 /**
  * Something that needs a left side, put first on an empty entry line, works
  * on the last answer: the handheld writes ans in front of it. The operator
- * keys do it (5, Enter, then +1 reads ans+1 and gives 6, which is how 1000
- * then ×1.05 Enter Enter … steps a recurrence), and so does a conversion
+ * keys do it (5, Enter, then +1 reads ans+1 and gives 6; Enter on the empty
+ * line after it repeats ans+1, stepping a recurrence), and so does a conversion
  * such as ▶Decimal from a menu or the catalog. The minus sign is left out: from a computer keyboard
  * a leading - is a negative number, and the keypad's subtraction and
  * negation keys both type it here.
@@ -120,26 +120,33 @@ export function calcKey(
       return moved ? done({ edit: moved }) : done({});
     }
     case "enter":
-      return done({}, page.edit.row.length ? { evaluate: "exact" } : null);
-    case "approx":
-      return done({}, page.edit.row.length ? { evaluate: "approx" } : null);
+    case "approx": {
+      const effect: CalcEffect = { evaluate: key.k === "enter" ? "exact" : "approx" };
+      if (page.edit.row.length) return done({}, effect);
+      // Enter on an empty line runs the last entry again, as the handheld does:
+      // 1000, then ans·1.05+200, then Enter Enter … steps a recurrence.
+      const last = page.history.at(-1);
+      return last ? done({ edit: E.setRow(textRow(last.inputText)) }, effect) : done({});
+    }
     default:
       return done({});
   }
 }
 
-/** A history item's text as a row for the entry line. */
+/** Entry text as a row for the entry line. */
+function textRow(text: string) {
+  try {
+    return astToRow(parse(text));
+  } catch {
+    return chars(text);
+  }
+}
+
+/** A history item's text, pasted at the cursor. */
 function pasteWhole(page: CalculatorPage, sel: HistorySelection): E.EditState {
   const h = page.history[sel.entry];
   if (!h) return page.edit;
-  const text = sel.part === "input" ? h.inputText : h.outputText;
-  let row;
-  try {
-    row = astToRow(parse(text));
-  } catch {
-    row = chars(text);
-  }
-  return E.insertRow(page.edit, row);
+  return E.insertRow(page.edit, textRow(sel.part === "input" ? h.inputText : h.outputText));
 }
 
 /**

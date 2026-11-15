@@ -194,6 +194,62 @@ function namesAns(a: Ast): boolean {
 /** The last answer put in where ans is named. */
 const withAnswer = (a: Ast, ans: Ast | undefined): Ast => (ans ? mapAst(a, (x) => (isAns(x) ? ans : x)) : a);
 
+/** Commands that rewrite an expression's form without changing its value. */
+const FORM_COMMANDS = new Set(["factor", "cFactor", "expand", "comDenom", "propFrac", "tExpand", "tCollect"]);
+
+/**
+ * factor(ans) after a solve: a form command on an equation or inequality
+ * rewrites each side, on answers joined by or/and each answer, and on a list
+ * each entry, as the handheld does. Giac reads x=a or x=b as true or false
+ * (factor gave 0), keeps an equation's sides as typed, and answers factor of
+ * a list with its table of factors and multiplicities.
+ */
+async function formOnParts(
+  input: Ast,
+  giac: Giac,
+  opts: { settings: Settings; ans?: Ast; approx?: boolean; seen?: Set<string>; values?: boolean },
+): Promise<EvalResult | null> {
+  if (input.k !== "call" || !FORM_COMMANDS.has(input.f) || !input.args[0]) return null;
+  const rest = input.args
+    .slice(1)
+    .map((a) => `,${print(a)}`)
+    .join("");
+  let arg = withAnswer(input.args[0], opts.ans);
+  // A stored value or a solve in it (factor(2·solve(…))): worked out first to see what it is.
+  let solves = false;
+  mapAst(arg, (x) => {
+    if (x.k === "call" && SOLVE_LIKE.has(x.f)) solves = true;
+    return x;
+  });
+  if (arg.k === "sym" || solves) {
+    const r = await evaluate(print(arg), giac, { ...opts, values: false });
+    if (!r.ok || r.definition) return null;
+    arg = r.output;
+  }
+  const joins = (x: Ast) => x.k === "bin" && (x.op in RELATIONS || x.op === "or" || x.op === "and");
+  const truth = (x: Ast) => x.k === "sym" && (x.name === "true" || x.name === "false");
+  // A solve with no answers (false) or every x (true): Giac reads it as 0 or 1.
+  if (truth(arg)) return { ok: true, input, output: arg, outputText: print(arg) };
+  if (!joins(arg) && arg.k !== "list") return null;
+  let error: string | null = null;
+  const apply = async (x: Ast): Promise<Ast> => {
+    if (error) return x;
+    if (x.k === "bin" && joins(x)) return { ...x, a: await apply(x.a), b: await apply(x.b) };
+    if (x.k === "list") {
+      const items: Ast[] = [];
+      for (const item of x.items) items.push(await apply(item));
+      return { ...x, items };
+    }
+    if (truth(x)) return x;
+    const r = await evaluate(`${input.f}(${print(x)}${rest})`, giac, { ...opts, ans: undefined });
+    if (!r.ok) error = r.error;
+    return r.ok ? r.output : x;
+  };
+  const output = await apply(arg);
+  if (error) return { ok: false, input, error };
+  return { ok: true, input, output, outputText: print(output) };
+}
+
 async function evaluateText(
   typedText: string,
   giac: Giac,
@@ -214,6 +270,8 @@ async function evaluateText(
   // never whatever Giac last worked out.
   if (!opts.ans && namesAns(input)) return { ok: false, input, error: "Error: No earlier answer to use" };
   if (input.k === "call" && input.f === "CopyVar") return copyVar(input, giac, opts.settings);
+  const parts = await formOnParts(input, giac, opts);
+  if (parts) return parts;
   if (input.k === "call" && STAT_COMMANDS.has(input.f)) return statistics(withAnswer(input, opts.ans) as typeof input, giac, opts.settings);
   const results = await statResults(input, giac, opts.settings);
   if (results) return results;

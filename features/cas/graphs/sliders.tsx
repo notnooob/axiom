@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { cn } from "@/shared/lib/utils";
 import { formatFloat } from "../engine/format";
 import { RENAME_OUT } from "../engine/translate";
@@ -12,8 +12,9 @@ import type { Slider } from "../state/document";
  * track with a pointer for a handle and the minimum and maximum under its
  * ends; vertical, the pointer faces left and the scale sits beside it. The
  * slider in use is blue, the others grey. Drag or click the track to set
- * the value; the graph redraws as it changes. Right-click (or long-press)
- * for the slider's menu. Minimized, it's a pair of step buttons and
+ * the value; the graph redraws as it changes. Tap the value to type one.
+ * Right-click, long-press or (on a touch screen) the ⋯ button for the
+ * slider's menu. Minimized, it's a pair of step buttons and
  * "a =1.". With no place of its own (Move) it takes the next one down the
  * left of the graph.
  */
@@ -97,6 +98,7 @@ export function SliderView({
   size,
   active,
   onValue,
+  onTyped,
   onMenu,
 }: {
   slider: Slider;
@@ -108,9 +110,23 @@ export function SliderView({
   active: boolean;
   /** final: the drag or step has finished, so the value can be kept. */
   onValue: (v: number, final: boolean) => void;
+  /** A value typed in place of the shown one ("2.5", "π/4"), for the page to work out. */
+  onTyped: (text: string) => void;
   onMenu: (x: number, y: number) => void;
 }) {
   const track = useRef<HTMLDivElement>(null);
+  const [typing, setTyping] = useState<string | null>(null);
+  const typed = (keep: boolean) => {
+    const t = typing?.trim();
+    setTyping(null);
+    if (keep && t && t !== String(s.value)) onTyped(t);
+  };
+  // A long press opens the menu: phones send no right-click.
+  const press = useRef<{ timer: number; x: number; y: number } | null>(null);
+  const endPress = () => {
+    if (press.current) window.clearTimeout(press.current.timer);
+    press.current = null;
+  };
   const s = slider;
   const frac = s.max > s.min ? (s.value - s.min) / (s.max - s.min) : 0;
   const place = sliderPlace(s, index);
@@ -121,9 +137,51 @@ export function SliderView({
   };
   const colour = active ? "text-casSelect" : "text-casLabel";
   const label = !s.hideName && (
-    <span className="whitespace-nowrap leading-tight text-casLabel">
+    <span className="inline-flex items-center whitespace-nowrap leading-tight text-casLabel">
       <b className="font-casmath">{s.name}</b>
-      <span className="font-casmono"> ={sliderText(s, s.value)}</span>
+      <span className="whitespace-pre font-casmono"> =</span>
+      {typing === null ? (
+        <button
+          type="button"
+          tabIndex={-1}
+          aria-label={`Type a value for ${s.name}`}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={() => setTyping(String(s.value))}
+          className="cursor-text border-b border-dotted border-current font-casmono leading-tight"
+        >
+          {sliderText(s, s.value)}
+        </button>
+      ) : (
+        <input
+          autoFocus
+          value={typing}
+          aria-label={`Value of ${s.name}`}
+          enterKeyHint="done"
+          autoComplete="off"
+          spellCheck={false}
+          onChange={(e) => setTyping(e.target.value)}
+          onFocus={(e) => e.target.select()}
+          // The calculator takes keys and focus from the page around it: keep both here.
+          onMouseDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") typed(true);
+            else if (e.key === "Escape") typed(false);
+          }}
+          onBlur={() => typed(true)}
+          className="w-[5em] border border-casSelect bg-casScreen px-[0.2em] font-casmono text-casInk outline-none"
+        />
+      )}
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label={`${s.name} slider menu`}
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => onMenu(e.clientX, e.clientY)}
+        className="-my-[0.6em] ml-[0.2em] hidden min-h-[2em] min-w-[2em] items-center justify-center text-[1.3em] leading-none text-casInk [@media(pointer:coarse)]:inline-flex"
+      >
+        ⋯
+      </button>
     </span>
   );
   const scale = (v: number) => <span className="font-casmono leading-none text-casLabel">{sliderText(s, v)}</span>;
@@ -146,13 +204,17 @@ export function SliderView({
     <div
       ref={track}
       onPointerDown={(e) => {
+        // A right-click opens the menu without moving the slider.
+        if (e.button !== 0) return;
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
         onValue(valueAt(e), false);
       }}
       onPointerMove={(e) => {
         if (e.buttons) onValue(valueAt(e), false);
       }}
-      onPointerUp={(e) => onValue(valueAt(e), true)}
+      onPointerUp={(e) => {
+        if (e.button === 0) onValue(valueAt(e), true);
+      }}
       className={cn("relative shrink-0 cursor-pointer touch-none", colour, s.vertical ? "h-[6em] w-[1.6em]" : "h-[1.6em] w-[7.5em]")}
     >
       <span
@@ -177,12 +239,38 @@ export function SliderView({
     <div
       role="group"
       aria-label={`Slider ${s.name}, ${sliderText(s, s.value)}`}
-      onPointerDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        endPress();
+        if (e.pointerType === "mouse" || typing !== null) return;
+        const { clientX: x, clientY: y } = e;
+        press.current = {
+          x,
+          y,
+          timer: window.setTimeout(() => {
+            press.current = null;
+            // The menu opens under the finger: the click that ends the press would pick its first item.
+            const swallow = (ev: MouseEvent) => {
+              ev.preventDefault();
+              ev.stopPropagation();
+            };
+            window.addEventListener("click", swallow, { capture: true, once: true });
+            window.setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 1000);
+            onMenu(x, y);
+          }, 500),
+        };
+      }}
+      onPointerMove={(e) => {
+        if (press.current && Math.hypot(e.clientX - press.current.x, e.clientY - press.current.y) > 10) endPress();
+      }}
+      onPointerUp={endPress}
+      onPointerCancel={endPress}
       onContextMenu={(e) => {
         e.preventDefault();
+        endPress();
         onMenu(e.clientX, e.clientY);
       }}
-      className="absolute flex select-none flex-col items-start font-casui"
+      className="absolute flex select-none flex-col items-start font-casui [-webkit-touch-callout:none]"
       style={{ left: place.x * size.w, top: place.y * size.h, fontSize: fs * 0.85 }}
     >
       {s.minimized ? (
