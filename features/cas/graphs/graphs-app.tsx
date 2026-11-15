@@ -226,8 +226,15 @@ export function GraphsApp({
     if (added) setUsedSlider(added);
     seenSliders.current = sliderNames;
   }, [sliderNames]);
-  /** After Move: the slider follows the pointer until a click puts it down. */
+  /** After Move: the slider follows the pointer until a click (or a tap) puts it down there. */
   const [moving, setMoving] = useState<string | null>(null);
+  const placeAt = (name: string, e: { clientX: number; clientY: number }) => {
+    const r = box.current!.getBoundingClientRect();
+    onSliderPlace(name, {
+      x: Math.min(0.9, Math.max(0, (e.clientX - r.left) / r.width)),
+      y: Math.min(0.9, Math.max(0, (e.clientY - r.top) / r.height)),
+    });
+  };
 
   const tool = page.tool;
   // Graph Trace on a relation follows its longest piece of curve.
@@ -346,12 +353,17 @@ export function GraphsApp({
     return () => el.removeEventListener("wheel", wheel);
   }, []);
   const pointer = {
+    // Moving a slider: the click that puts it down lands on the slider itself
+    // (it follows the pointer) or a label, which keep their clicks. Take it first.
+    onPointerDownCapture: (e: ReactPointerEvent) => {
+      if (!moving || e.button !== 0) return;
+      e.stopPropagation();
+      e.preventDefault();
+      placeAt(moving, e);
+      setMoving(null);
+    },
     onPointerDown: (e: ReactPointerEvent) => {
       if (e.button !== 0) return;
-      if (moving) {
-        setMoving(null);
-        return;
-      }
       if (tool) {
         if (choosing) {
           const n = graphAt(e);
@@ -365,11 +377,7 @@ export function GraphsApp({
     },
     onPointerMove: (e: ReactPointerEvent) => {
       if (moving) {
-        const r = box.current!.getBoundingClientRect();
-        onSliderPlace(moving, {
-          x: Math.min(0.9, Math.max(0, (e.clientX - r.left) / r.width)),
-          y: Math.min(0.9, Math.max(0, (e.clientY - r.top) / r.height)),
-        });
+        placeAt(moving, e);
         return;
       }
       const d = drag.current;
