@@ -32,6 +32,7 @@ export type Node =
   | { t: "exp"; exp: Row };
 
 export const chars = (s: string): Row => Array.from(s).map((c) => ({ t: "ch", c }));
+const angleRow = (a: Ast): Row => (a.k === "bin" && a.op === "∠" ? [...angleRow(a.a), ...chars("∠"), ...astToRow(a.b)] : astToRow(a));
 const group = (open: "(" | "{" | "[" | "|", arg: Row): Node => ({ t: "group", open, arg });
 
 /** Comma-joined rows, as inside a call's brackets. */
@@ -60,7 +61,8 @@ export function astToRow(a: Ast): Row {
     case "list":
       return [group("{", joined(a.items.map(r)))];
     case "mat":
-      return [{ t: "matrix", cells: a.rows.map((row) => row.map(r)) }];
+      // A vector's r∠θ (or ρ∠θ∠φ) entries are written without brackets: [√2∠π/4 1].
+      return [{ t: "matrix", cells: a.rows.map((row) => row.map((x) => (x.k === "bin" && x.op === "∠" ? angleRow(x) : r(x)))) }];
     case "neg":
       // −(a·b) and −a/b need no brackets; −(a+b) does.
       return [...chars("-"), ...wrapped(a.a, precOf(a.a) < 8 || a.a.k === "neg")];

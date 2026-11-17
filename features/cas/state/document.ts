@@ -29,6 +29,8 @@ export type HistoryEntry = {
   error?: string;
   /** The handheld's ⚠ message for the answer, a line per string ("" between paragraphs). */
   warning?: string[];
+  /** What a program showed (Disp), a line per entry, each its parts: a string in quotes is plain text, anything else maths. */
+  display?: string[][];
 };
 
 /** A selected history item: up-arrow from the entry line walks these. */

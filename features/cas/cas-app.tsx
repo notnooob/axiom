@@ -24,7 +24,10 @@ import { historySaid, markSaid, menuSaid, pageSaid, toolSaid, wizardSaid } from 
 import { calcKey, isTemplateWizard, wizardInsert, wizardLinear } from "./calculator/calc-keys";
 import { CalculatorApp } from "./calculator/calculator-app";
 import { CasEngine, definedFunctions, definedNames, type EngineStatus } from "./engine/client";
+import { definedSources } from "./engine/program";
+import { libraryDefinition, loadLibraries } from "./files/library";
 import { DEFAULT_SETTINGS, evaluate, type Settings } from "./engine/evaluate";
+import type { ProgramIO } from "./engine/eval-program";
 import { unrounded } from "./engine/format";
 import { analyze } from "./graphs/analyze";
 import {
@@ -47,7 +50,7 @@ import { parse, type Ast } from "./math/ast";
 import { print } from "./math/print";
 import { RENAME_IN, translate } from "./engine/translate";
 import { DE_DEFAULTS, type RelationOp, type Slider } from "./state/document";
-import { emptyEdit, selectBetween, selection, selectionText, templateNode } from "./math/editor";
+import { CARET, emptyEdit, insertText, selectBetween, selection, selectionText, templateNode } from "./math/editor";
 import { DefinedNames } from "./math/render";
 import { astToRow, chars, rowToLinear, type Row } from "./math/tree";
 import { calculatorMenu } from "./menus/calculator-menu";
@@ -554,6 +557,118 @@ export function CasApp() {
     [updatePage],
   );
 
+  /**
+   * A running program's Request and Text: the dialog waits for the student,
+   * and closing it any other way than OK is a Break, as on the handheld.
+   */
+  const asking = useRef<((v: string | null) => void) | null>(null);
+  const telling = useRef<(() => void) | null>(null);
+  const programIO = useMemo<ProgramIO>(
+    () => ({
+      request: (prompt, text) =>
+        new Promise<string | null>((resolve) => {
+          asking.current = resolve;
+          setWizard(openWizard({ kind: "wizard", title: text ? "Request String" : "Request", arrows: false, fields: [{ label: prompt || "Value:", value: "" }], build: "request:{0}" }));
+        }),
+      message: (text) =>
+        new Promise<void>((resolve) => {
+          telling.current = resolve;
+          setWarning([text]);
+        }),
+    }),
+    [],
+  );
+  useEffect(() => {
+    if (wizard || !asking.current) return;
+    const answer = asking.current;
+    asking.current = null;
+    answer(null);
+  }, [wizard]);
+  useEffect(() => {
+    if (warning || !telling.current) return;
+    const done = telling.current;
+    telling.current = null;
+    done();
+  }, [warning]);
+
+  /** Put a line in the Calculator's entry line, replacing what's there, with the cursor at CARET if it has one. */
+  const setEntry = useCallback((text: string) => setCalc((p) => ({ ...p, edit: insertText(emptyEdit(), text), sel: null })), [setCalc]);
+
+  /** Refresh Libraries: every LibPub and LibPriv object in MyLib, defined here as lib\obj. */
+  const refreshLibraries = useCallback(async () => {
+    const e = engine.current;
+    if (!e) return;
+    const objs = await loadLibraries();
+    let n = 0;
+    for (const o of objs) {
+      const siblings = objs.filter((x) => x.lib === o.lib).map((x) => x.def.name);
+      const r = await evaluate(libraryDefinition(o, siblings), e.giac, { settings: current.current.settings });
+      if (!r.ok) continue;
+      for (const d of [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])]) e.remember(d);
+      n++;
+    }
+    setDefined(definedNames(e.saved));
+    toast(n ? `${n} library object${n === 1 ? "" : "s"} ready to use as library\\name.` : "No library objects found in My Documents/MyLib.");
+  }, []);
+
+  /** The Program Editor's dialogs, Recall Definition and Create Library Shortcut, once filled in. */
+  const programWizard = useCallback(
+    async (built: string) => {
+      const e = engine.current;
+      if (!e) return;
+      const [kind, ...rest] = built.split(":");
+      const arg = rest.join(":").trim();
+      if (kind === "prgmnew") {
+        const [name = "", type, access] = rest.map((s) => s.trim());
+        if (!/^[A-Za-z][\w]*$/.test(name)) return setError("Error: A name is letters, digits and _, starting with a letter");
+        const block = type === "Function" ? "Func" : "Prgm";
+        setEntry(`Define ${access && access !== "None" ? `${access} ` : ""}${name.toLowerCase()}()=${block}:${CARET}:End${block}`);
+        return;
+      }
+      if (kind === "prgmopen" || kind === "prgmview") {
+        const def = definedSources(e.saved).get(arg);
+        if (!def) return setError("Error: Not defined");
+        if (kind === "prgmopen") return setEntry(def.source);
+        setWarning([`${def.name}(${def.params.join(",")})  ${def.kind === "Func" ? "Function" : "Program"}`, "", ...def.lines.map((l) => `  ${l}`)]);
+        return;
+      }
+      if (kind === "recalldef") {
+        const def = definedSources(e.saved).get(arg);
+        if (def) return setEntry(def.source);
+        const fn = definedFunctions(e.saved).get(arg);
+        const shown = fn ? `${arg}(${fn.params.join(",")})` : arg;
+        const r = await evaluate(shown, e.giac, { settings: current.current.settings });
+        if (!r.ok) return setError(r.error);
+        setEntry(`Define ${shown}=${r.outputText}`);
+        return;
+      }
+      const objs = await loadLibraries();
+      if (kind === "libimport") {
+        const [lib, name] = arg.split("\\");
+        const o = objs.find((x) => x.lib === lib && x.def.name === name);
+        if (!o) return setError("Error: Not found in the libraries");
+        setEntry(libraryDefinition(o, []).replace(`Define ${o.lib}.`, "Define "));
+        return;
+      }
+      if (kind === "libshortcut") {
+        const [lib = "", prefix = "", priv] = rest.map((s) => s.trim().toLowerCase());
+        if (!/^[a-z][a-z0-9]*$/.test(prefix)) return setError("Error: A shortcut is letters and digits, starting with a letter");
+        const mine = objs.filter((o) => o.lib === lib && (o.def.access === "LibPub" || priv === "yes"));
+        const siblings = objs.filter((o) => o.lib === lib).map((o) => o.def.name);
+        let n = 0;
+        for (const o of mine) {
+          const r = await evaluate(libraryDefinition(o, siblings, prefix), e.giac, { settings: current.current.settings });
+          if (!r.ok) continue;
+          for (const d of [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])]) e.remember(d);
+          n++;
+        }
+        setDefined(definedNames(e.saved));
+        toast(`${n} shortcut${n === 1 ? "" : "s"}: ${prefix}.name`);
+      }
+    },
+    [setEntry],
+  );
+
   const runEvaluate = useCallback(
     async (p: CalculatorPage, approx: boolean) => {
       const e = engine.current;
@@ -561,10 +676,14 @@ export function CasApp() {
       busy.current = true;
       const text = rowToLinear(p.edit.row);
       try {
-        const res = await evaluate(text, e.giac, { settings, ans: lastAns.current ?? shownAnswer(p), approx });
+        const res = await evaluate(text, e.giac, { settings, ans: lastAns.current ?? shownAnswer(p), approx, io: programIO });
         if (!res.ok) {
           setError(res.error);
           return;
+        }
+        if (res.settings) {
+          setSettings(res.settings);
+          void e.applySettings(res.settings);
         }
         // A recursive function's helper (in definitions) comes before the function itself.
         const defs = [...(res.definitions ?? []), ...(res.definition ? [res.definition] : [])];
@@ -582,6 +701,7 @@ export function CasApp() {
           outputText: res.outputText,
           ...(full !== print(res.output) ? { ansText: full } : {}),
           ...(res.warning && { warning: res.warning.text }),
+          ...(res.display && { display: res.display }),
         };
         setCalc((cur) => ({ ...cur, edit: emptyEdit(), history: [...cur.history, entry] }));
         say(historySaid(entry));
@@ -1500,7 +1620,7 @@ export function CasApp() {
       if (!action) return;
       // On a Notes page, the Calculations menu types into the current maths box (or a new one).
       if (page?.kind === "notes" && (action.kind === "insert" || action.kind === "template"))
-        notesApi.current?.insertMath(action.kind === "insert" ? action.text : rowToLinear([templateNode(action.template)]));
+        notesApi.current?.insertMath(action.kind === "insert" ? action.text.replaceAll(CARET, "") : rowToLinear([templateNode(action.template)]));
       else if (action.kind === "insert") pageKey({ k: "text", text: action.text });
       else if (action.kind === "template") pageKey({ k: "template", id: action.template });
       else if (action.kind === "wizard") setWizard(openWizard(action));
@@ -1740,7 +1860,53 @@ export function CasApp() {
             build: "settings:{0}:{1}:{3}:{4}",
           }),
         );
-      } else if (action.id === "financeSolver") setFinance({ ...lastFinance.current, focus: 0, fresh: true });
+      } else if (action.id === "prgmNew")
+        setWizard(
+          openWizard({
+            kind: "wizard",
+            title: "New",
+            arrows: false,
+            fields: [
+              { label: "Name:", value: "" },
+              { label: "Type:", value: "Program", options: ["Program", "Function"] },
+              { label: "Library Access:", value: "None", options: ["None", "LibPriv", "LibPub"] },
+            ],
+            build: "prgmnew:{0}:{1}:{2}",
+          }),
+        );
+      else if (action.id === "prgmOpen" || action.id === "prgmView" || action.id === "recallDef") {
+        const e = engine.current;
+        if (!e) return;
+        const sources = [...definedSources(e.saved).keys()];
+        const names = action.id === "recallDef" ? [...new Set([...definedNames(e.saved), ...sources])].sort() : sources.sort();
+        if (!names.length) return setError(action.id === "recallDef" ? "Error: Nothing is defined in this problem" : "Error: No programs or functions are defined in this problem");
+        const title = { prgmOpen: "Open", prgmView: "View", recallDef: "Recall Definition" }[action.id];
+        setWizard(openWizard({ kind: "wizard", title, arrows: false, fields: [{ label: "Name:", value: names[0], options: names }], build: `${action.id.toLowerCase()}:{0}` }));
+      } else if (action.id === "prgmImport" || action.id === "libShortcut") {
+        void loadLibraries().then((objs) => {
+          if (!objs.length) return setError("Error: No library objects. A document in My Documents/MyLib defines them with Define LibPub or Define LibPriv.");
+          if (action.id === "prgmImport") {
+            const names = objs.map((o) => `${o.lib}\\${o.def.name}`);
+            setWizard(openWizard({ kind: "wizard", title: "Import", arrows: false, fields: [{ label: "Name:", value: names[0], options: names }], build: "libimport:{0}" }));
+          } else {
+            const libs = [...new Set(objs.map((o) => o.lib))];
+            setWizard(
+              openWizard({
+                kind: "wizard",
+                title: "Create Library Shortcut",
+                arrows: false,
+                fields: [
+                  { label: "Library:", value: libs[0], options: libs },
+                  { label: "Shortcut:", value: libs[0]!.slice(0, 2) },
+                  { label: "Include Private Objects", value: "No", check: true },
+                ],
+                build: "libshortcut:{0}:{1}:{2}",
+              }),
+            );
+          }
+        });
+      } else if (action.id === "refreshLibs") void refreshLibraries();
+      else if (action.id === "financeSolver") setFinance({ ...lastFinance.current, focus: 0, fresh: true });
       else if (action.id === "clearHistory") setCalc((p) => ({ ...p, history: [], sel: null }));
       else if (action.id === "clearAZ") {
         const e = engine.current;
@@ -1753,7 +1919,7 @@ export function CasApp() {
           });
       } else graphAction(action.id);
     },
-    [addPage, graphAction, pageKey, setCalc, settings, doc, setup, rows, browse, page, newDoc, writeNow, refreshFiles, showStatus, openFile, downloadFile, tnsOf, setLists, recalcLists, runPython, updatePage, startNew, closeDocument, saveDocument, isScratch], // eslint-disable-line react-hooks/exhaustive-deps
+    [addPage, graphAction, pageKey, setCalc, settings, doc, setup, rows, browse, page, newDoc, writeNow, refreshFiles, showStatus, openFile, downloadFile, tnsOf, setLists, recalcLists, runPython, updatePage, startNew, closeDocument, saveDocument, isScratch, refreshLibraries], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   function askDelete(path: string) {
@@ -1784,6 +1950,16 @@ export function CasApp() {
     (built: string) => {
       const field = (prefix: string) => built.slice(prefix.length).trim();
       const badName = (n: string) => !n || /[/\\:*?"<>|]/.test(n);
+      if (/^(prgmnew|prgmopen|prgmview|recalldef|libimport|libshortcut):/.test(built)) {
+        void programWizard(built);
+        return;
+      }
+      if (built.startsWith("request:")) {
+        const answer = asking.current;
+        asking.current = null;
+        answer?.(built.slice(8));
+        return;
+      }
       if (built.startsWith("geostore:")) {
         // geostore:<measurement>:<variable>; an empty name unlinks it.
         const [id, name = ""] = built.slice(9).split(":").map((v) => v.trim());
@@ -2038,7 +2214,7 @@ export function CasApp() {
       setCalc((p) => ({ ...p, edit: wizardInsert(p.edit, built), sel: null }));
       setGraphs((g) => (g.editing !== null ? { ...g, edit: wizardInsert(g.edit, built) } : g));
     },
-    [setCalc, setGraphs, assign, rows, browse, page, refreshFiles, remember, setLists, recalcLists],
+    [setCalc, setGraphs, assign, rows, browse, page, refreshFiles, remember, setLists, recalcLists, programWizard],
   );
 
   // The catalog's answer to a key or a click: keep it open, or close it and insert.

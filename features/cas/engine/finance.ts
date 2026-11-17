@@ -16,13 +16,13 @@ import { UnsupportedError } from "./translate";
  * bal(5,6,5.75,5000,,12,12) bears out CpY=1: its 12 is FV and
  * PpY, and only with CpY=1 is the first month's interest 23.35.
  */
-export const FINANCE = new Set(["tvmFV", "tvmPV", "tvmPmt", "tvmN", "tvmI", "eff", "nom", "amortTbl", "bal", "ΣInt", "ΣPrn", "npv", "irr", "mirr"]);
+export const FINANCE = new Set(["tvmFV", "tvmPV", "tvmPmt", "tvmN", "tvmI", "eff", "nom", "amortTbl", "bal", "ΣInt", "ΣPrn", "npv", "irr", "mirr", "dbd"]);
 
 /** An argument worked out: a number, an empty slot, a list of numbers (cash flows), a matrix of numbers (an amortisation table) or anything else. */
 export type FinanceArg = { k: "num"; v: number } | { k: "empty" } | { k: "list"; v: number[] } | { k: "table"; rows: number[][] } | { k: "other" };
 
-/** amortTbl's answer: rows of payment number, interest, principal and balance. */
-export type FinanceValue = number | { table: number[][] };
+/** amortTbl's answer: rows of payment number, interest, principal and balance; dbd's, a whole number of days. */
+export type FinanceValue = number | { table: number[][] } | { days: number };
 
 const TVM: Record<string, TvmField> = { tvmN: "n", tvmI: "i", tvmPV: "pv", tvmPmt: "pmt", tvmFV: "fv" };
 const FIELDS: TvmField[] = ["n", "i", "pv", "pmt", "fv"];
@@ -55,6 +55,13 @@ export function finance(f: string, args: FinanceArg[]): FinanceValue | null {
     return finite(f === "eff" ? effectiveRate(rate, cpy) : nominalRate(rate, cpy));
   }
   if (f === "npv" || f === "irr" || f === "mirr") return cashFlowValue(f, args);
+  if (f === "dbd") {
+    count(args, 2, 2);
+    const values = required(args);
+    if (!values) return null;
+    const [a, b] = values.map(dateOf) as [number, number];
+    return { days: Math.round((b - a) / 86_400_000) };
+  }
   // The amortisation functions: bal(NPmt,…), amortTbl(NPmt,…), ΣInt(NPmt1,NPmt2,…), ΣPrn(NPmt1,NPmt2,…).
   const ranged = f === "ΣInt" || f === "ΣPrn";
   const lead = ranged ? 2 : 1;
@@ -207,4 +214,30 @@ function payments(args: FinanceArg[], ranged: boolean): number[] | null {
 function finite(v: number): number {
   if (!Number.isFinite(v)) throw new EngineError("Error: No solution found");
   return v;
+}
+
+/**
+ * A dbd date, as a number: MM.DDYY (two digits or fewer before the point)
+ * or DDMM.YY (three or four), years 1950 to 2049, as the handheld reads them.
+ * The day it names, in milliseconds (UTC).
+ */
+export function dateOf(v: number): number {
+  if (!(v > 0)) throw new EngineError("Error: Invalid date");
+  const [whole = "", frac = ""] = v.toFixed(6).replace(/0+$/, "").split(".");
+  let month: number, day: number, year: number;
+  if (whole.length <= 2) {
+    const f = frac.padEnd(4, "0");
+    if (f.length > 4) throw new EngineError("Error: Invalid date");
+    [month, day, year] = [Number(whole), Number(f.slice(0, 2)), Number(f.slice(2, 4))];
+  } else if (whole.length <= 4) {
+    const w = whole.padStart(4, "0");
+    const f = frac.padEnd(2, "0");
+    if (f.length > 2) throw new EngineError("Error: Invalid date");
+    [day, month, year] = [Number(w.slice(0, 2)), Number(w.slice(2, 4)), Number(f)];
+  } else throw new EngineError("Error: Invalid date");
+  const full = year < 50 ? 2000 + year : 1900 + year;
+  const t = Date.UTC(full, month - 1, day);
+  const d = new Date(t);
+  if (d.getUTCMonth() !== month - 1 || d.getUTCDate() !== day) throw new EngineError("Error: Invalid date");
+  return t;
 }

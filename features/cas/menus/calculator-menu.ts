@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
+import { CARET as C } from "../math/editor";
 import { app, ins, MATRIX_WIZARD, off, rule, sub, tpl, wiz, type Menu, type MenuItem } from "./types";
 
 /**
@@ -50,6 +51,9 @@ const logisticWizard = (title: string, command: string): MenuItem =>
     ],
     `${command} {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results`,
   );
+
+/** A Mode setting's values, each pasting setMode with the handheld's numbers for it. */
+const modeMenu = (label: string, mode: number, values: string[]): MenuItem => sub(label, values.map((v, i) => ins(v, `setMode(${mode},${i + 1})`)));
 
 /** Distributions, under both Probability and Statistics. */
 /** The F distribution's two degrees of freedom, as its wizards ask for them. */
@@ -131,21 +135,21 @@ const DISTRIBUTIONS: MenuItem[] = [
 export const calculatorMenu: Menu = [
   sub("Actions", [
     ins("Define", "Define "),
-    off("Recall Definition"),
+    app("Recall Definition", "recallDef"),
     rule(ins("Delete Variable", "DelVar ")),
     app("Clear a-z...", "clearAZ"),
     app("Clear History", "clearHistory"),
     rule(ins("Insert Comment", "©")),
     rule(
       sub("Library", [
-        off("Refresh Libraries"),
+        app("Refresh Libraries", "refreshLibs"),
         ins('Insert "\\" character', "\\"),
-        off("Create Library Shortcut"),
-        off("Define LibPriv"),
-        off("Define LibPub (Show in Catalog)"),
+        app("Create Library Shortcut", "libShortcut"),
+        ins("Define LibPriv", "Define LibPriv "),
+        ins("Define LibPub (Show in Catalog)", "Define LibPub "),
       ]),
     ),
-    sub("Lock", [off("Lock Variable"), off("Unlock Variable"), off("Get Lock Info")]),
+    sub("Lock", [ins("Lock Variable", "Lock "), ins("Unlock Variable", "unLock "), ins("Get Lock Info", "getLockInfo(")]),
   ]),
   sub("Number", [
     ins("Convert to Decimal", "▶Decimal"),
@@ -536,8 +540,8 @@ export const calculatorMenu: Menu = [
     ]),
     sub("Advanced", [
       ins("Trace", "trace("),
-      off("LU Decomposition"),
-      off("QR Decomposition"),
+      ins("LU Decomposition", "LU "),
+      ins("QR Decomposition", "QR "),
       ins("Eigenvalues", "eigVl("),
       ins("Eigenvectors", "eigVc("),
       ins("Characteristic Polynomial", "charPoly("),
@@ -548,8 +552,8 @@ export const calculatorMenu: Menu = [
       ins("Dot Product", "dotP("),
       ins("Convert to Polar", "▶Polar"),
       ins("Convert to Rectangular", "▶Rect"),
-      off("Convert to Cylindrical"),
-      off("Convert to Spherical"),
+      ins("Convert to Cylindrical", "▶Cylind"),
+      ins("Convert to Spherical", "▶Sphere"),
     ]),
   ]),
   sub("Finance", [
@@ -570,55 +574,58 @@ export const calculatorMenu: Menu = [
       ins("Modified Internal Rate of Return", "mirr("),
     ]),
     sub("Interest Conversion", [ins("Nominal Interest Rate", "nom("), ins("Effective Interest Rate", "eff(")]),
-    sub("Days between Dates", [off("Month Day Format"), off("Day Month Format")]),
+    // Both paste dbd(: the dates' own form (MM.DDYY or DDMM.YY) tells them apart.
+    sub("Days between Dates", [ins("Month Day Format", "dbd("), ins("Day Month Format", "dbd(")]),
   ]),
   sub("Functions & Programs", [
-    sub("Program Editor", ["New...", "Open...", "Import...", "View..."].map(off)),
-    off("Func...EndFunc"),
-    off("Prgm...EndPrgm"),
-    off("Local"),
-    sub(
-      "Control",
-      [
-        "If",
-        "If...Then...EndIf",
-        "If...Then...Else...EndIf",
-        "ElseIf...Then",
-        "For...EndFor",
-        "While...EndWhile",
-        "Loop...EndLoop",
-        "Try...Else...EndTry",
-        "ClrErr",
-        "PassErr",
-        "errCode",
-        "warnCodes",
-        "Wait",
-      ].map(off),
-    ),
-    sub("Transfer", ["Return", "Cycle", "Exit", "Lbl", "GoTo Lbl", "Stop"].map(off)),
+    sub("Program Editor", [app("New...", "prgmNew"), app("Open...", "prgmOpen"), app("Import...", "prgmImport"), app("View...", "prgmView")]),
+    ins("Func...EndFunc", `Func:${C}:EndFunc`),
+    ins("Prgm...EndPrgm", `Prgm:${C}:EndPrgm`),
+    ins("Local", "Local "),
+    sub("Control", [
+      ins("If", "If "),
+      ins("If...Then...EndIf", `If ${C} Then::EndIf`),
+      ins("If...Then...Else...EndIf", `If ${C} Then::Else::EndIf`),
+      ins("ElseIf...Then", `ElseIf ${C} Then:`),
+      ins("For...EndFor", `For ${C}::EndFor`),
+      ins("While...EndWhile", `While ${C}::EndWhile`),
+      ins("Loop...EndLoop", `Loop:${C}:EndLoop`),
+      ins("Try...Else...EndTry", `Try:${C}:Else::EndTry`),
+      ins("ClrErr", "ClrErr"),
+      ins("PassErr", "PassErr"),
+      ins("errCode", "errCode"),
+      ins("warnCodes", "warnCodes("),
+      ins("Wait", "Wait "),
+    ]),
+    sub("Transfer", [ins("Return", "Return "), ins("Cycle", "Cycle"), ins("Exit", "Exit"), ins("Lbl", "Lbl "), ins("GoTo Lbl", "Goto "), ins("Stop", "Stop")]),
     sub("I/O", [
-      ...["Disp", "DispAt", "Request", "RequestStr", "Text", "getKey"].map(off),
-      rule(off("Get")),
-      off("GetStr"),
-      off("Send"),
-      rule(off("RefreshProbeVars")),
+      ins("Disp", "Disp "),
+      ins("DispAt", "DispAt "),
+      ins("Request", "Request "),
+      ins("RequestStr", "RequestStr "),
+      ins("Text", "Text "),
+      ins("getKey", "getKey("),
+      rule(ins("Get", "Get ")),
+      ins("GetStr", "GetStr "),
+      ins("Send", "Send "),
+      rule(ins("RefreshProbeVars", "RefreshProbeVars")),
     ]),
     sub("Mode", [
       sub("Display Digits", [
-        ...["Float", ...Array.from({ length: 12 }, (_, i) => `Float${i + 1}`)].map(off),
-        ...Array.from({ length: 13 }, (_, i) => off(`Fix${i}`)),
+        ...["Float", ...Array.from({ length: 12 }, (_, i) => `Float${i + 1}`), ...Array.from({ length: 13 }, (_, i) => `Fix${i}`)].map((l, i) => ins(l, `setMode(1,${i + 1})`)),
       ]),
-      sub("Angle", ["Radian", "Degree", "Gradian"].map(off)),
-      sub("Exponential Format", ["Normal", "Scientific", "Engineering"].map(off)),
-      sub("Real or Complex", ["Real", "Rectangular", "Polar"].map(off)),
-      sub("Auto or Approx", ["Auto", "Approximate", "Exact"].map(off)),
-      sub("Vector Format", ["Rectangular", "Cylindrical", "Spherical"].map(off)),
-      sub("Base", ["Decimal", "Hex", "Binary"].map(off)),
-      sub("Unit System", ["SI", "Eng/US"].map(off)),
-      off("Get Mode"),
-      off("Get Language Info"),
-      off("Get Platform Info"),
+      modeMenu("Angle", 2, ["Radian", "Degree", "Gradian"]),
+      modeMenu("Exponential Format", 3, ["Normal", "Scientific", "Engineering"]),
+      modeMenu("Real or Complex", 4, ["Real", "Rectangular", "Polar"]),
+      modeMenu("Auto or Approx", 5, ["Auto", "Approximate", "Exact"]),
+      modeMenu("Vector Format", 6, ["Rectangular", "Cylindrical", "Spherical"]),
+      modeMenu("Base", 7, ["Decimal", "Hex", "Binary"]),
+      modeMenu("Unit System", 8, ["SI", "Eng/US"]),
+      ins("Get Mode", "getMode("),
+      ins("Get Language Info", "getLangInfo()"),
+      ins("Get Platform Info", "getPlatform()"),
     ]),
-    off("Add New Line"),
+    // The entry line is one line here: a new line in a block is ":", which the handheld also reads as one.
+    ins("Add New Line", ":"),
   ]),
 ];

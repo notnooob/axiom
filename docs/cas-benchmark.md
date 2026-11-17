@@ -1,22 +1,22 @@
 # Calculator benchmark
 
-197 of 197 commands give the handheld's answer (100%).
+210 of 210 commands give the handheld's answer (100%).
 
-The Calculator menu has 346 items, as the handheld's: 246 are built and 100 are greyed (not built yet).
+The Calculator menu has 346 items, as the handheld's: 346 are built and 0 are greyed (not built yet).
 
 ## Menu coverage
 
 | Menu | Built | Not built yet |
 |---|---|---|
-| Actions | 6 | Recall Definition, Refresh Libraries, Create Library Shortcut, Define LibPriv, Define LibPub (Show in Catalog), Lock Variable, Unlock Variable, Get Lock Info |
+| Actions | 14 | — |
 | Number | 24 | — |
 | Algebra | 32 | — |
 | Calculus | 21 | — |
 | Probability | 29 | — |
 | Statistics | 80 | — |
-| Matrix & Vector | 39 | LU Decomposition, QR Decomposition, Convert to Cylindrical, Convert to Spherical |
-| Finance | 15 | Month Day Format, Day Month Format |
-| Functions & Programs | 0 | New..., Open..., Import..., View..., Func...EndFunc, Prgm...EndPrgm, Local, If, If...Then...EndIf, If...Then...Else...EndIf, ElseIf...Then, For...EndFor, While...EndWhile, Loop...EndLoop, Try...Else...EndTry, ClrErr, PassErr, errCode, warnCodes, Wait, Return, Cycle, Exit, Lbl, GoTo Lbl, Stop, Disp, DispAt, Request, RequestStr, Text, getKey, Get, GetStr, Send, RefreshProbeVars, Float, Float1, Float2, Float3, Float4, Float5, Float6, Float7, Float8, Float9, Float10, Float11, Float12, Fix0, Fix1, Fix2, Fix3, Fix4, Fix5, Fix6, Fix7, Fix8, Fix9, Fix10, Fix11, Fix12, Radian, Degree, Gradian, Normal, Scientific, Engineering, Real, Rectangular, Polar, Auto, Approximate, Exact, Rectangular, Cylindrical, Spherical, Decimal, Hex, Binary, SI, Eng/US, Get Mode, Get Language Info, Get Platform Info, Add New Line |
+| Matrix & Vector | 43 | — |
+| Finance | 17 | — |
+| Functions & Programs | 86 | — |
 
 ## Commands
 
@@ -169,7 +169,7 @@ Each command is typed as a student would and run through the same `evaluate()` t
 | list maths | `{1,2,3}*2` | `{2,4,6}` | ✓ |
 | list▶mat | `list▶mat({1,2,3,4},2)` | `[[1,2][3,4]]` | ✓ |
 
-### Matrices & Vectors (19/19)
+### Matrices & Vectors (24/24)
 
 | Command | Typed | Answer | |
 |---|---|---|---|
@@ -192,6 +192,11 @@ Each command is typed as a student would and run through the same `evaluate()` t
 | rowSwap | `rowSwap([[1,2][3,4]],1,2)` | `[[3,4][1,2]]` | ✓ |
 | dim | `dim([[1,2,3][4,5,6]])` | `{2,3}` | ✓ |
 | diag | `diag([[1,2][3,4]])` | `[1,4]` | ✓ |
+| LU Decomposition | `u` | `[[3,4][0,2/3]]` | ✓ |
+| QR Decomposition | `r` | `[[√(10),7*√(10)/5][0,√(10)/5]]` | ✓ |
+| Convert to Polar (vector) | `[1,1]▶Polar` | `[√(2)∠π/4]` | ✓ |
+| Convert to Cylindrical | `[1,1,1]▶Cylind` | `[√(2)∠π/4,1]` | ✓ |
+| Convert to Spherical | `[1,1,1]▶Sphere` | `[√(3)∠π/4∠cos⁻¹(√(3)/3)]` | ✓ |
 
 ### Probability (19/19)
 
@@ -244,7 +249,7 @@ Each command is typed as a student would and run through the same `evaluate()` t
 | Multiple Linear Regression | `stat.b1` | `2.03333` | ✓ |
 | Correlation Matrix | `corrMat({1,2,3},{3,2,1})` | `[[1.,-1.][-1.,1.]]` | ✓ |
 
-### Finance (14/14)
+### Finance (16/16)
 
 | Command | Typed | Answer | |
 |---|---|---|---|
@@ -261,9 +266,11 @@ Each command is typed as a student would and run through the same `evaluate()` t
 | npv | `npv(10,-1000,{300,400,500})` | `-21.0368` | ✓ |
 | irr | `irr(-1000,{300,400,500})` | `8.89634` | ✓ |
 | mirr | `mirr(10,12,-1000,{300,400,500})` | `9.81567` | ✓ |
+| dbd (month first) | `dbd(12.3103,1.0104)` | `1` | ✓ |
+| dbd (day first) | `dbd(101.07,106.07)` | `151` | ✓ |
 | amortTbl | `amortTbl(2,360,6,200000,-1199.1,0,12,12)` | `[[0,0.,0.,200000.][1,-1000.,-199.1,199801.][2,-999.,-200.1,199601.]]` | ✓ |
 
-### Define & variables (6/6)
+### Define & variables (12/12)
 
 | Command | Typed | Answer | |
 |---|---|---|---|
@@ -273,3 +280,9 @@ Each command is typed as a student would and run through the same `evaluate()` t
 | piecewise | `g(-2)` | `4` | ✓ |
 | with operator \| | `x^2+1\|x=3` | `10` | ✓ |
 | DelVar | `c` | `c` | ✓ |
+| Func with For | `s(100)` | `5050` | ✓ |
+| Func with If…ElseIf…Else | `f(2)+f(3)*10+f(1)*100` | `12` | ✓ |
+| Func with While | `g(10)` | `4` | ✓ |
+| Prgm stores a result | `res` | `6` | ✓ |
+| Lock | `a:=6` | `Error: Variable is locked` | ✓ |
+| getLockInfo | `getLockInfo(a)` | `1` | ✓ |

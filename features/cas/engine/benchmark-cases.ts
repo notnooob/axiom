@@ -178,6 +178,12 @@ export const CASES: Case[] = [
   M("rowSwap", "rowSwap([[1,2][3,4]],1,2)", "[[3,4][1,2]]"),
   M("dim", "dim([[1,2,3][4,5,6]])", "{2,3}"),
   M("diag", "diag([[1,2][3,4]])", /\[1,4\]|\{1,4\}/),
+  // Partial pivoting, as the handheld factors: the 3 goes on top.
+  M("LU Decomposition", "u", "[[3,4][0,2/3]]", { before: ["LU [[1,2][3,4]],l,u,p"] }),
+  M("QR Decomposition", "r", "[[√(10),7*√(10)/5][0,√(10)/5]]", { before: ["QR [[1,2][3,4]],q,r"] }),
+  M("Convert to Polar (vector)", "[1,1]▶Polar", "[√(2)∠π/4]"),
+  M("Convert to Cylindrical", "[1,1,1]▶Cylind", "[√(2)∠π/4,1]"),
+  M("Convert to Spherical", "[1,1,1]▶Sphere", /^\[√\(3\)∠π\/4∠/),
 
   // Probability
   P("normPdf", "normPdf(0,0,1)", /^0\.39894/),
@@ -240,6 +246,8 @@ export const CASES: Case[] = [
   F("npv", "npv(10,-1000,{300,400,500})", /^-21\.036/),
   F("irr", "irr(-1000,{300,400,500})", /^8\.896/),
   F("mirr", "mirr(10,12,-1000,{300,400,500})", /^9\.815/),
+  F("dbd (month first)", "dbd(12.3103,1.0104)", "1"),
+  F("dbd (day first)", "dbd(101.07,106.07)", "151"),
   F("amortTbl", "amortTbl(2,360,6,200000,-1199.1,0,12,12)", /^\[\[0/),
 
   // Define, store and recall
@@ -249,4 +257,10 @@ export const CASES: Case[] = [
   D("piecewise", "g(-2)", "4", { before: ["Define g(x)=piecewise(x^2,x<0,x,x≥0)"] }),
   D("with operator |", "x^2+1|x=3", "10"),
   D("DelVar", "c", "c", { before: ["c:=4", "DelVar c"] }),
+  D("Func with For", "s(100)", "5050", { before: ["Define s(n)=Func:Local k,t:t:=0:For k,1,n:t:=t+k:EndFor:Return t:EndFunc"] }),
+  D("Func with If…ElseIf…Else", "f(2)+f(3)*10+f(1)*100", "12", { before: ["Define f(x)=Func:If x^2>4 Then:Return 1:ElseIf x^2=4 Then:Return 2:Else:Return 0:EndIf:EndFunc"] }),
+  D("Func with While", "g(10)", "4", { before: ["Define g(n)=Func:Local k:k:=1:While 2^k<n:k:=k+1:EndWhile:k:EndFunc"] }),
+  D("Prgm stores a result", "res", "6", { before: ["Define p(n)=Prgm:Local k:For k,1,n:Disp k:EndFor:n*2→res:EndPrgm", "p(3)"] }),
+  D("Lock", "a:=6", undefined, { before: ["a:=5", "Lock a"], error: true }),
+  D("getLockInfo", "getLockInfo(a)", "1", { before: ["a:=5", "Lock a"] }),
 ];

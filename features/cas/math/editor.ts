@@ -119,7 +119,16 @@ export function typeChar(s: EditState, c: string): EditState {
  * Text from a menu or the catalog: "solve(" becomes solve with an open
  * bracket pair and the cursor inside it.
  */
+/** In inserted text, where the cursor goes (Func:‸:EndFunc leaves it inside the block). */
+export const CARET = "\u2038";
+
 export function insertText(s: EditState, text: string): EditState {
+  const mark = text.indexOf(CARET);
+  if (mark >= 0) {
+    const before = insertText(s, text.slice(0, mark));
+    const after = splice(before, chars(text.slice(mark + 1).replaceAll(CARET, "")));
+    return { ...after, cursor: before.cursor };
+  }
   if (text.endsWith("(")) {
     const name = splice(s, chars(text.slice(0, -1)));
     return splice(name, [group("(")], { offset: 0, slot: "arg" });
