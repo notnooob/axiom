@@ -250,7 +250,8 @@ export function translate(input: Ast, settings: Ctx): Translation {
     return x;
   });
   const top = input.k === "bin" && input.op === "|" ? input.a : input;
-  const exactCall = top.k === "call" && (top.f === "exact" || top.f === "▶approxFraction");
+  // ▶approxFraction typed after a value (0.333…▶approxFraction()) is the same request as the call form.
+  const exactCall = (top.k === "call" && (top.f === "exact" || top.f === "▶approxFraction")) || (top.k === "post" && top.op === "▶approxFraction");
   const firstArg = top.k === "call" ? top.args[0] : undefined;
   // invBinom answers a whole number of successes, decimals in or not.
   // List arithmetic keeps Giac's own decimals, element by element: {1.,2,3}·{4,5,6} is {4.,10,18}.
@@ -821,7 +822,7 @@ function postToGiac(op: string, a: Ast, s: Ctx): string {
 /** Distribution functions: the handheld always answers these in decimals. */
 const DISTRIBUTIONS = new Set([
   "normPdf", "normCdf", "invNorm", "binomPdf", "binomCdf", "poissPdf", "poissCdf",
-  "geomPdf", "geomCdf", "tPdf", "tCdf", "invt",
+  "geomPdf", "geomCdf", "tPdf", "tCdf", "invt", "χ²Pdf", "χ²Cdf", "invχ²", "FPdf", "FCdf", "invF",
 ]);
 
 function callToGiac(f: string, args: Ast[], s: Ctx): string {
@@ -1091,6 +1092,18 @@ function exactCall(f: string, args: Ast[], ctx: Ctx): string {
       return g("student_cdf", a2!, infinite(a0!), infinite(a1!));
     case "invt":
       return g("student_icdf", a1!, a0!);
+    case "χ²Pdf":
+      return g("chisquare", a1!, a0!);
+    case "χ²Cdf":
+      return g("chisquare_cdf", a2!, infinite(a0!), infinite(a1!));
+    case "invχ²":
+      return g("chisquare_icdf", a1!, a0!);
+    case "FPdf":
+      return g("fisher", a1!, a2!, a0!);
+    case "FCdf":
+      return g("fisher_cdf", a2!, a3!, infinite(a0!), infinite(a1!));
+    case "invF":
+      return g("fisher_icdf", a1!, a2!, a0!);
     case "unitV":
       // Divided by the length of all its entries (l2norm of a column matrix is a decimal norm).
       // A zero vector is undef in every place ([[undef,undef,undef]]): Giac's
@@ -1227,6 +1240,18 @@ function exactCall(f: string, args: Ast[], ctx: Ctx): string {
       // Giac gives a bare sequence; the handheld a list.
     // Rows count from 1 on the handheld, from 0 in Giac.
     // Sizes the handheld checks: Giac gives det of a non-square matrix, and pads dot and cross.
+    case "ref":
+      if (A.length !== 1) break;
+      // The handheld pivots on the entry of largest size in each column (partial
+      // pivoting), so ref([[1,2][3,4]]) is [[1,4/3][0,1]]; Giac takes the first
+      // non-zero entry. A matrix with names in it keeps Giac's ref: there's no size to compare.
+      return (
+        `ifte(type(${a0})!=DOM_LIST,ref(${a0}),ifte(type((${a0})[0])!=DOM_LIST or size(lname(${a0}))>0,ref(${a0}),` +
+        `((M_)->{local r_,c_,i_,j_,k_,p_; r_:=rowdim(M_); c_:=coldim(M_); i_:=0; ` +
+        `for(j_:=0;j_<c_ and i_<r_;j_++){ p_:=i_; for(k_:=i_+1;k_<r_;k_++){ if(abs(evalf(M_[k_,j_]))>abs(evalf(M_[p_,j_]))) p_:=k_; } ` +
+        `if(M_[p_,j_]!=0){ if(p_!=i_) M_:=rowSwap(M_,i_,p_); M_[i_]:=normal(M_[i_]/M_[i_,j_]); ` +
+        `for(k_:=i_+1;k_<r_;k_++){ M_[k_]:=normal(M_[k_]-M_[k_,j_]*M_[i_]); } i_:=i_+1; } } return M_; })(${a0})))`
+      );
     case "det":
       if (A.length !== 1) break;
       return `ifte(type(dim(${a0}))==DOM_LIST and dim(${a0})[0]==dim(${a0})[1],det(${a0}),"Error: Dimension error")`;
@@ -1246,6 +1271,21 @@ function exactCall(f: string, args: Ast[], ctx: Ctx): string {
     case "colAugment":
       // Needs one-row matrices kept as matrices, which this engine flattens to vectors.
       throw new UnsupportedError(f);
+    case "dominantTerm":
+      // Giac's dominant_term is undef at ±∞; for a polynomial or rational function it's the ratio of leading terms.
+      if (a0 && a1 && a2 && /inf/.test(a2))
+        return g("normal", `lcoeff(numer(${a0}),${a1})/lcoeff(denom(${a0}),${a1})*${a1}^(degree(numer(${a0}),${a1})-degree(denom(${a0}),${a1}))`);
+      break;
+    case "centralDiff": {
+      // centralDiff(f, x=a[, h]): the symmetric difference quotient, h 0.001 by default, as the handheld.
+      const at = args[1];
+      if (a0 && at?.k === "bin" && at.op === "=") {
+        const [x, v] = [toGiac(at.a, s), toGiac(at.b, s)];
+        const h = a2 ?? "0.001";
+        return g("evalf", `(subst(${a0},${x},(${v})+(${h}))-subst(${a0},${x},(${v})-(${h})))/(2*(${h}))`);
+      }
+      break;
+    }
   }
   const renamed = RENAME_FN[f];
   if (renamed) return g(renamed, ...A);

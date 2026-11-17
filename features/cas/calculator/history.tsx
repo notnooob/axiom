@@ -7,6 +7,7 @@ import { cn } from "@/shared/lib/utils";
 import type { Cursor } from "../math/cursor";
 import { selectBetween, selection, type EditState } from "../math/editor";
 import { MathView, useCaretInView } from "../math/render";
+import { FlagBadge, flagRing, type Flag } from "../screen/flag";
 import type { HistoryEntry } from "../state/document";
 
 /** One → moves a too-wide part this fraction of the screen's width. */
@@ -28,9 +29,12 @@ export function HistoryRow({
   onPick,
   onCaret,
   onWarning,
+  flag,
 }: {
   entry: HistoryEntry;
   index: number;
+  /** The assistant highlighted this entry (ai/highlights.ts). */
+  flag?: Flag;
   selected?: "input" | "output";
   /** The caret in the selected part, after a click on it. */
   caret?: EditState;
@@ -76,9 +80,10 @@ export function HistoryRow({
       )}
     </div>
   );
-  if (!entry.warning) return row;
   // A warning moves the whole entry right of a ⚠, centred on the band, as on the handheld.
-  return (
+  const body = !entry.warning ? (
+    row
+  ) : (
     <div className={cn("flex items-center", band)}>
       <button
         type="button"
@@ -89,6 +94,15 @@ export function HistoryRow({
         <WarningMark />
       </button>
       {row}
+    </div>
+  );
+  if (!flag) return body;
+  // The assistant's highlight: its number beside the entry (where the ⚠ goes), and a ring round the band.
+  return (
+    <div className={cn("relative flex items-center", band)}>
+      <FlagBadge {...flag} className="ml-[1cqw]" />
+      <div className="min-w-0 flex-1">{body}</div>
+      <div aria-hidden className={cn("absolute inset-0", flagRing(flag.tone))} />
     </div>
   );
 }

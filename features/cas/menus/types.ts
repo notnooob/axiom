@@ -69,6 +69,8 @@ export type MenuItem = {
   rule?: boolean;
   /** A keyboard shortcut shown at the right of the row, e.g. "Ctrl+T". */
   hint?: string;
+  /** An app's icon before the row (the add-page menu), by app name. */
+  icon?: string;
 };
 
 export type Menu = MenuItem[];

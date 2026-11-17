@@ -45,8 +45,20 @@ const key = (face: ReactNode, label: string, act: Act, more: Partial<Spec> = {})
 });
 const ch = (c: string, face: ReactNode = c, more: Partial<Spec> = {}) => key(face, c, { k: "char", c }, more);
 const num = (c: string, more: Partial<Spec> = {}) => ch(c, c, { tone: "num", ...more });
+/** ctrl then a letter does what Ctrl and that letter do on a computer's keyboard (ctrl I adds a page). */
+const CTRL_LETTER: Record<string, Key> = {
+  i: { k: "insertPage" },
+  s: { k: "save" },
+  h: { k: "homeScreen" },
+  m: { k: "menu" },
+  k: { k: "doc" },
+  t: { k: "table" },
+  z: { k: "undo" },
+  y: { k: "redo" },
+  a: { k: "selectAll" },
+};
 const letter = (c: string) =>
-  key(c.toUpperCase(), c, { k: "char", c }, { letter: true, tone: "xyz".includes(c) ? "light" : "fn" });
+  key(c.toUpperCase(), c, { k: "char", c }, { letter: true, tone: "xyz".includes(c) ? "light" : "fn", ...(CTRL_LETTER[c] ? { ctrl: CTRL_LETTER[c] } : {}) });
 /** Spoken names, where the face alone reads badly. */
 const SAY: Record<string, string> = {
   "=": "equals",
@@ -67,8 +79,8 @@ const SAY: Record<string, string> = {
   del: "delete",
   doc: "document menu",
   var: "variables",
-  Home: "home, not available",
-  Scratchpad: "scratchpad, not available",
+  Home: "home",
+  Scratchpad: "scratchpad",
   Flag: "flag, not available",
 };
 
@@ -93,6 +105,7 @@ const CTRL_SAY: Record<string, string> = {
   var: "store",
   del: "clear",
   doc: "insert page",
+  Scratchpad: "save",
 };
 
 /** What shift makes a key do, spoken (letters' capitals aren't listed). */
@@ -115,7 +128,7 @@ const stacked = (top: string, below: string) => (
 
 const NAV_LEFT: Spec[] = [
   key("esc", "esc", { k: "esc" }, { kbd: "Esc" }),
-  key(<ScratchpadIcon />, "Scratchpad", null, { alt: "save" }),
+  key(<ScratchpadIcon />, "Scratchpad", { k: "scratchpad" }, { alt: "save", ctrl: { k: "save" }, kbd: "Save: Ctrl S" }),
   key("tab", "tab", { k: "tab" }, { kbd: "Tab" }),
 ];
 
@@ -125,8 +138,8 @@ const NAV_RIGHT: Spec[] = [
       <HomeIcon /> on
     </>,
     "Home",
-    null,
-    { alt: "off" },
+    { k: "homeScreen" },
+    { alt: "off", kbd: "Ctrl H" },
   ),
   key("doc ▾", "doc", { k: "doc" }, { ctrl: { k: "insertPage" }, alt: "+ page", kbd: "Ctrl K. Add a page: Ctrl I" }),
   key("menu", "menu", { k: "menu" }, { ctrl: { k: "menu" }, kbd: "Ctrl M" }),
@@ -298,7 +311,7 @@ export function Keypad({
 
       <div className="rounded-hero bg-casBodyLow px-[3cqw] pb-[4cqw] pt-[2cqw]">
         <div className={GRID}>
-          {MODS.map((s, i) => (s ? cell(s, s.tone === "ctrl" ? "w-[80%] self-start" : undefined) : <span key={i} />))}
+          {MODS.map((s, i) => (s ? cell(s, s.tone === "ctrl" ? "w-[80%] self-start" : s.act === "shift" ? "text-[max(3.3cqw,13px)]" : undefined) : <span key={i} />))}
         </div>
         <div className={cn(GRID, "mt-[0.6cqw]")}>
           {MAIN.map((row, r) => (
@@ -379,12 +392,14 @@ function KeyButton({
       onMouseDown={(e) => e.preventDefault()}
       onClick={() => onPress(spec)}
       className={cn(
-        "flex h-[max(7.4cqw,38px)] w-full items-center justify-center whitespace-nowrap rounded-card border-b-[0.5cqw] border-casKeyLip text-[max(3.9cqw,15px)] leading-none active:translate-y-px",
+        "flex h-[max(7.4cqw,38px)] w-full items-center justify-center whitespace-nowrap rounded-card border-b-[0.5cqw] border-casKeyLip text-[max(3.9cqw,15px)] leading-none active:translate-y-[0.3cqw] active:border-b-[0.2cqw]",
         (spec.tone ?? "fn") === "fn" && "bg-casKeyFn text-casKeyFnText",
         spec.tone === "num" && "bg-casKeyNum text-[max(4.6cqw,17px)] text-casKeyNumText",
         spec.tone === "light" && "bg-casKeyLight text-casKeyLightText",
         spec.tone === "ctrl" && "bg-casCtrl text-casCtrlText",
-        on && "ring-[0.6cqw] ring-inset ring-casKeyAlt",
+        // Held for the next key: ctrl turns red, shift (and caps lock) blue.
+        on && spec.act === "ctrl" && "bg-[#e5484d] text-white",
+        on && spec.act === "shift" && "bg-casSelect text-white",
         className,
       )}
     >

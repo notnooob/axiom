@@ -30,6 +30,9 @@ import { formatFloat } from "../engine/format";
 import { SliderView } from "./sliders";
 import { autoScale, deName, fmt3, fnName, parNames, relName, type GraphWindow, type Samples } from "./model";
 import { graphSaid } from "../a11y";
+import type { Highlight } from "../ai/highlights";
+import { FlagBadge, flagHex } from "../screen/flag";
+import { RENAME_IN } from "../engine/translate";
 
 export const CURVE = [palette.casF1, palette.casF2, palette.casF3, palette.casF4, palette.casF5, palette.casF6];
 export const curveColour = (n: number) => CURVE[(n - 1) % CURVE.length]!;
@@ -68,6 +71,7 @@ export function GraphsApp({
   onSliderPlace,
   onCursor,
   onSelect,
+  highlights = [],
 }: {
   page: GraphsPage;
   giac: Giac | null;
@@ -101,6 +105,8 @@ export function GraphsApp({
   onCursor: (c: Cursor) => void;
   /** A drag across the entry line selects that stretch of it. */
   onSelect: (from: Cursor, to: Cursor) => void;
+  /** The assistant's highlights on this page: a function (a halo under its curve) or a point (a ring). */
+  highlights?: Highlight[];
 }) {
   const root = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -182,6 +188,43 @@ export function GraphsApp({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- parKey stands for parametrics
   }, [giac, ready, parKey]);
+
+  // Scatter plots: each pair of lists' points, fetched afresh when the plots
+  // change (a list edited on a Lists page is new when this page next opens).
+  const [scatterPts, setScatterPts] = useState<{ n: number; pts: [number, number][] }[]>([]);
+  const scatters = page.scatters ?? [];
+  const scKey = scatters.map((sc) => `${sc.n}:${sc.x}:${sc.y}:${sc.hidden ? 1 : 0}`).join("|");
+  const fitted = useRef(false);
+  useEffect(() => {
+    if (!giac || !ready || !scatters.length) return;
+    let cancelled = false;
+    void (async () => {
+      const out: { n: number; pts: [number, number][] }[] = [];
+      for (const sc of scatters) {
+        if (sc.hidden) continue;
+        const xs = parseNumbers(await giac(`evalf(${RENAME_IN[sc.x] ?? sc.x})`));
+        const ys = parseNumbers(await giac(`evalf(${RENAME_IN[sc.y] ?? sc.y})`));
+        out.push({ n: sc.n, pts: xs.slice(0, ys.length).map((x, i) => [x, ys[i]!] as [number, number]).filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y)) });
+      }
+      if (cancelled) return;
+      setScatterPts(out);
+      // A page that's only a plot (as Data & Statistics makes) fits its window to the data once, as the handheld does.
+      const all = out.flatMap((s) => s.pts);
+      if (!fitted.current && all.length && !page.functions.length) {
+        fitted.current = true;
+        const [x0, x1] = [Math.min(...all.map((p) => p[0])), Math.max(...all.map((p) => p[0]))];
+        const [y0, y1] = [Math.min(...all.map((p) => p[1])), Math.max(...all.map((p) => p[1]))];
+        const dx = (x1 - x0 || 1) * 0.1;
+        const dy = (y1 - y0 || 1) * 0.1;
+        const win = { xmin: x0 - dx, xmax: x1 + dx, ymin: y0 - dy, ymax: y1 + dy };
+        onWindow({ ...win, xscl: autoScale(win.xmin, win.xmax), yscl: autoScale(win.ymin, win.ymax) });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scKey stands for scatters
+  }, [giac, ready, scKey]);
 
   // Diff Eqs: the first one's slope field (the axes follow the page's first
   // Diff Eq, as on the handheld) and each one's solution through its (x0, y0).
@@ -409,8 +452,32 @@ export function GraphsApp({
     const g = c.getContext("2d");
     if (!g) return;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    draw(g, size.w, size.h, size.sw, page, samples, toolY, grids, pars, field, solutions);
-  }, [size, page, samples, toolY, grids, pars, field, solutions]);
+    const halos = highlights.flatMap((h) => (h.target.kind === "fn" ? [{ n: h.target.n, colour: flagHex(h.tone) }] : []));
+    draw(g, size.w, size.h, size.sw, page, samples, toolY, grids, pars, field, solutions, halos);
+    // Scatter plots: a small square per point, in the plot's colour.
+    const ww = page.window;
+    for (const sc of scatterPts) {
+      g.fillStyle = curveColour(sc.n);
+      for (const [x, y] of sc.pts)
+        g.fillRect(((x - ww.xmin) / (ww.xmax - ww.xmin)) * size.w - 2.5, ((ww.ymax - y) / (ww.ymax - ww.ymin)) * size.h - 2.5, 5, 5);
+    }
+  }, [size, page, samples, toolY, grids, pars, field, solutions, scatterPts, highlights]);
+
+  /** Where a highlighted function's number goes: on its curve, from a third of the way across, in the middle of the window's height (clear of the top bar and the entry line). */
+  const onCurve = (n: number) => {
+    const s = samples.find((x) => x.n === n);
+    if (!s) return null;
+    const span = w.ymax - w.ymin;
+    const from = Math.floor(s.xs.length / 3);
+    for (const band of [0.25, 0.1]) {
+      for (let k = 0; k < s.xs.length; k++) {
+        const i = (from + k) % s.xs.length;
+        const y = s.ys[i];
+        if (y !== undefined && Number.isFinite(y) && y > w.ymin + band * span && y < w.ymax - band * span) return { x: px(s.xs[i]!), y: py(y) };
+      }
+    }
+    return null;
+  };
 
   const labelFor = (n: number) => {
     const s = samples.find((x) => x.n === n);
@@ -586,6 +653,20 @@ export function GraphsApp({
             </div>
           ),
         )}
+        {highlights.map((h) => {
+          // A point: a ring round it. A function: its number on the curve (the halo is drawn with the curve).
+          const at = h.target.kind === "point" ? { x: px(h.target.x), y: py(h.target.y) } : h.target.kind === "fn" ? onCurve(h.target.n) : null;
+          if (!at) return null;
+          return (
+            <div key={`flag${h.n}`} className="pointer-events-none absolute" style={{ left: at.x, top: at.y }}>
+              {h.target.kind === "point" && (
+                <span aria-hidden className={cn("absolute size-[5cqw] -translate-x-1/2 -translate-y-1/2 rounded-full ring-[length:0.6cqw]", h.tone === "look" ? "ring-casLook" : "ring-casFlag")} />
+              )}
+              {/* Beside a curve's point, level with it; above-right of a marked point, clear of its ring. */}
+              <FlagBadge n={h.n} tone={h.tone} className={cn("absolute", h.target.kind === "fn" ? "-top-[1.9cqw] left-[1.6cqw]" : "-top-[6.5cqw] left-[1.2cqw]")} />
+            </div>
+          );
+        })}
         {tool && <ToolOverlay page={page} y={toolY} slope={slope} curvePt={curvePt} fs={fs} px={px} py={py} />}
         {page.editing !== null && (
           <div
@@ -766,7 +847,7 @@ function GraphTable({ page, giac, ready }: { page: GraphsPage; giac: Giac | null
     // eslint-disable-next-line react-hooks/exhaustive-deps -- key stands for fns
   }, [giac, ready, key]);
   return (
-    <div className="w-1/2 shrink-0 overflow-y-auto border-l-[0.4cqw] border-casF6 font-casui text-[3.6cqw] [scrollbar-width:none]">
+    <div className="w-1/2 shrink-0 overflow-y-auto border-l-[0.4cqw] border-casF6 font-casui text-[3.6cqw] scrollbar-none">
       <div className="grid" style={{ gridTemplateColumns: `repeat(${cols.length + 1}, minmax(0, 1fr))` }}>
         {/* Two header rows, as on the handheld: the column name, then its definition. */}
         <div className="row-span-2 flex items-start justify-center border-b-[0.3cqw] border-r border-casRule bg-casRowAlt pt-[1.4cqw]">
@@ -1153,6 +1234,8 @@ function draw(
   pars: ParSamples[],
   field: SlopeField | null,
   solutions: { n: number; pts: [number, number][] }[],
+  /** The assistant highlighted these functions: a wide, faint stroke of its colour under each one's curve. */
+  halos: { n: number; colour: string }[] = [],
 ) {
   const w: GraphWindow = page.window;
   const px = (x: number) => ((x - w.xmin) / (w.xmax - w.xmin)) * W;
@@ -1296,7 +1379,7 @@ function draw(
   for (const s of samples) {
     g.strokeStyle = curveColour(s.n);
     g.lineWidth = Math.max(1.2, W * 0.004) * (s.n === searched ? 2 : 1);
-    g.beginPath();
+    const path = new Path2D();
     let pen = false;
     for (let i = 0; i < s.xs.length; i++) {
       const y = s.ys[i]!;
@@ -1308,11 +1391,21 @@ function draw(
       const jump = prev !== undefined && Number.isFinite(prev) && Math.abs(py(y) - py(prev)) > H * 1.5;
       const X = px(s.xs[i]!);
       const Y = Math.max(-H, Math.min(2 * H, py(y)));
-      if (!pen || jump) g.moveTo(X, Y);
-      else g.lineTo(X, Y);
+      if (!pen || jump) path.moveTo(X, Y);
+      else path.lineTo(X, Y);
       pen = true;
     }
-    g.stroke();
+    const halo = halos.find((x) => x.n === s.n);
+    if (halo) {
+      g.save();
+      g.strokeStyle = halo.colour;
+      g.globalAlpha = 0.3;
+      g.lineWidth = Math.max(6, W * 0.022);
+      g.lineCap = g.lineJoin = "round";
+      g.stroke(path);
+      g.restore();
+    }
+    g.stroke(path);
   }
 
   // Parametric curves: the points at each t step, joined.

@@ -1,0 +1,4 @@
+# Cloudflare (Workers static assets / Pages): cross-origin isolation for Python's SharedArrayBuffer.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

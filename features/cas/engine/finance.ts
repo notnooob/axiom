@@ -16,10 +16,10 @@ import { UnsupportedError } from "./translate";
  * bal(5,6,5.75,5000,,12,12) bears out CpY=1: its 12 is FV and
  * PpY, and only with CpY=1 is the first month's interest 23.35.
  */
-export const FINANCE = new Set(["tvmFV", "tvmPV", "tvmPmt", "tvmN", "tvmI", "eff", "nom", "amortTbl", "bal", "ΣInt", "ΣPrn"]);
+export const FINANCE = new Set(["tvmFV", "tvmPV", "tvmPmt", "tvmN", "tvmI", "eff", "nom", "amortTbl", "bal", "ΣInt", "ΣPrn", "npv", "irr", "mirr"]);
 
-/** An argument worked out: a number, an empty slot, a matrix of numbers (an amortisation table) or anything else. */
-export type FinanceArg = { k: "num"; v: number } | { k: "empty" } | { k: "table"; rows: number[][] } | { k: "other" };
+/** An argument worked out: a number, an empty slot, a list of numbers (cash flows), a matrix of numbers (an amortisation table) or anything else. */
+export type FinanceArg = { k: "num"; v: number } | { k: "empty" } | { k: "list"; v: number[] } | { k: "table"; rows: number[][] } | { k: "other" };
 
 /** amortTbl's answer: rows of payment number, interest, principal and balance. */
 export type FinanceValue = number | { table: number[][] };
@@ -54,6 +54,7 @@ export function finance(f: string, args: FinanceArg[]): FinanceValue | null {
     if (!(cpy > 0)) throw new EngineError("Error: Domain error");
     return finite(f === "eff" ? effectiveRate(rate, cpy) : nominalRate(rate, cpy));
   }
+  if (f === "npv" || f === "irr" || f === "mirr") return cashFlowValue(f, args);
   // The amortisation functions: bal(NPmt,…), amortTbl(NPmt,…), ΣInt(NPmt1,NPmt2,…), ΣPrn(NPmt1,NPmt2,…).
   const ranged = f === "ΣInt" || f === "ΣPrn";
   const lead = ranged ? 2 : 1;
@@ -87,6 +88,64 @@ export function finance(f: string, args: FinanceArg[]): FinanceValue | null {
   if (f === "bal") return rows[last]!.balance;
   const from = rows.slice(span[0]!, last + 1);
   return roundDecimal(from.reduce((s, r) => s + (f === "ΣInt" ? r.interest : r.principal), 0), places);
+}
+
+/**
+ * npv(rate, CF0, CFList[, CFFreq]), irr(CF0, CFList[, CFFreq]) and
+ * mirr(financeRate, reinvestRate, CF0, CFList[, CFFreq]): rates in percent per
+ * period, CF0 at time 0 and each later flow one period on, a frequency
+ * repeating its flow that many times.
+ */
+function cashFlowValue(f: "npv" | "irr" | "mirr", args: FinanceArg[]): number | null {
+  const rates = f === "npv" ? 1 : f === "mirr" ? 2 : 0;
+  count(args, rates + 2, rates + 3);
+  const given = required(args.slice(0, rates + 1));
+  const list = args[rates + 1]!;
+  const freqArg = args[rates + 2];
+  if (!given) return null;
+  // One cash flow in place of a list is a list of one, as on the handheld.
+  const cfs = list.k === "num" ? [list.v] : list.k === "list" ? list.v : null;
+  const freq = !freqArg || freqArg.k === "empty" ? cfs?.map(() => 1) : freqArg.k === "list" ? freqArg.v : freqArg.k === "num" ? [freqArg.v] : null;
+  if (!cfs || !freq) return null;
+  if (freq.length !== cfs.length) throw new EngineError("Error: Dimension error");
+  if (freq.some((n) => !Number.isInteger(n) || n < 0 || n > 10_000)) throw new EngineError("Error: Domain error");
+  const cf0 = given[rates]!;
+  const flows = [cf0, ...cfs.flatMap((c, k) => Array<number>(freq[k]!).fill(c))];
+  const npv = (rate: number) => flows.reduce((s, c, t) => s + c / (1 + rate) ** t, 0);
+  if (f === "npv") return finite(npv(given[0]! / 100));
+  if (f === "mirr") {
+    const [fin, reinvest] = [given[0]! / 100, given[1]! / 100];
+    const n = flows.length - 1;
+    const pvOut = flows.reduce((s, c, t) => s + (c < 0 ? c / (1 + fin) ** t : 0), 0);
+    const fvIn = flows.reduce((s, c, t) => s + (c > 0 ? c * (1 + reinvest) ** (n - t) : 0), 0);
+    if (n < 1 || pvOut === 0 || fvIn === 0) throw new EngineError("Error: Domain error");
+    return finite(((fvIn / -pvOut) ** (1 / n) - 1) * 100);
+  }
+  return finite(irr(npv) * 100);
+}
+
+/** The rate (as a fraction) where the net present value is 0: Newton's method from 10%, else bisection. */
+function irr(npv: (rate: number) => number): number {
+  let r = 0.1;
+  for (let k = 0; k < 100; k++) {
+    const v = npv(r);
+    const h = 1e-7 * Math.max(1, Math.abs(r));
+    const d = (npv(r + h) - npv(r - h)) / (2 * h);
+    if (!Number.isFinite(d) || d === 0) break;
+    const next = r - v / d;
+    if (!(next > -1)) break;
+    if (Math.abs(next - r) < 1e-14 * Math.max(1, Math.abs(r))) return next;
+    r = next;
+  }
+  // Newton wandered off: look for a sign change between −99.99% and 10 000%.
+  let [lo, hi] = [-0.9999, 100];
+  if (Math.sign(npv(lo)) === Math.sign(npv(hi))) return NaN;
+  for (let k = 0; k < 200; k++) {
+    const mid = (lo + hi) / 2;
+    if (Math.sign(npv(mid)) === Math.sign(npv(lo))) lo = mid;
+    else hi = mid;
+  }
+  return (lo + hi) / 2;
 }
 
 /** bal, ΣInt and ΣPrn of a table amortTbl made: its rows read off and added up. */

@@ -3,6 +3,7 @@
 import { emptyEdit, type EditState } from "../math/editor";
 import type { Row } from "../math/tree";
 import { STANDARD, type GraphWindow, type Mark, type Tool } from "../graphs/model";
+import type { GeoObj, GeoTool } from "../geometry/model";
 
 /**
  * One document of problems, each with any number of pages (1.1, 1.2, 2.1 …).
@@ -10,7 +11,7 @@ import { STANDARD, type GraphWindow, type Mark, type Tool } from "../graphs/mode
  * ones; each problem has its own, as on the handheld (the engine is swapped
  * over when the active page moves to another problem).
  */
-export type AppKind = "calculator" | "graphs";
+export type AppKind = "calculator" | "graphs" | "lists" | "python" | "pyshell" | "datastats" | "notes" | "geometry";
 
 export type HistoryEntry = {
   id: number;
@@ -115,10 +116,15 @@ export type Slider = {
   at?: { x: number; y: number };
 };
 
+/** A scatter plot (s1 …): an x list and a y list, by variable name. */
+export type ScatterPlot = { n: number; x: string; y: string; hidden?: boolean };
+
 export type GraphsPage = {
   kind: "graphs";
   id: number;
   problem?: number;
+  /** The imported card, written back unchanged on export while the page is unedited. */
+  xml?: string;
   functions: GraphFunction[];
   /** Missing on documents saved before relations existed. */
   relations?: GraphRelation[];
@@ -126,6 +132,7 @@ export type GraphsPage = {
   des?: GraphDE[];
   deSettings?: DESettings;
   sliders?: Slider[];
+  scatters?: ScatterPlot[];
   /** The parametric entry line's five fields (x, y, tmin, tmax, tstep), or a Diff Eq's three (f, x0, y0), while it's open; `field` is the one being edited. */
   parDraft?: { field: number; rows: Row[]; fresh?: boolean };
   window: GraphWindow;
@@ -141,7 +148,92 @@ export type GraphsPage = {
   axes: boolean;
 };
 
-export type Page = CalculatorPage | GraphsPage;
+/**
+ * Lists & Spreadsheet. Each column has an optional name (which makes it a
+ * list variable for the whole problem), an optional column formula, and its
+ * cells as typed ("=" starts a cell formula). `values` holds what each cell
+ * shows after the last recalculation.
+ */
+export type ListsColumn = { name?: string; formula?: string; cells: string[]; values?: string[] };
+/** row: 0 is the name row, 1 the ◆ formula row, 2… the cells (cell index row − 2). */
+export type ListsSel = { row: number; col: number };
+export type ListsPage = {
+  kind: "lists";
+  id: number;
+  problem?: number;
+  cols: ListsColumn[];
+  sel: ListsSel;
+  /** The cell being edited, or null. */
+  edit: EditState | null;
+};
+
+/**
+ * Data & Statistics: a plot of a list (x) or two lists (x against y), by
+ * variable name, with what's been added to it from Analyze. `window` unset
+ * fits the data.
+ */
+export type DataPlot = "dot" | "box" | "histogram" | "normprob" | "scatter" | "xyline";
+export type DataStatsPage = {
+  kind: "datastats";
+  id: number;
+  problem?: number;
+  x?: string;
+  y?: string;
+  plot: DataPlot;
+  window?: GraphWindow;
+  connect?: boolean;
+  extendWhiskers?: boolean;
+  bins?: { width: number; start: number };
+  /** A regression command (LinRegMx, QuadReg …) shown with its equation. */
+  regression?: string;
+  movable?: { m: number; b: number; lock?: boolean };
+  /** Plot Function: expressions in x. */
+  functions?: string[];
+  /** Plot Value: expressions (mean(a) …) drawn as vertical lines. */
+  values?: string[];
+  normalPdf?: boolean;
+  digits?: string;
+  diagnostics?: boolean;
+  xml?: string;
+};
+
+/** A Python program in the editor: one file per page, as on the handheld. */
+export type PythonPage = { kind: "python"; id: number; problem?: number; file: string; source: string };
+/** The Python Shell: what's been printed and typed, and the line being typed. */
+export type ShellLine = { kind: "in" | "out" | "err"; text: string };
+export type PyShellPage = { kind: "pyshell"; id: number; problem?: number; lines: ShellLine[]; input: string };
+
+/** Text formatting in Notes. */
+export type NotesStyle = { b?: boolean; i?: boolean; u?: boolean; s?: boolean; sub?: boolean; sup?: boolean };
+export type NotesMath = { math: string; out?: string; approx?: boolean; hideIn?: boolean; hideOut?: boolean };
+/**
+ * A piece of a Notes paragraph: plain text (a string), formatted text, a maths
+ * box (its input, and its result once worked out), a chem box, or a comment.
+ */
+export type NotesRun = string | ({ text: string } & NotesStyle) | NotesMath | { chem: string } | { comment: string; by: "Teacher" | "Reviewer" };
+export type NotesPage = { kind: "notes"; id: number; problem?: number; paras: NotesRun[][]; xml?: string };
+
+/**
+ * A Geometry page: its construction, the tool in use (and what it has picked so
+ * far), the selected object, and whether the axes and grid show.
+ */
+export type GeometryPage = {
+  kind: "geometry";
+  id: number;
+  problem?: number;
+  objects: GeoObj[];
+  tool?: { name: GeoTool; picked: string[] } | null;
+  sel?: string | null;
+  axes?: boolean;
+  grid?: boolean;
+  /** What's shown: the centre (cm) and the width across; unset is (0, 0) and 20 cm. */
+  view?: { x: number; y: number; w: number };
+};
+
+/** A page from an app that isn't built yet (Lua, Widgets…), kept so the document stays whole. */
+export type UnsupportedPage = { kind: "unsupported"; id: number; problem?: number; app: string; xml?: string };
+
+export type Page = CalculatorPage | GraphsPage | ListsPage | PythonPage | PyShellPage | NotesPage | UnsupportedPage | DataStatsPage | GeometryPage;
 
 export type CasDocument = {
   title: string;
@@ -149,6 +241,11 @@ export type CasDocument = {
   active: number;
   /** The engine definitions of each problem other than the active one, by problem number. */
   problems?: Record<string, string[]>;
+  /**
+   * Imported variables not yet in the engine, as TI statements (a:=3,
+   * Define f(x)=…), by problem: evaluated the first time the problem is shown.
+   */
+  pendingSym?: Record<string, string[]>;
 };
 
 let nextId = 1;
@@ -164,6 +261,12 @@ export function bumpIds(doc: CasDocument): void {
 
 export function newPage(kind: AppKind, problem = 1): Page {
   if (kind === "calculator") return { kind, id: newId(), problem, history: [], edit: emptyEdit(), sel: null };
+  if (kind === "lists") return { kind, id: newId(), problem, cols: [], sel: { row: 2, col: 0 }, edit: null };
+  if (kind === "python") return { kind, id: newId(), problem, file: "program.py", source: "" };
+  if (kind === "pyshell") return { kind, id: newId(), problem, lines: [], input: "" };
+  if (kind === "datastats") return { kind, id: newId(), problem, plot: "dot" };
+  if (kind === "notes") return { kind, id: newId(), problem, paras: [] };
+  if (kind === "geometry") return { kind, id: newId(), problem, objects: [] };
   return {
     kind,
     id: newId(),
@@ -180,8 +283,8 @@ export function newPage(kind: AppKind, problem = 1): Page {
   };
 }
 
-export function newDocument(): CasDocument {
-  return { title: "*Doc", pages: [newPage("calculator")], active: 0 };
+export function newDocument(first: AppKind = "calculator", title = "Untitled"): CasDocument {
+  return { title, pages: [newPage(first)], active: 0 };
 }
 
 export const problemOf = (p: Page | undefined): number => p?.problem ?? 1;

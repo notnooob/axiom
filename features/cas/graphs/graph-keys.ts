@@ -16,7 +16,8 @@ export type GraphEffect =
   | { relation: { n: number; text: string } }
   | { parametric: { n: number; texts: string[] } }
   | { de: { n: number; texts: string[] } }
-  | { analyze: { type: AnalyzeKind; fn: number; a: number; b: number } }
+  /** other: the second function for an intersection (the assistant names it); otherwise the first other one shown. */
+  | { analyze: { type: AnalyzeKind; fn: number; other?: number; a: number; b: number } }
   | null;
 
 /**

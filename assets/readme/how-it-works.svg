@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="430" viewBox="0 0 1200 430" role="img" aria-labelledby="title desc">
+  <title id="title">How Axiom runs</title>
+  <desc id="desc">Everything runs inside your browser tab: the Axiom page talks to Giac, a computer algebra system compiled to WebAssembly, in a worker; to Python through Pyodide in a second worker; and to My Documents in the browser's IndexedDB storage. A static host serves the files once. The only outside connection is an optional AI service, using your own key.</desc>
+
+  <rect width="1200" height="430" rx="28" fill="#121212"/>
+  <rect x="0.5" y="0.5" width="1199" height="429" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.07"/>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+    <!-- Static host -->
+    <g transform="translate(48 56)">
+      <rect width="210" height="96" rx="16" fill="#1b1b1d" stroke="#ffffff" stroke-opacity="0.12"/>
+      <text x="105" y="42" text-anchor="middle" font-size="22" font-weight="600" fill="#f0f0f0">Static host</text>
+      <text x="105" y="72" text-anchor="middle" font-size="18" fill="#a3a3a3">HTML · JS · WASM</text>
+    </g>
+    <path d="M258 104 H322" stroke="#a3a3a3" stroke-width="2"/>
+    <path d="M322 104 l-10 -6 v12 z" fill="#a3a3a3"/>
+    <text x="290" y="88" text-anchor="middle" font-size="18" fill="#a3a3a3">once</text>
+
+    <!-- The browser tab -->
+    <g transform="translate(330 32)">
+      <rect width="822" height="366" rx="22" fill="none" stroke="#5aaee6" stroke-opacity="0.55" stroke-width="2"/>
+      <text x="28" y="44" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="18" letter-spacing="2" fill="#5aaee6">YOUR BROWSER TAB</text>
+
+      <!-- The page -->
+      <g transform="translate(28 78)">
+        <rect width="236" height="252" rx="16" fill="#ffffff"/>
+        <rect width="236" height="44" rx="16" fill="#3d3d3d"/>
+        <rect y="28" width="236" height="16" fill="#3d3d3d"/>
+        <rect x="16" y="12" width="40" height="32" fill="#f4f4f4"/>
+        <text x="36" y="35" text-anchor="middle" font-size="18" fill="#0a0a0a">1.1</text>
+        <text x="118" y="104" text-anchor="middle" font-size="26" font-weight="700" fill="#0a0a0a">Axiom</text>
+        <text x="118" y="140" text-anchor="middle" font-size="20" fill="#5c5c5c">the handheld:</text>
+        <text x="118" y="168" text-anchor="middle" font-size="20" fill="#5c5c5c">screen, keypad,</text>
+        <text x="118" y="196" text-anchor="middle" font-size="20" fill="#5c5c5c">menus, pages</text>
+      </g>
+
+      <!-- Connections -->
+      <g stroke="#a3a3a3" stroke-width="2" fill="none">
+        <path d="M264 128 C330 128 330 104 392 104"/>
+        <path d="M264 204 H392"/>
+        <path d="M264 280 C330 280 330 304 392 304"/>
+      </g>
+
+      <!-- Workers and storage -->
+      <g transform="translate(392 70)">
+        <rect width="402" height="70" rx="14" fill="#1b1b1d" stroke="#ffffff" stroke-opacity="0.12"/>
+        <text x="24" y="31" font-size="22" font-weight="600" fill="#f0f0f0">Giac CAS</text>
+        <text x="24" y="56" font-size="18" fill="#a3a3a3">WebAssembly, in a worker</text>
+      </g>
+      <g transform="translate(392 170)">
+        <rect width="402" height="70" rx="14" fill="#1b1b1d" stroke="#ffffff" stroke-opacity="0.12"/>
+        <text x="24" y="31" font-size="22" font-weight="600" fill="#f0f0f0">Python</text>
+        <text x="24" y="56" font-size="18" fill="#a3a3a3">Pyodide, in a worker</text>
+      </g>
+      <g transform="translate(392 270)">
+        <rect width="402" height="70" rx="14" fill="#1b1b1d" stroke="#ffffff" stroke-opacity="0.12"/>
+        <text x="24" y="31" font-size="22" font-weight="600" fill="#f0f0f0">My Documents</text>
+        <text x="24" y="56" font-size="18" fill="#a3a3a3">IndexedDB, in this browser</text>
+      </g>
+    </g>
+
+    <!-- The one optional way out -->
+    <g transform="translate(48 250)">
+      <rect width="210" height="110" rx="16" fill="none" stroke="#a3a3a3" stroke-opacity="0.7" stroke-dasharray="6 6"/>
+      <text x="105" y="42" text-anchor="middle" font-size="22" font-weight="600" fill="#f0f0f0">AI service</text>
+      <text x="105" y="70" text-anchor="middle" font-size="18" fill="#a3a3a3">optional,</text>
+      <text x="105" y="92" text-anchor="middle" font-size="18" fill="#a3a3a3">your own key</text>
+    </g>
+    <path d="M258 305 H358" stroke="#a3a3a3" stroke-width="2" stroke-dasharray="6 6"/>
+  </g>
+</svg>

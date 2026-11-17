@@ -17,8 +17,8 @@ const Col = ({ children, className }: { children: ReactNode; className?: string 
 const Row = ({ children }: { children: ReactNode }) => (
   <span className="inline-flex items-center gap-[0.3cqw]">{children}</span>
 );
-const Sup = ({ children }: { children: ReactNode }) => <span className="-mt-[1.6cqw] scale-75">{children}</span>;
-const Sub = ({ children }: { children: ReactNode }) => <span className="-mb-[1.6cqw] scale-75">{children}</span>;
+const Sup = ({ children }: { children: ReactNode }) => <span className="mt-[-1.6cqw] scale-75">{children}</span>;
+const Sub = ({ children }: { children: ReactNode }) => <span className="mb-[-1.6cqw] scale-75">{children}</span>;
 const Frac = ({ top, bottom }: { top: ReactNode; bottom: ReactNode }) => (
   <Col className="gap-[0.2cqw]">
     {top}
@@ -368,7 +368,7 @@ export function CellGrid({
     <div
       role="listbox"
       aria-label={label}
-      className="relative grid gap-px border border-casRule bg-casRule"
+      className="relative grid animate-pop gap-px border border-casRule bg-casRule"
       style={{ gridTemplateColumns: `repeat(${cols}, 7.4cqw)` }}
     >
       {cells.map((c, i) => (

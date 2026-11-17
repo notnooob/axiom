@@ -361,3 +361,46 @@ export function keyOnSelection(s: EditState, key: Key): { edit: EditState; done:
       return { edit: plain, done: false };
   }
 }
+
+/**
+ * A key on a single entry line (a spreadsheet cell, a dialog-free line): the
+ * editing keys, or null when the key isn't an editing key (enter, esc, up,
+ * down … are the caller's).
+ */
+export function editorKey(s: EditState, key: Key): EditState | null {
+  if (selection(s)) {
+    const r = keyOnSelection(s, key);
+    return r.done ? r.edit : editorKey(r.edit, key);
+  }
+  switch (key.k) {
+    case "char":
+      return typeChar(s, key.c);
+    case "text":
+    case "paste":
+      return insertText(s, key.text);
+    case "template":
+      return insertTemplate(s, key.id);
+    case "backspace":
+      return backspace(s);
+    case "delete":
+      return deleteForward(s);
+    case "left":
+      return moveLeft(s);
+    case "right":
+      return moveRight(s);
+    case "home":
+      return moveHome(s);
+    case "end":
+      return moveEnd(s);
+    case "tab":
+      return nextSlot(s);
+    case "selectAll":
+      return selectAll(s);
+    case "selectLeft":
+      return extendSelection(s, "left");
+    case "selectRight":
+      return extendSelection(s, "right");
+    default:
+      return null;
+  }
+}

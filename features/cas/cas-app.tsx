@@ -5,16 +5,20 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
-  type ReactNode,
 } from "react";
-import { Copy, Download, MessageSquare, Trash2 } from "lucide-react";
-import { Button } from "@/shared/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { createPortal } from "react-dom";
+import { AnimatePresence } from "framer-motion";
+import { Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { ScaleIn } from "@/src/components/amicro/scale-in";
+import { TextShimmer } from "@/src/components/amicro/text-shimmer";
+import { useWebHaptics } from "@/src/hooks/use-web-haptics";
 import { cn } from "@/shared/lib/utils";
 import { historySaid, markSaid, menuSaid, pageSaid, toolSaid, wizardSaid } from "./a11y";
 import { calcKey, wizardInsert } from "./calculator/calc-keys";
@@ -35,14 +39,15 @@ import {
   type GraphEffect,
 } from "./graphs/graph-keys";
 import { GraphsApp } from "./graphs/graphs-app";
-import { autoScale, deName, fnName, parNames, relName, zoomed, type Samples } from "./graphs/model";
+import { deDefinition, pageDefinitions } from "./graphs/definitions";
+import { autoScale, fnName, parNames, relName, zoomed, type Samples } from "./graphs/model";
 import { Keypad } from "./keypad/keypad";
 import { keyFromEvent, type Key } from "./keys";
-import { mapAst, parse, sym, type Ast } from "./math/ast";
+import { parse, type Ast } from "./math/ast";
 import { print } from "./math/print";
 import { RENAME_IN, translate } from "./engine/translate";
 import { DE_DEFAULTS, type RelationOp, type Slider } from "./state/document";
-import { emptyEdit, selectBetween, selection, selectionText, type EditState } from "./math/editor";
+import { emptyEdit, selectBetween, selection, selectionText, templateNode } from "./math/editor";
 import { DefinedNames } from "./math/render";
 import { astToRow, chars, rowToLinear, type Row } from "./math/tree";
 import { calculatorMenu } from "./menus/calculator-menu";
@@ -59,17 +64,46 @@ import {
 } from "./catalog/catalog";
 import { PALETTE, paletteKeyPress, TemplatePalette } from "./menus/palette";
 import { FinanceSolver, financeKeyPress, newFinance, type FinanceState } from "./finance/finance-solver";
-import { CheckBox, openWizard, WizardDialog, wizardKeyPress, type WizardState } from "./menus/wizard";
+import { openWizard, WizardDialog, wizardKeyPress, type WizardState } from "./menus/wizard";
 import { download, screenPng } from "./screen/capture";
-import { FeedbackDialog, KINDS, type FeedbackKind, type ReportSource } from "./report";
-import { ADD_PAGE, DOC_MENU } from "./menus/doc-menus";
-import { HowToBar, SyntaxHint } from "./howto/howto";
-import { landedSyntax, resolve } from "./howto/paths";
-import type { HowTo } from "./howto/types";
+import { ADD_PAGE, BROWSE_MENU, DOC_MENU, SETTINGS_MENU } from "./menus/doc-menus";
+import { app as menuApp } from "./menus/types";
+import { BROWSE_START, BrowseScreen, browseKeyPress, targetFolder, visibleRows, type BrowseState } from "./files/browse";
+import { HOME_START, HomeScreen, homeKeyPress, type HomeAction, type HomeSel } from "./files/home";
+import * as files from "./files/store";
+import { addFiles } from "./files/upload";
+import { classify, decodeTns } from "./tns/decode";
+import { exportTns } from "./tns/export";
+import { importTns } from "./tns/import";
+import { ListsApp } from "./lists/lists-app";
+import { listsMenu } from "./lists/lists-menu";
+import * as sheet from "./lists/sheet";
+import { NotesApp, UnsupportedApp, type NotesApi } from "./notes/notes-app";
+import { NOTES_MENU } from "./notes/notes-menu";
+import { DataStatsApp } from "./data/data-app";
+import { dataMenu } from "./data/data-menu";
+import { GeometryApp, geometryKey, zoomed as zoomedGeo } from "./geometry/geometry-app";
+import { geometryMenu } from "./geometry/geometry-menu";
+import { ASKS, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
+import { ONE_VAR } from "./data/plot";
+import type { GraphWindow } from "./graphs/model";
+import { PythonCanvas, PythonEditor, PythonShell, type DrawOp } from "./python/python-app";
+import { python, type PyStatus } from "./python/runner";
+import { oneVar, regression, twoVar, type StatResult } from "./engine/stats";
 import { freeVariables, SLIDER_DIGITS, sliderStep, snap } from "./graphs/sliders";
 import { Screen } from "./screen/screen";
-import { load, save } from "./state/persist";
+import { EnginePill, ErrorDialog, Legal, MessageDialog, Notice, ScreenBar, SliderPrompt, type Choice, type SliderAsk } from "./screen/dialogs";
+import { AiPanel } from "./ai/ai-panel";
+import { AiMode } from "./ai/ai-mode";
+import { AssistantSettings, useAssistant, type DocActions, type DocBinding } from "./ai/assistant";
+import { highlightsSaid, liveHighlights, type Highlight } from "./ai/highlights";
+import { ownsOpenDoc, restoreOf } from "./ai/threads";
+import type { AgentDialog, AgentHost } from "./ai/tools";
+import { registerWebMcp } from "./ai/webmcp";
+import { clearPrefs, load, pref, save, setPref, type Saved } from "./state/persist";
+import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
+  bumpIds,
   insertProblem,
   newDocument,
   newId,
@@ -79,131 +113,23 @@ import {
   type CalculatorPage,
   type CasDocument,
   type GraphsPage,
-  type HistoryEntry,
+  type DataStatsPage,
+  type GeometryPage,
+  type ListsPage,
+  type NotesRun,
   type Page,
+  type PyShellPage,
+  type PythonPage,
+  type ShellLine,
 } from "./state/document";
 
 /**
- * The engine definitions that give one Graphs page its own copies of its
- * curves (see fnName in graphs/model.ts). Used when a curve is entered and
- * when a saved document is opened.
+ * The device's width: the page's column on phones; on wide screens the
+ * keypad, the gap, the screen and the body's padding at their largest, the
+ * screen as tall as the window leaves room for (--cas-h).
  */
-function pageDefinitions(page: GraphsPage, settings: Settings): string[] {
-  const t = (text: string) => translate(parse(text), settings).giac;
-  const out: string[] = [];
-  for (const f of page.functions) {
-    try {
-      out.push(`${fnName(page.id, f.n)}(x):=${t(f.text)}`);
-    } catch {
-      // A function that no longer parses just isn't drawn.
-    }
-  }
-  for (const r of page.relations ?? []) {
-    try {
-      const ast = parse(r.text);
-      if (ast.k === "bin")
-        out.push(
-          `${relName(page.id, r.n)}(x,y):=(${translate(ast.a, settings).giac})-(${translate(ast.b, settings).giac})`,
-        );
-    } catch {
-      // As above.
-    }
-  }
-  for (const c of page.parametrics ?? []) {
-    try {
-      const [xn, yn] = parNames(page.id, c.n);
-      out.push(`${xn}(t):=${t(c.x)}`, `${yn}(t):=${t(c.y)}`);
-    } catch {
-      // As above.
-    }
-  }
-  for (const d of page.des ?? []) {
-    try {
-      out.push(deDefinition(page.id, d.n, d.y, d.rhs, settings));
-    } catch {
-      // As above.
-    }
-  }
-  return out;
-}
-
-/** d1: y1′ = x·y1 becomes the slope function g…d1_(x,y) = x·y. */
-function deDefinition(page: number, n: number, y: number, rhs: string, settings: Settings): string {
-  const body = mapAst(parse(rhs), (a) => (a.k === "sym" && a.name === `y${y}` ? sym("y") : a));
-  return `${deName(page, n)}(x,y):=${translate(body, settings).giac}`;
-}
-
-/**
- * The calculator's width: the page's own column on phones; on wide screens
- * the keypad, the gap and the screen at their largest (sizes from the row in
- * CasApp), so the heading, the bar and the notes line up with its edges.
- */
-const DEVICE_WIDTH = "mx-auto max-w-[34rem] lg:max-w-[calc(min(21rem,(100vh-11rem)/2)+1.5rem+(100vh-11rem)*4/3)]";
-
-/** This calculator's source, published under the GPL (scripts/publish-cas-source.mjs). */
-const CAS_SOURCE = "https://github.com/vcehub/cas";
-/** Giac's source for the build in public/cas/giac, mirrored as a release there (see its SOURCE.md). */
-const GIAC_SOURCE = "https://github.com/vcehub/cas/releases/tag/giac-1.9.0";
-
-/** Feedback beside "How do I…", opening a short menu of the three kinds. */
-function FeedbackMenu({ onPick }: { onPick: (kind: FeedbackKind) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="outline" className="ml-auto max-lg:hidden">
-          <MessageSquare aria-hidden="true" className="size-[16px]" />
-          Feedback
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[320px] p-[6px]">
-        {KINDS.map((k) => (
-          <button
-            key={k.id}
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onPick(k.id);
-            }}
-            className="block w-full rounded-[6px] px-[12px] py-[10px] text-left hover:bg-surfaceHover focus-visible:bg-surfaceHover"
-          >
-            <span className="block text-ui font-semibold text-ink">{k.label}</span>
-            <span className="block text-uiSm text-inkBody">{k.says}</span>
-          </button>
-        ))}
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-/**
- * The fine print: free, not for SACs or exams, unaffiliated, and the GPL's notices (the
- * licence, no warranty, where the source is), for this calculator and for Giac.
- */
-function Legal({ className }: { className?: string }) {
-  return (
-    <>
-      <p className={cn("m-0 text-sm text-inkMuted", className)}>
-        Free for educational use. Not allowed in SACs or VCAA exams. Not affiliated with or endorsed by Texas Instruments.
-      </p>
-      <p className="m-0 text-sm text-inkMuted">
-        This calculator is free software under the GNU GPL v3 or later, with no warranty (
-        <a href="/cas/giac/COPYING" className="underline underline-offset-2 hover:text-ink">
-          licence
-        </a>
-        ,{" "}
-        <a href={CAS_SOURCE} className="underline underline-offset-2 hover:text-ink">
-          source
-        </a>
-        ). The maths runs on Giac, by Bernard Parisse and Renée De Graeve (
-        <a href={GIAC_SOURCE} className="underline underline-offset-2 hover:text-ink">
-          source
-        </a>
-        ).
-      </p>
-    </>
-  );
-}
+const DEVICE_WIDTH =
+  "w-full max-w-136 [--cas-h:calc(100dvh-12.5rem)] lg:max-w-[calc(min(24rem,var(--cas-h)/2.1)+1.25rem+var(--cas-h)*4/3+2.5rem)]";
 
 /**
  * The last answer on the page, for ans when this visit has none yet (after a
@@ -257,28 +183,24 @@ const FINANCE_NAMES = ["N", "I(%)", "PV", "Pmt", "FV", "PpY", "CpY", "PmtAt"];
 
 const DIGIT_OPTIONS = ["Float", ...Array.from({ length: 12 }, (_, i) => `Float${i + 1}`)];
 
-/** What undo puts back on a page: its entry line, and on a Calculator page its history. */
-type UndoSnap = { edit: EditState; history?: HistoryEntry[] };
-type UndoStacks = { past: UndoSnap[]; future: UndoSnap[]; typing: boolean };
-const UNDO_LIMIT = 200;
+/** "new": a blank document behind the add-page menu, before its first page is chosen. */
+type View = "home" | "browse" | "doc" | "new";
+/** The open document, kept in this browser between Saves (and while the Scratchpad is shown). */
+type Cached = { saved: Saved; path: string | null; dirty: boolean };
+type Setup = { text: "Small" | "Medium" | "Large"; haptics: boolean };
+const TEXT_SCALE: Record<Setup["text"], number> = { Small: 0.88, Medium: 1, Large: 1.18 };
+const RECENT_MAX = 5;
 
-/** One step of undo (back) or redo on the active page, moving the snapshot between the stacks. */
-function undoStep(d: CasDocument, back: boolean, all: Map<number, UndoStacks>): CasDocument {
-  const p = d.pages[d.active];
-  if (!p || (p.kind !== "calculator" && p.kind !== "graphs")) return d;
-  const stacks = all.get(p.id);
-  const from = back ? stacks?.past : stacks?.future;
-  const snap = from?.pop();
-  if (!stacks || !snap) return d;
-  (back ? stacks.future : stacks.past).push({ edit: p.edit, ...(p.kind === "calculator" ? { history: p.history } : {}) });
-  stacks.typing = false;
-  const pages = d.pages.slice();
-  pages[d.active] =
-    p.kind === "calculator"
-      ? { ...p, edit: snap.edit, history: snap.history ?? p.history, sel: null }
-      : { ...p, edit: snap.edit };
-  return { ...d, pages };
+/** The Scratchpad always has a Calculator page and a Graphs page (A Calculate, B Graph). */
+function withScratchPages(doc: CasDocument): CasDocument {
+  const pages = doc.pages.slice();
+  if (!pages.some((p) => p.kind === "calculator")) pages.unshift(newPage("calculator"));
+  if (!pages.some((p) => p.kind === "graphs")) pages.push(newPage("graphs"));
+  return { ...doc, title: "Scratchpad", pages };
 }
+const freshScratch = (): Saved => ({ doc: withScratchPages(newDocument()), settings: DEFAULT_SETTINGS, definitions: [] });
+
+const stem = (name: string) => name.replace(/\.tns$/i, "");
 
 /**
  * The whole calculator: one document, its pages, the engine, and the key
@@ -288,10 +210,6 @@ function undoStep(d: CasDocument, back: boolean, all: Map<number, UndoStacks>): 
 export function CasApp() {
   const [doc, setDoc] = useState<CasDocument>(newDocument);
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
-  // "Report a wrong answer": the page as it was when the form opened.
-  const [report, setReport] = useState<{ source: ReportSource; kind: FeedbackKind | null } | null>(null);
-  // "How do I…": the command's syntax, under the screen until the next Enter.
-  const [hint, setHint] = useState<string | null>(null);
   const [status, setStatus] = useState<EngineStatus>("loading");
   const [error, setError] = useState<string | null>(null);
   /** The message of the ⚠ last clicked, while its dialog is open. */
@@ -317,9 +235,55 @@ export function CasApp() {
   // Read out through the live region; n changes so a repeat is read again.
   const [said, setSaid] = useState({ text: "", n: 0 });
   const say = useCallback((text: string) => setSaid((s) => ({ text, n: s.n + 1 })), []);
+  const { trigger: haptic } = useWebHaptics();
   // A focus ring for keyboard focus only: clicking a key also focuses the calculator.
   const pointerFocus = useRef(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
+
+  // The handheld around the document: home screen, My Documents, the open file.
+  const [view, setView] = useState<View>("home");
+  const [homeSel, setHomeSel] = useState<HomeSel>(HOME_START);
+  const [browse, setBrowse] = useState<BrowseState>(BROWSE_START);
+  const [fileList, setFileList] = useState<files.FileRecord[]>([]);
+  /** The Scratchpad is on screen (it saves itself); otherwise a document. */
+  const [isScratch, setIsScratch] = useState(true);
+  /** The document's path in My Documents; null until it's first saved. */
+  const [openPath, setOpenPath] = useState<string | null>(null);
+  /** Changed since it was last saved (the * before the title, as on the handheld). */
+  const [dirty, setDirty] = useState(false);
+  /** The assistant thread whose document is open (it made, opened or worked on it); null for the student's own. */
+  const [docOwner, setDocOwner] = useState<string | null>(null);
+  /** The assistant's highlights (ai/highlights.ts): shown on their pages, never saved. */
+  const [highlights, setHighlights] = useState<Highlight[]>([]);
+  const docOwnerRef = useRef<string | null>(null);
+  const own = useCallback((thread: string | null) => {
+    docOwnerRef.current = thread;
+    setDocOwner(thread);
+  }, []);
+  /** What to do once a Save As (asked for by "save changes?") is done. */
+  const afterSave = useRef<(() => void) | null>(null);
+  const [setup, setSetupState] = useState<Setup>(() => pref<Setup>("setup", { text: "Medium", haptics: true }));
+  const [recent, setRecent] = useState<string[]>(() => pref<string[]>("recent", []));
+  const [confirm, setConfirm] = useState<{ title: string; lines: string[]; ok: () => void; buttons?: Choice[] } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const uploadInput = useRef<HTMLInputElement>(null);
+  /** The next change to doc is an opening, not an edit: don't write it back. */
+  const skipSave = useRef(false);
+  /** New Document asked which app to start with: ADD_PAGE's answer makes the document. */
+  const creatingNew = useRef(false);
+  const rows = useMemo(() => visibleRows(fileList, browse), [fileList, browse]);
+  const refreshFiles = useCallback(async () => setFileList(await files.all()), []);
+  const hap = useCallback((t: Parameters<typeof haptic>[0]) => setup.haptics && haptic(t), [setup.haptics, haptic]);
+
+  // Python: the worker's state, the input() prompt waiting for an answer, and what a program has drawn.
+  const [py, setPy] = useState<{ status: PyStatus; prompt: string | null; canvas: DrawOp[] | null }>({
+    status: "off",
+    prompt: null,
+    canvas: null,
+  });
+  const pyEditor = useRef<HTMLTextAreaElement | null>(null);
+  /** The Shell page the running program prints to. */
+  const pyShell = useRef<number | null>(null);
 
   const restored = useRef(false);
   /** The problem whose definitions the engine holds now. */
@@ -328,7 +292,8 @@ export function CasApp() {
   const opening = useRef<number | null>(null);
   useEffect(() => {
     // Pick up the document from this browser's last visit, if there is one.
-    const saved = load();
+    const loaded = load();
+    const saved = loaded ? { ...loaded, doc: withScratchPages(loaded.doc) } : null;
     const e = new CasEngine(saved?.settings ?? DEFAULT_SETTINGS);
     engine.current = e;
     if (saved) {
@@ -348,7 +313,10 @@ export function CasApp() {
       });
       setDefined(definedNames(saved.definitions));
     }
+    else setDoc(freshScratch().doc);
     restored.current = true;
+    skipSave.current = true;
+    void refreshFiles();
     const unsubscribe = e.onStatus(setStatus);
     return () => {
       unsubscribe();
@@ -356,13 +324,38 @@ export function CasApp() {
     };
   }, []);
 
+  // Every change is kept 400 ms later: the Scratchpad in this browser's
+  // storage, a document in the cache (it reaches My Documents on Save).
+  // Opening a document isn't a change.
+  const current = useRef({ doc, settings, openPath, isScratch, dirty });
+  current.current = { doc, settings, openPath, isScratch, dirty };
+  const snapshot = useCallback((): Saved => {
+    const { doc: d, settings: st } = current.current;
+    return { doc: d, settings: st, definitions: engine.current?.saved ?? [] };
+  }, []);
+  const writeNow = useCallback(async () => {
+    const c = current.current;
+    if (c.isScratch) save(snapshot());
+    else setPref("current", { saved: snapshot(), path: c.openPath, dirty: c.dirty } satisfies Cached);
+  }, [snapshot]);
   useEffect(() => {
     if (!restored.current) return;
-    const t = setTimeout(() => save({ doc, settings, definitions: engine.current?.saved ?? [] }), 400);
+    if (skipSave.current) {
+      skipSave.current = false;
+      return;
+    }
+    if (!current.current.isScratch) {
+      setDirty(true);
+      current.current.dirty = true;
+    }
+    const t = setTimeout(() => void writeNow(), 400);
     return () => clearTimeout(t);
-  }, [doc, settings]);
+  }, [doc, settings, writeNow]);
 
   const page = doc.pages[doc.active];
+  // The assistant's highlights that still match what they marked, and those on the page on screen.
+  const shownHighlights = useMemo(() => liveHighlights(doc, highlights), [doc, highlights]);
+  const pageHighlights = useMemo(() => shownHighlights.filter((h) => h.pageId === page?.id), [shownHighlights, page?.id]);
   // Function numbers in use across the problem: every Graphs page's, and
   // f1, f2 … defined anywhere (the Calculator, a regression). The next graph
   // takes the lowest free one.
@@ -404,8 +397,71 @@ export function CasApp() {
       await e.clearAll();
       await e.restore(arriving);
       setDefined(definedNames(arriving));
+      await applyPending(activeProblem);
     })();
-  }, [activeProblem]);
+  }, [activeProblem]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A stored Geometry measurement keeps its variable up to date: name:=value
+  // goes to the engine once the figure settles (not on every step of a drag).
+  const storedGeo = useMemo(() => {
+    const out: [string, string][] = [];
+    for (const pg of doc.pages) {
+      if (pg.kind !== "geometry" || problemOf(pg) !== activeProblem || !pg.objects.some((o) => o.kind === "measure" && o.store)) continue;
+      const shapes = resolveGeo(pg.objects);
+      for (const o of pg.objects) {
+        const s = shapes.get(o.id);
+        if (o.kind === "measure" && o.store && s?.t === "value" && Number.isFinite(s.value))
+          out.push([o.store, String(Math.abs(s.value) < 1e-10 ? 0 : Number(s.value.toPrecision(12)))]);
+      }
+    }
+    return out;
+  }, [doc.pages, activeProblem]);
+  const sentGeo = useRef(new Map<string, string>());
+  useEffect(() => {
+    if (status !== "ready" || !storedGeo.length) return;
+    const t = setTimeout(async () => {
+      const e = engine.current;
+      if (!e) return;
+      for (const [name, value] of storedGeo) {
+        const key = `${activeProblem}:${name}`;
+        if (sentGeo.current.get(key) === value) continue;
+        sentGeo.current.set(key, value);
+        try {
+          const r = await evaluate(`${name}:=${value}`, e.giac, { settings: current.current.settings });
+          if (!r.ok) setError(r.error);
+          else for (const d of [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])]) e.remember(d);
+        } catch (err) {
+          setError(`Error: ${(err as Error).message}`);
+        }
+      }
+      setDefined(definedNames(e.saved));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [storedGeo, activeProblem, status]);
+
+  /**
+   * An imported document's variables (a:=3, Define f1(x)=…) go into the
+   * engine the first time their problem is shown, then leave pendingSym.
+   */
+  const applyPending = useCallback(async (problem: number) => {
+    const e = engine.current;
+    const stmts = latestDoc.current.pendingSym?.[String(problem)];
+    if (!e || !stmts?.length) return;
+    for (const stmt of stmts) {
+      try {
+        const r = await evaluate(stmt, e.giac, { settings: current.current.settings });
+        if (r.ok) for (const d of [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])]) e.remember(d);
+      } catch {
+        // A variable the engine can't take is left out; the rest still come across.
+      }
+    }
+    setDefined(definedNames(e.saved));
+    setDoc((d) => {
+      const pendingSym = { ...(d.pendingSym ?? {}) };
+      delete pendingSym[String(problem)];
+      return { ...d, pendingSym };
+    });
+  }, []);
 
   /**
    * Undo and redo, per page: the entry line, and history lines removed with
@@ -415,39 +471,7 @@ export function CasApp() {
   const undo = useRef(new Map<number, UndoStacks>());
   /** The change being made comes from typing a character: a run of them undoes as one step. */
   const typing = useRef(false);
-  const recordUndo = useCallback((p: Page, n: Page) => {
-    if (p.kind !== n.kind) return;
-    const stacks = undo.current.get(p.id) ?? { past: [], future: [], typing: false };
-    undo.current.set(p.id, stacks);
-    const wall =
-      p.kind === "calculator" && n.kind === "calculator"
-        ? n.history.length > p.history.length
-        : p.kind === "graphs" &&
-          n.kind === "graphs" &&
-          (n.editing !== p.editing ||
-            n.functions !== p.functions ||
-            n.relations !== p.relations ||
-            n.parametrics !== p.parametrics ||
-            n.des !== p.des);
-    if (wall) {
-      stacks.past = [];
-      stacks.future = [];
-      stacks.typing = false;
-      return;
-    }
-    const removed = p.kind === "calculator" && n.kind === "calculator" && n.history.length < p.history.length;
-    // Moving the cursor ends a run of typing.
-    if (!typing.current) stacks.typing = false;
-    if (n.edit.row === p.edit.row && !removed) return;
-    const top = stacks.past[stacks.past.length - 1];
-    stacks.future = [];
-    // The same change seen twice (React runs state updaters twice in development) is one step.
-    if (top?.edit === p.edit) return;
-    if (typing.current && stacks.typing && top) return;
-    stacks.past.push({ edit: p.edit, ...(p.kind === "calculator" ? { history: p.history } : {}) });
-    if (stacks.past.length > UNDO_LIMIT) stacks.past.shift();
-    stacks.typing = typing.current;
-  }, []);
+  const recordUndo = useCallback((p: Page, n: Page) => recordStep(undo.current, p, n, typing.current), []);
 
   /** Update the active page if it's of the given kind. */
   const update = useCallback(
@@ -456,7 +480,9 @@ export function CasApp() {
         const p = d.pages[d.active];
         if (!p || p.kind !== kind) return d;
         const pages = d.pages.slice();
-        const next = fn(p as Extract<Page, { kind: K }>);
+        let next = fn(p as Extract<Page, { kind: K }>);
+        // An imported Graphs page's original XML no longer matches once it's edited.
+        if ((next.kind === "graphs" || next.kind === "datastats" || next.kind === "notes") && next.xml && next !== p) next = { ...next, xml: undefined };
         recordUndo(p, next);
         pages[d.active] = next;
         return { ...d, pages };
@@ -478,6 +504,55 @@ export function CasApp() {
   }, []);
   const setCalc = useCallback((fn: (p: CalculatorPage) => CalculatorPage) => update("calculator", fn), [update]);
   const setGraphs = useCallback((fn: (p: GraphsPage) => GraphsPage) => update("graphs", fn), [update]);
+  const setLists = useCallback((fn: (p: ListsPage) => ListsPage) => update("lists", fn), [update]);
+  const setPython = useCallback((fn: (p: PythonPage) => PythonPage) => update("python", fn), [update]);
+  const setData = useCallback((fn: (p: DataStatsPage) => DataStatsPage) => update("datastats", fn), [update]);
+  const setGeo = useCallback((fn: (p: GeometryPage) => GeometryPage) => update("geometry", fn), [update]);
+  /** Rotation and Dilation, once their object and centre are picked: the angle or scale factor. */
+  const askGeoAmount = useCallback((tool: GeoTool, picked: string[]) => {
+    const label = ASKS[tool];
+    if (label)
+      setWizard(
+        openWizard({ kind: "wizard", title: GEO_TOOLS[tool], arrows: false, fields: [{ label, value: tool === "rotation" ? "90" : "2" }], build: `geoamount:${tool}:${picked[0]}:${picked[1]}:{0}` }),
+      );
+  }, []);
+  /** The window a Data & Statistics page is drawn in (its own, or the one fitting the data): what zoom works from. */
+  const dataWindow = useRef<GraphWindow | null>(null);
+  /** The Notes editor's commands, for the keypad, its menu and the assistant. */
+  const notesApi = useRef<NotesApi | null>(null);
+  /** A Notes maths box worked out with the problem's variables; what it defines is defined for the problem. */
+  const notesEvaluate = useCallback(async (text: string, approx: boolean) => {
+    const e = engine.current;
+    if (!e) return { ok: false, text: "Error: The engine isn't loaded" };
+    try {
+      const r = await evaluate(text, e.giac, { settings: current.current.settings, approx });
+      if (!r.ok) return { ok: false, text: r.error };
+      for (const d of [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])]) e.remember(d);
+      setDefined(definedNames(e.saved));
+      return { ok: true, text: r.outputText };
+    } catch (err) {
+      return { ok: false, text: `Error: ${(err as Error).message}` };
+    }
+  }, []);
+  /** The problem's lists, for Data & Statistics' variable menus: named columns, and list variables in the engine. */
+  const listNames = useCallback((): string[] => {
+    const d = latestDoc.current;
+    const problem = problemOf(d.pages[d.active]);
+    const out = new Set<string>();
+    for (const p of d.pages) if (p.kind === "lists" && problemOf(p) === problem) for (const c of p.cols) if (c.name) out.add(c.name);
+    const lists = (engine.current?.saved ?? []).filter((s) => /^[A-Za-z]\w*\s*:=\s*\[(?!\[)/.test(s.trim()));
+    for (const n of definedNames(lists)) out.add(n);
+    return [...out].sort();
+  }, []);
+  /** Update a page by id, whichever page is active (a Shell printing while another page is shown). */
+  const updatePage = useCallback((id: number, fn: (p: Page) => Page) => {
+    setDoc((d) => ({ ...d, pages: d.pages.map((p) => (p.id === id ? fn(p) : p)) }));
+  }, []);
+  const shellPrint = useCallback(
+    (id: number, ...lines: ShellLine[]) =>
+      updatePage(id, (p) => (p.kind === "pyshell" ? { ...p, lines: [...p.lines, ...lines].slice(-500) } : p)),
+    [updatePage],
+  );
 
   const runEvaluate = useCallback(
     async (p: CalculatorPage, approx: boolean) => {
@@ -809,7 +884,7 @@ export function CasApp() {
         });
       } else {
         const { type, fn, a, b } = effect.analyze;
-        const other = p.functions.find((f) => !f.hidden && f.n !== fn)?.n;
+        const other = effect.analyze.other ?? p.functions.find((f) => !f.hidden && f.n !== fn)?.n;
         const mark = await analyze(
           e.giac,
           type,
@@ -827,6 +902,152 @@ export function CasApp() {
       }
     },
     [settings, setGraphs, say, offerSliders],
+  );
+
+  /** Work a Lists page out again, and give the engine its named columns. */
+  const recalcLists = useCallback(
+    async (p: ListsPage) => {
+      const e = engine.current;
+      if (!e) return;
+      const run: sheet.Evaluate = async (text) => {
+        try {
+          const r = await evaluate(text, e.giac, { settings });
+          if (!r.ok) return { ok: false, text: r.error, definitions: [] };
+          return { ok: true, text: r.outputText, definitions: [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])] };
+        } catch {
+          return { ok: false, text: "Error", definitions: [] };
+        }
+      };
+      const r = await sheet.recalc(p, run);
+      for (const d of r.definitions) e.remember(d);
+      setDefined(definedNames(e.saved));
+      updatePage(p.id, (q) => (q.kind === "lists" ? { ...q, cols: r.page.cols } : q));
+    },
+    [settings, updatePage],
+  );
+
+  /**
+   * Run Python in the problem's Shell page (made after the current page if
+   * there isn't one), with the problem's programs importable by name.
+   */
+  const runPython = useCallback(
+    (what: { file: string } | { code: string }) => {
+      const d = latestDoc.current;
+      const here = d.pages[d.active];
+      const problem = problemOf(here);
+      const programs = d.pages
+        .filter((x): x is PythonPage => x.kind === "python" && problemOf(x) === problem)
+        .map((x) => ({ name: x.file, source: x.source }));
+      let pages = d.pages;
+      let at = pages.findIndex((x) => x.kind === "pyshell" && problemOf(x) === problem);
+      if (at < 0) {
+        at = d.active + 1;
+        pages = [...pages.slice(0, at), newPage("pyshell", problem), ...pages.slice(at)];
+      }
+      const shell = pages[at] as PyShellPage;
+      const line: ShellLine = "file" in what ? { kind: "in", text: `#Run ${what.file.replace(/\.py$/, "")}` } : { kind: "in", text: what.code };
+      pages = pages.map((x, i) => (i === at && x.kind === "pyshell" ? { ...x, lines: [...x.lines, line], input: "" } : x));
+      setDoc({ ...d, pages, active: at });
+      pyShell.current = shell.id;
+      setPy((s) => ({ ...s, canvas: null, prompt: null }));
+      const r = python();
+      if (!r.isolated && "file" in what) toast("Live keys, input() and Break need this page reloaded (it sets itself up on first visit).");
+      r.run(programs, what);
+    },
+    [],
+  );
+
+  // The Python worker's output lands in the Shell it was started from.
+  useEffect(
+    () =>
+      python().on((ev) => {
+        const id = pyShell.current;
+        if (ev.type === "status") setPy((s) => ({ ...s, status: ev.status }));
+        else if ((ev.type === "out" || ev.type === "err") && id !== null) shellPrint(id, { kind: ev.type, text: ev.text });
+        else if (ev.type === "draw") setPy((s) => ({ ...s, canvas: ev.op === "clear" ? [ev] : [...(s.canvas ?? []), ev] }));
+        else if (ev.type === "textAt") setPy((s) => ({ ...s, canvas: [...(s.canvas ?? []), { op: "textAt", row: ev.row, text: ev.text, align: ev.align }] }));
+        else if (ev.type === "clearText") setPy((s) => ({ ...s, canvas: s.canvas ? [{ op: "clear", args: [] }] : s.canvas }));
+        else if (ev.type === "input") setPy((s) => ({ ...s, prompt: ev.prompt }));
+        else if (ev.type === "done") {
+          setPy((s) => ({ ...s, prompt: null }));
+          if (ev.error && id !== null) shellPrint(id, { kind: "err", text: ev.error });
+        }
+      }),
+    [shellPrint],
+  );
+
+  /** The keypad typing into the Python editor: the textarea is edited in place, then its text saved. */
+  const pyEdit = useCallback(
+    (key: Key) => {
+      const el = pyEditor.current;
+      if (!el) return;
+      const { selectionStart: a, selectionEnd: b, value } = el;
+      const lineStart = value.lastIndexOf("\n", a - 1) + 1;
+      const put = (t: string, from = a, to = b) => el.setRangeText(t, from, to, "end");
+      switch (key.k) {
+        case "char":
+          put(key.c);
+          break;
+        case "text":
+        case "paste":
+          put(key.text);
+          break;
+        case "enter": {
+          // New lines keep the indent, and go one deeper after a colon.
+          const line = value.slice(lineStart, a);
+          const indent = /^\s*/.exec(line)![0] + (/:\s*$/.test(line) ? "    " : "");
+          put(`\n${indent}`);
+          break;
+        }
+        case "tab":
+          put("    ");
+          break;
+        case "backspace":
+          if (a !== b) put("");
+          else if (a > 0) put("", a - 1, a);
+          break;
+        case "delete":
+          if (a !== b) put("");
+          else put("", a, a + 1);
+          break;
+        case "left":
+          el.setSelectionRange(Math.max(0, a - 1), Math.max(0, a - 1));
+          return;
+        case "right":
+          el.setSelectionRange(b + 1, b + 1);
+          return;
+        case "home":
+          el.setSelectionRange(lineStart, lineStart);
+          return;
+        case "end": {
+          const e = value.indexOf("\n", a);
+          const to = e < 0 ? value.length : e;
+          el.setSelectionRange(to, to);
+          return;
+        }
+        case "up":
+        case "down": {
+          const col = a - lineStart;
+          const target =
+            key.k === "up"
+              ? lineStart === 0
+                ? 0
+                : value.lastIndexOf("\n", lineStart - 2) + 1
+              : value.indexOf("\n", a) < 0
+                ? value.length
+                : value.indexOf("\n", a) + 1;
+          const end = value.indexOf("\n", target);
+          const to = Math.min(target + col, end < 0 ? value.length : end);
+          el.setSelectionRange(to, to);
+          return;
+        }
+        default:
+          return;
+      }
+      const text = el.value;
+      setPython((p) => ({ ...p, source: text }));
+    },
+    [setPython],
   );
 
   const pageKey = useCallback(
@@ -855,16 +1076,58 @@ export function CasApp() {
         const { page: next, effect } = graphKey(page, key, takenFns);
         setGraphs(() => next);
         if (effect) void runGraphEffect(next, effect);
+      } else if (page?.kind === "lists") {
+        const { page: next, effect } = sheet.listsKey(page, key);
+        setLists(() => next);
+        if (effect && "error" in effect) setError(effect.error);
+        else if (effect) void recalcLists(next);
+      } else if (page?.kind === "geometry") {
+        const next = geometryKey(page, key);
+        if (next) setGeo(() => next);
+      } else if (page?.kind === "notes") {
+        notesApi.current?.key(key);
+      } else if (page?.kind === "python") {
+        // Ctrl+R (the √ shortcut elsewhere) runs the program, as on the handheld.
+        if (key.k === "template" && key.id === "sqrt") runPython({ file: page.file });
+        else pyEdit(key);
+      } else if (page?.kind === "pyshell") {
+        const r = python();
+        // A finished drawing stays up until a key is pressed.
+        if (py.canvas && py.status !== "running") {
+          setPy((s) => ({ ...s, canvas: null }));
+          return;
+        }
+        if (py.status === "running" && py.prompt === null) {
+          if (key.k === "esc") r.stop();
+          else r.key(key.k === "char" ? key.c : key.k);
+          return;
+        }
+        // From the latest input, not this render's: fast typing lands several keys before a re-render.
+        const editInput = (fn: (input: string) => string) => updatePage(page.id, (p) => (p.kind === "pyshell" ? { ...p, input: fn(p.input) } : p));
+        const setInput = (input: string) => editInput(() => input);
+        if (key.k === "char") editInput((i) => i + key.c);
+        else if (key.k === "text" || key.k === "paste") editInput((i) => i + key.text);
+        else if (key.k === "backspace") editInput((i) => i.slice(0, -1));
+        else if (key.k === "clear" || key.k === "esc") setInput("");
+        else if (key.k === "up") setInput([...page.lines].reverse().find((l) => l.kind === "in" && !l.text.startsWith("#Run"))?.text ?? page.input);
+        else if (key.k === "enter") {
+          if (py.prompt !== null) {
+            shellPrint(page.id, { kind: "out", text: py.prompt + page.input });
+            setInput("");
+            setPy((s) => ({ ...s, prompt: null }));
+            r.answer(page.input);
+          } else if (page.input.trim()) runPython({ code: page.input });
+        }
       }
     },
-    [wizard, finance, page, runEvaluate, runGraphEffect, setCalc, setGraphs, takenFns],
+    [wizard, finance, page, runEvaluate, runGraphEffect, setCalc, setGraphs, setLists, recalcLists, runPython, pyEdit, py, updatePage, shellPrint, takenFns],
   );
 
   /** Clear all: one empty Calculator page and no variables. The settings stay. */
   const clearAll = useCallback(() => {
     shownProblem.current = 1;
     opening.current = null;
-    setDoc(newDocument());
+    setDoc((d) => (current.current.openPath ? { ...newDocument(), title: d.title } : withScratchPages(newDocument())));
     setMenu(null);
     setWizard(null);
     setPalette(null);
@@ -881,7 +1144,7 @@ export function CasApp() {
 
   // A new page is a clean sheet: a new Graphs page has no curves on it.
   const addPage = useCallback(
-    (kind: "calculator" | "graphs") => {
+    (kind: "calculator" | "graphs" | "lists" | "python" | "pyshell" | "datastats" | "notes" | "geometry") => {
       setDoc((d) => {
         const pages = d.pages.slice();
         const page = newPage(kind, problemOf(d.pages[d.active]));
@@ -892,6 +1155,274 @@ export function CasApp() {
       });
     },
     [takenFns],
+  );
+
+  /** Put a saved document on screen: its pages, settings and the engine's definitions. */
+  const openSaved = useCallback(async (saved: Saved, path: string | null, scratch = false, wasDirty = false) => {
+    const e = engine.current;
+    if (!e) return;
+    skipSave.current = true;
+    // Another document: no thread's until one claims it (the assistant's tools, or a thread being reopened).
+    own(null);
+    if (!scratch) setPref("current", { saved, path, dirty: wasDirty } satisfies Cached);
+    bumpIds(saved.doc);
+    setMenu(null);
+    setWizard(null);
+    setCatalog(null);
+    setPalette(null);
+    setFinance(null);
+    setError(null);
+    undo.current.clear();
+    lastAns.current = undefined;
+    samples.current = [];
+    shownProblem.current = problemOf(saved.doc.pages[saved.doc.active]);
+    opening.current = shownProblem.current;
+    latestDoc.current = saved.doc;
+    setDoc(saved.doc);
+    setSettings(saved.settings);
+    setIsScratch(scratch);
+    setOpenPath(path);
+    setDirty(wasDirty);
+    current.current = { ...current.current, doc: saved.doc, settings: saved.settings, openPath: path, isScratch: scratch, dirty: wasDirty };
+    setView("doc");
+    await e.clearAll();
+    await e.applySettings(saved.settings);
+    await e.restore(saved.definitions);
+    for (const pg of saved.doc.pages)
+      if (pg.kind === "graphs")
+        for (const d of pageDefinitions(pg, saved.settings)) {
+          await e.giac(d);
+          e.remember(d);
+        }
+    setDefined(definedNames(e.saved));
+    await applyPending(shownProblem.current);
+  }, [applyPending, own]);
+
+  const remember = useCallback((path: string) => {
+    setRecent((r) => {
+      const next = [path, ...r.filter((x) => x !== path)].slice(0, RECENT_MAX);
+      setPref("recent", next);
+      return next;
+    });
+  }, []);
+
+  /** Open a file from My Documents: a document made here, or an upload (decoded on first open). */
+  const openFile = useCallback(
+    async (path: string) => {
+      const c = current.current;
+      if (!c.isScratch && c.openPath === path) {
+        setView("doc");
+        return;
+      }
+      const rec = await files.getFile(path);
+      if (!rec || rec.type !== "file") return;
+      if (!(await leaveOk())) return;
+      if (rec.doc) {
+        remember(path);
+        await openSaved(rec.doc, path);
+        return;
+      }
+      const bytes = rec.bytes ?? new Uint8Array();
+      const name = files.nameOf(path);
+      if (/\.py$/i.test(name)) {
+        const doc: CasDocument = { title: stem(name), pages: [{ kind: "python", id: newId(), problem: 1, file: name, source: new TextDecoder().decode(bytes) }, newPage("pyshell")], active: 0 };
+        const saved: Saved = { doc, settings: DEFAULT_SETTINGS, definitions: [] };
+        await files.cacheImport(path, saved);
+        remember(path);
+        await openSaved(saved, path);
+        return;
+      }
+      const kind = classify(bytes);
+      if (kind === "ndless") {
+        setConfirm({ title: name, lines: ["This is an Ndless program.", "", "It's kept here and can be downloaded, but programs for the handheld's processor can't run in a browser."], ok: () => undefined });
+        return;
+      }
+      if (kind !== "document") {
+        setConfirm({ title: name, lines: ["This file isn't a document.", "", "It's kept here and can be downloaded (it may be data for an Ndless program)."], ok: () => undefined });
+        return;
+      }
+      try {
+        const imported = importTns(decodeTns(bytes), stem(name));
+        const saved: Saved = { doc: imported.doc, settings: DEFAULT_SETTINGS, definitions: [] };
+        await files.cacheImport(path, saved);
+        remember(path);
+        await openSaved(saved, path);
+        await refreshFiles();
+        if (imported.skipped) toast(`${imported.skipped} program${imported.skipped === 1 ? "" : "s"} or function${imported.skipped === 1 ? "" : "s"} in this document can't run here yet.`);
+      } catch (err) {
+        setError(`Error: Couldn't open ${name}: ${(err as Error).message}`);
+      }
+    },
+    [openSaved, refreshFiles, remember], // eslint-disable-line react-hooks/exhaustive-deps
+  );
+
+  const openScratchpad = useCallback(
+    async (kind: "calculator" | "graphs") => {
+      if (!current.current.isScratch) {
+        // The document stays in the cache: Home → Current brings it back.
+        await writeNow();
+        const loaded = load();
+        await openSaved(loaded ? { ...loaded, doc: withScratchPages(loaded.doc) } : freshScratch(), null, true);
+      }
+      setDoc((d) => {
+        const at = d.pages.findIndex((p) => p.kind === kind);
+        return at < 0 ? d : { ...d, active: at };
+      });
+      setView("doc");
+    },
+    [openSaved, writeNow],
+  );
+
+  /** A new document, starting with the given app; it's in My Documents once it's saved. */
+  const newDoc = useCallback(
+    async (first: "calculator" | "graphs" | "lists" | "python" | "datastats" | "notes" | "geometry") => {
+      const doc = newDocument(first, "Untitled");
+      if (first === "python") doc.pages.push(newPage("pyshell"));
+      await openSaved({ doc, settings: DEFAULT_SETTINGS, definitions: [] }, null);
+    },
+    [openSaved],
+  );
+
+  /** Save: to the document's file, or Save As for one that hasn't been saved (or the Scratchpad). */
+  const saveDocument = useCallback(
+    async (then?: () => void) => {
+      const c = current.current;
+      if (c.isScratch || !c.openPath) {
+        afterSave.current = then ?? null;
+        setWizard(openWizard({ kind: "wizard", title: "Save As", arrows: false, fields: [{ label: "File Name:", value: c.isScratch || c.doc.title === "Untitled" ? "" : c.doc.title }], build: "saveas:{0}" }));
+        return;
+      }
+      await files.saveDoc(c.openPath, snapshot());
+      setDirty(false);
+      current.current.dirty = false;
+      await writeNow();
+      await refreshFiles();
+      toast.success(`Saved ${files.nameOf(c.openPath)}`);
+      then?.();
+    },
+    [snapshot, writeNow, refreshFiles],
+  );
+
+  /**
+   * Before the open document is replaced (New, Open, Close): if it has
+   * unsaved changes, ask Save / Don't Save / Cancel, as the handheld does.
+   * Resolves true to go ahead.
+   */
+  const leaveOk = useCallback(
+    () =>
+      new Promise<boolean>((resolve) => {
+        const c = current.current;
+        if (c.isScratch || !c.dirty) return resolve(true);
+        setConfirm({
+          title: "Save Document",
+          lines: [`Do you want to save changes to "${c.doc.title}"?`],
+          ok: () => undefined,
+          buttons: [
+            { label: "Yes", run: () => void saveDocument(() => resolve(true)) },
+            { label: "No", run: () => resolve(true) },
+            { label: "Cancel", run: () => resolve(false) },
+          ],
+        });
+      }),
+    [saveDocument],
+  );
+
+  /** File → New, Home → New: save-or-not first, then a blank document asking for its first page. */
+  const startNew = useCallback(async () => {
+    if (!(await leaveOk())) return;
+    creatingNew.current = true;
+    setView("new");
+    setMenu({ items: ADD_PAGE, state: openMenu() });
+  }, [leaveOk]);
+
+  /** The open document (Home → Current): on screen, or back from the cache after the Scratchpad. */
+  const openCurrent = useCallback(async () => {
+    if (!current.current.isScratch) return setView("doc");
+    const cached = pref<Cached | null>("current", null);
+    if (cached?.saved?.doc?.pages?.length) {
+      await writeNow();
+      await openSaved(cached.saved, cached.path, false, cached.dirty);
+    } else toast("No document is open. Choose New or Browse.");
+  }, [openSaved, writeNow]);
+
+  /** Where leaving a document goes: the screen it was opened from (Home or My Documents). */
+  const backTo = useRef<"home" | "browse">("home");
+  useEffect(() => {
+    if (view === "home" || view === "browse") backTo.current = view;
+  }, [view]);
+  const closeDocument = useCallback(async () => {
+    if (!(await leaveOk())) return;
+    setPref("current", null);
+    const loaded = load();
+    await openSaved(loaded ? { ...loaded, doc: withScratchPages(loaded.doc) } : freshScratch(), null, true);
+    if (backTo.current === "browse") void refreshFiles();
+    setView(backTo.current);
+  }, [leaveOk, openSaved, refreshFiles]);
+  /** X and Esc: close the document (Save / No / Cancel first if it has changes); the Scratchpad just steps back. */
+  const leaveDocument = useCallback(() => {
+    setMenu(null);
+    creatingNew.current = false;
+    if (current.current.isScratch) {
+      void writeNow();
+      setView(backTo.current);
+    } else void closeDocument();
+  }, [closeDocument, writeNow]);
+
+  const tnsOf = useCallback((saved: Saved): Uint8Array => exportTns(saved.doc, saved.settings).bytes, []);
+
+  const downloadFile = useCallback(
+    async (path: string) => {
+      const rec = await files.getFile(path);
+      if (!rec || rec.type !== "file") return;
+      const name = files.nameOf(path);
+      const bytes = rec.bytes && !rec.edited ? rec.bytes : rec.doc ? tnsOf(rec.doc) : null;
+      if (!bytes) return;
+      download(new Blob([bytes as BlobPart]), /\.\w+$/.test(name) ? name : `${name}.tns`);
+    },
+    [tnsOf],
+  );
+
+  const showStatus = useCallback(async () => {
+    const u = await files.usage();
+    const kb = (n: number) => `${Math.round(n / 1024).toLocaleString()} KB`;
+    setConfirm({
+      title: "Status",
+      lines: [
+        "Axiom, a CAS handheld in the browser",
+        "Maths: Giac 1.9.0",
+        "",
+        `Documents: ${u.files}`,
+        `My Documents uses ${kb(u.bytes)}`,
+        ...(u.used !== undefined && u.quota ? [`This site's storage: ${kb(u.used)} of ${kb(u.quota)}`] : []),
+        `Python: ${python().isolated ? "ready for live keys and input()" : "runs; live keys need a reload"}`,
+      ],
+      ok: () => undefined,
+    });
+  }, []);
+
+  const homeAction = useCallback(
+    (act: HomeAction | undefined) => {
+      if (!act) return;
+      if (act === "scratchCalc") void openScratchpad("calculator");
+      else if (act === "scratchGraph") void openScratchpad("graphs");
+      else if (act === "fileNew") void startNew();
+      else if (act === "fileOpen") {
+        void refreshFiles();
+        setView("browse");
+      } else if (act === "recent")
+        setMenu({ items: recent.map((r) => menuApp(files.nameOf(r), `recent:${r}`)), state: openMenu() });
+      else if (act === "current") void openCurrent();
+      else if (act === "settings") setMenu({ items: SETTINGS_MENU, state: openMenu() });
+      else if (act.startsWith("newWith:")) {
+        const app = act.slice(8);
+        const first = app === "data" ? "datastats" : app;
+        if (first === "calculator" || first === "graphs" || first === "lists" || first === "python" || first === "datastats" || first === "notes" || first === "geometry")
+          void leaveOk().then((go) => {
+            if (go) void newDoc(first);
+          });
+      }
+    },
+    [newDoc, openScratchpad, recent, refreshFiles, startNew, openCurrent, leaveOk],
   );
 
   const graphAction = useCallback(
@@ -967,12 +1498,217 @@ export function CasApp() {
   const runAction = useCallback(
     (action: MenuAction | undefined) => {
       if (!action) return;
-      if (action.kind === "insert") pageKey({ k: "text", text: action.text });
+      // On a Notes page, the Calculations menu types into the current maths box (or a new one).
+      if (page?.kind === "notes" && (action.kind === "insert" || action.kind === "template"))
+        notesApi.current?.insertMath(action.kind === "insert" ? action.text : rowToLinear([templateNode(action.template)]));
+      else if (action.kind === "insert") pageKey({ k: "text", text: action.text });
       else if (action.kind === "template") pageKey({ k: "template", id: action.template });
       else if (action.kind === "wizard") setWizard(openWizard(action));
       else if (action.id === "insertProblem") setDoc(insertProblem);
-      else if (action.id === "addCalculator") addPage("calculator");
-      else if (action.id === "addGraphs") addPage("graphs");
+      else if (/^add(Calculator|Graphs|Lists|Python|Shell|Data|Notes|Geometry)$/.test(action.id)) {
+        const kinds = { addCalculator: "calculator", addGraphs: "graphs", addLists: "lists", addPython: "python", addShell: "pyshell", addData: "datastats", addNotes: "notes", addGeometry: "geometry" } as const;
+        const kind = kinds[action.id as keyof typeof kinds];
+        if (creatingNew.current) {
+          creatingNew.current = false;
+          void newDoc(kind === "pyshell" ? "python" : kind);
+        } else if (kind === "python") {
+          setWizard(openWizard({ kind: "wizard", title: "New", arrows: false, fields: [{ label: "Name:", value: "", hint: "program" }], build: "pynew:{0}" }));
+        } else addPage(kind);
+      } else if (action.id === "fileNew") void startNew();
+      else if (action.id === "fileOpen") {
+        void writeNow().then(refreshFiles);
+        setView("browse");
+      } else if (action.id === "fileClose") void closeDocument();
+      else if (action.id === "fileSave") void saveDocument();
+      else if (action.id === "fileSaveAs") {
+        afterSave.current = null;
+        setWizard(openWizard({ kind: "wizard", title: "Save As", arrows: false, fields: [{ label: "File Name:", value: isScratch || doc.title === "Untitled" ? "" : doc.title }], build: "saveas:{0}" }));
+      }
+      else if (action.id === "fileDownload") {
+        const r = exportTns(doc, settings);
+        download(new Blob([r.bytes as BlobPart]), `${doc.title}.tns`);
+        if (r.dropped) toast(`${r.dropped} page${r.dropped === 1 ? "" : "s"} made here can't be written to .tns yet (Graphs); the rest is in the file.`);
+      } else if (action.id === "handheldSetup")
+        setWizard(
+          openWizard({
+            kind: "wizard",
+            title: "Handheld Setup",
+            fields: [
+              { label: "Text Size:", value: setup.text, options: ["Small", "Medium", "Large"] },
+              { label: "Haptics", value: setup.haptics ? "Yes" : "No", check: true },
+            ],
+            build: "setup:{0}:{1}",
+          }),
+        );
+      else if (action.id === "status") void showStatus();
+      else if (action.id === "factoryReset")
+        setConfirm({
+          title: "Restore Factory Defaults",
+          lines: ["Every document in My Documents, the Scratchpad and all settings will be deleted from this browser.", "", "This can't be undone."],
+          ok: () => {
+            void files.clearAll().then(() => {
+              clearPrefs();
+              window.location.reload();
+            });
+          },
+        });
+      else if (action.id.startsWith("recent:")) void openFile(action.id.slice(7));
+      else if (action.id.startsWith("browse")) {
+        const r = rows[browse.sel];
+        const folder = targetFolder(rows, browse.sel);
+        if (action.id === "browseNewFolder")
+          setWizard(openWizard({ kind: "wizard", title: "New Folder", arrows: false, fields: [{ label: "Name:", value: "" }], build: "browse:mkdir:{0}" }));
+        else if (action.id === "browseRename" && r && r.path !== files.ROOT)
+          setWizard(openWizard({ kind: "wizard", title: "Rename", arrows: false, fields: [{ label: "Name:", value: r.name }], build: "browse:rename:{0}" }));
+        else if (action.id === "browseDelete" && r && r.path !== files.ROOT) askDelete(r.path);
+        else if (action.id === "browseCopy" && r && !r.folder) {
+          setBrowse((b) => ({ ...b, clip: r.path }));
+          toast(`Copied ${r.name}`);
+        } else if (action.id === "browsePaste" && browse.clip) {
+          const from = browse.clip;
+          void (async () => {
+            const rec = await files.getFile(from);
+            if (!rec) return;
+            const name = await files.freeName(folder, files.nameOf(from));
+            await files.put({ ...rec, path: files.join(folder, name), modified: Date.now() });
+            await refreshFiles();
+            toast.success(`Pasted ${name}`);
+          })();
+        } else if (action.id === "browseUpload") uploadInput.current?.click();
+        else if (action.id === "browseDownload" && r && !r.folder) void downloadFile(r.path);
+        else if (action.id === "browseExportAll")
+          void files.exportAll((rec) => (rec.doc ? tnsOf(rec.doc) : null)).then((zip) => download(new Blob([zip as BlobPart]), "My Documents.zip"));
+        else if (action.id === "browseSortName") setBrowse((b) => ({ ...b, sort: "name" }));
+        else if (action.id === "browseSortSize") setBrowse((b) => ({ ...b, sort: "size" }));
+      } else if (action.id.startsWith("lists") && page?.kind === "lists") {
+        const fn = {
+          listsInsertRow: sheet.insertRow,
+          listsDeleteRow: sheet.deleteRow,
+          listsInsertColumn: sheet.insertColumn,
+          listsDeleteColumn: sheet.deleteColumn,
+          listsClearColumn: sheet.clearColumn,
+          listsSortUp: (p: ListsPage) => sheet.sortColumn(p, false),
+          listsSortDown: (p: ListsPage) => sheet.sortColumn(p, true),
+        }[action.id];
+        if (fn) {
+          const next = fn(page);
+          setLists(() => next);
+          void recalcLists(next);
+        }
+      } else if (action.id.startsWith("geo") && page?.kind === "geometry") {
+        const id = action.id;
+        if (id.startsWith("geoTool:")) setGeo((p) => ({ ...p, tool: { name: id.slice(8) as GeoTool, picked: [] }, sel: null }));
+        else if (id === "geoSelect") setGeo((p) => ({ ...p, tool: null }));
+        else if (id === "geoDelete") setGeo((p) => (p.sel ? { ...p, objects: removeGeo(p.objects, [p.sel]), sel: null } : p));
+        else if (id === "geoClear") setGeo((p) => ({ ...p, objects: [], tool: null, sel: null }));
+        else if (id === "geoAxes") setGeo((p) => ({ ...p, axes: !p.axes }));
+        else if (id === "geoGrid") setGeo((p) => ({ ...p, grid: !p.grid }));
+        else if (id === "geoZoomIn") setGeo((p) => zoomedGeo(p, 0.8));
+        else if (id === "geoZoomOut") setGeo((p) => zoomedGeo(p, 1.25));
+        else if (id === "geoZoomReset") setGeo((p) => ({ ...p, view: undefined }));
+        else if (id === "geoStore") {
+          const m = page.objects.find((o) => o.id === page.sel && o.kind === "measure");
+          if (m?.kind === "measure")
+            setWizard(openWizard({ kind: "wizard", title: "Store Variable", arrows: false, fields: [{ label: "Variable:", value: m.store ?? "" }], build: `geostore:${m.id}:{0}` }));
+        }
+      } else if (action.id.startsWith("ds") && page?.kind === "datastats") {
+        const id = action.id;
+        const shownWin = dataWindow.current;
+        const fmt = (v: number) => String(Number(v.toPrecision(10)));
+        if (id.startsWith("dsPlot:")) {
+          const plot = id.slice(7) as DataStatsPage["plot"];
+          setData((p) => ({ ...p, plot, window: undefined }));
+        } else if (id === "dsConnect") setData((p) => ({ ...p, connect: !p.connect }));
+        else if (id === "dsWhiskers") setData((p) => ({ ...p, extendWhiskers: !p.extendWhiskers }));
+        else if (id === "dsNormal") setData((p) => ({ ...p, normalPdf: !p.normalPdf }));
+        else if (id.startsWith("dsAxis:")) {
+          const axis = id.slice(7);
+          const names = listNames();
+          setMenu({
+            items: names.length
+              ? names.map((n) => menuApp(n, `dsVar:${axis}:${n}`))
+              : [{ label: "No lists in this problem" }],
+            state: openMenu(),
+          });
+        } else if (id.startsWith("dsVar:")) {
+          const [, axis, name] = id.split(":");
+          setData((p) => {
+            const next = { ...p, [axis === "x" ? "x" : "y"]: name, window: undefined };
+            // Two lists make a scatter plot, one a dot plot, as on the handheld.
+            if (next.x && next.y && ONE_VAR.includes(next.plot)) next.plot = "scatter";
+            if (!next.y && !ONE_VAR.includes(next.plot)) next.plot = "dot";
+            return next;
+          });
+        } else if (id === "dsRemoveX") setData((p) => ({ ...p, x: undefined, window: undefined }));
+        else if (id === "dsRemoveY") setData((p) => ({ ...p, y: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
+        else if (id === "dsClearAll") setData((p) => ({ kind: "datastats", id: p.id, problem: p.problem, plot: "dot" }));
+        else if (id === "dsRemoveAnalysis")
+          setData((p) => ({ ...p, regression: undefined, movable: undefined, functions: undefined, values: undefined, normalPdf: undefined }));
+        else if (id.startsWith("dsReg:")) {
+          const kind = id.slice(6);
+          setData((p) => ({ ...p, regression: p.regression === kind ? undefined : kind }));
+        } else if (id === "dsMovable")
+          setData((p) => {
+            if (p.movable) return { ...p, movable: undefined };
+            // A line through the middle of the window, at half its diagonal's slope.
+            const w = shownWin ?? { xmin: -10, xmax: 10, ymin: -10, ymax: 10, xscl: 1, yscl: 1 };
+            const m = ((w.ymax - w.ymin) / (w.xmax - w.xmin)) * 0.5;
+            return { ...p, movable: { m, b: (w.ymin + w.ymax) / 2 - (m * (w.xmin + w.xmax)) / 2 } };
+          });
+        else if (id === "dsLock") setData((p) => (p.movable ? { ...p, movable: { ...p.movable, lock: !p.movable.lock, ...(!p.movable.lock ? { b: 0 } : {}) } } : p));
+        else if (id === "dsWindow" && shownWin)
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Window Settings",
+              arrows: false,
+              fields: [
+                { label: "XMin:", value: fmt(shownWin.xmin) },
+                { label: "XMax:", value: fmt(shownWin.xmax) },
+                { label: "YMin:", value: fmt(shownWin.ymin) },
+                { label: "YMax:", value: fmt(shownWin.ymax) },
+              ],
+              build: "ds:window:{0}:{1}:{2}:{3}",
+            }),
+          );
+        else if (id === "dsZoomData") setData((p) => ({ ...p, window: undefined }));
+        else if ((id === "dsZoomIn" || id === "dsZoomOut") && shownWin) {
+          const k = id === "dsZoomIn" ? 0.5 : 2;
+          const cx = (shownWin.xmin + shownWin.xmax) / 2;
+          const cy = (shownWin.ymin + shownWin.ymax) / 2;
+          const hx = ((shownWin.xmax - shownWin.xmin) / 2) * k;
+          const hy = ((shownWin.ymax - shownWin.ymin) / 2) * k;
+          setData((p) => ({ ...p, window: { xmin: cx - hx, xmax: cx + hx, ymin: cy - hy, ymax: cy + hy, xscl: 1, yscl: 1 } }));
+        } else if (id === "dsSettings")
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Data & Statistics Settings",
+              fields: [
+                { label: "Display Digits:", value: page.digits ?? "Auto", options: ["Auto", ...Array.from({ length: 8 }, (_, i) => `Float${i + 1}`)] },
+                { label: "Diagnostics", value: page.diagnostics ? "Yes" : "No", check: true },
+              ],
+              build: "ds:settings:{0}:{1}",
+            }),
+          );
+      } else if (action.id === "notes:attrs" && page?.kind === "notes") {
+        const a = notesApi.current?.attrs();
+        if (!a) setError("Error: Put the cursor in a maths box first");
+        else
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Math Box Attributes",
+              fields: [
+                { label: "Input:", value: a.hideIn ? "Hide" : "Show", options: ["Show", "Hide"] },
+                { label: "Output:", value: a.hideOut ? "Hide" : "Show", options: ["Show", "Hide"] },
+              ],
+              build: "notesattrs:{0}:{1}",
+            }),
+          );
+      } else if (action.id.startsWith("notes:") && page?.kind === "notes") notesApi.current?.action(action.id);
+      else if (action.id === "pyRun" && page?.kind === "python") runPython({ file: page.file });
+      else if (action.id === "pyClear" && page?.kind === "pyshell") updatePage(page.id, (p) => (p.kind === "pyshell" ? { ...p, lines: [] } : p));
       else if (action.id === "docSettings") {
         setWizard(
           openWizard({
@@ -1017,11 +1753,184 @@ export function CasApp() {
           });
       } else graphAction(action.id);
     },
-    [addPage, graphAction, pageKey, setCalc, settings],
+    [addPage, graphAction, pageKey, setCalc, settings, doc, setup, rows, browse, page, newDoc, writeNow, refreshFiles, showStatus, openFile, downloadFile, tnsOf, setLists, recalcLists, runPython, updatePage, startNew, closeDocument, saveDocument, isScratch], // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  function askDelete(path: string) {
+    setConfirm({
+      title: "Delete",
+      lines: [`Delete ${files.nameOf(path)}?`, "", "It's removed from this browser; this can't be undone."],
+      ok: () => {
+        void files.remove(path).then(async () => {
+          if (current.current.openPath && (current.current.openPath === path || current.current.openPath.startsWith(`${path}/`))) {
+            setPref("current", null);
+            const loaded = load();
+            await openSaved(loaded ? { ...loaded, doc: withScratchPages(loaded.doc) } : freshScratch(), null, true);
+            setView("browse");
+          }
+          setRecent((r) => {
+            const next = r.filter((x) => x !== path && !x.startsWith(`${path}/`));
+            setPref("recent", next);
+            return next;
+          });
+          setBrowse((b) => ({ ...b, sel: Math.max(0, b.sel - 1) }));
+          await refreshFiles();
+        });
+      },
+    });
+  }
 
   const wizardDone = useCallback(
     (built: string) => {
+      const field = (prefix: string) => built.slice(prefix.length).trim();
+      const badName = (n: string) => !n || /[/\\:*?"<>|]/.test(n);
+      if (built.startsWith("geostore:")) {
+        // geostore:<measurement>:<variable>; an empty name unlinks it.
+        const [id, name = ""] = built.slice(9).split(":").map((v) => v.trim());
+        if (name && !VAR_NAME.test(name)) return setError("Error: A variable name is letters, digits and _, starting with a letter");
+        setGeo((p) => ({
+          ...p,
+          objects: p.objects.map((o) => (o.kind !== "measure" ? o : o.id === id ? { ...o, store: name || undefined } : o.store === name ? { ...o, store: undefined } : o)),
+        }));
+        return;
+      }
+      if (built.startsWith("geoamount:")) {
+        // geoamount:<tool>:<object>:<centre>:<number> (a fraction a/b is fine too).
+        const [tool, obj, centre, text = ""] = built.slice(10).split(":");
+        const m = /^\s*(-?[\d.]+)\s*(?:\/\s*([\d.]+))?\s*$/.exec(text.replace("−", "-"));
+        const n = m ? Number(m[1]) / (m[2] ? Number(m[2]) : 1) : NaN;
+        if (!Number.isFinite(n)) return setError("Error: Type a number");
+        setGeo((p) => {
+          const r = transformWith(p.objects, tool as GeoTool, [obj!, centre!], n);
+          if ("error" in r) {
+            setTimeout(() => setError(`Error: ${r.error}`));
+            return p;
+          }
+          return { ...p, objects: r.objs };
+        });
+        return;
+      }
+      if (built.startsWith("saveas:")) {
+        const name = field("saveas:").replace(/\.tns$/i, "");
+        if (badName(name)) return setError("Error: Invalid file name");
+        void (async () => {
+          const path = files.join(files.ROOT, await files.freeName(files.ROOT, `${name}.tns`));
+          const s: Saved = { doc: { ...current.current.doc, title: stem(files.nameOf(path)) }, settings: current.current.settings, definitions: engine.current?.saved ?? [] };
+          await files.put({ path, type: "file", doc: s, size: files.sizeOf(s), modified: Date.now() });
+          skipSave.current = true;
+          setDoc(s.doc);
+          setIsScratch(false);
+          setOpenPath(path);
+          setDirty(false);
+          current.current = { ...current.current, doc: s.doc, openPath: path, isScratch: false, dirty: false };
+          setPref("current", { saved: s, path, dirty: false } satisfies Cached);
+          remember(path);
+          await refreshFiles();
+          toast.success(`Saved as ${files.nameOf(path)}`);
+          const then = afterSave.current;
+          afterSave.current = null;
+          then?.();
+        })();
+        return;
+      }
+      if (built.startsWith("browse:")) {
+        const r = rows[browse.sel];
+        const folder = targetFolder(rows, browse.sel);
+        if (built.startsWith("browse:mkdir:")) {
+          const name = field("browse:mkdir:");
+          if (badName(name)) return setError("Error: Invalid folder name");
+          void files.mkdir(files.join(folder, name)).then(refreshFiles);
+        } else if (built.startsWith("browse:rename:") && r) {
+          let name = field("browse:rename:");
+          if (badName(name)) return setError("Error: Invalid name");
+          if (!r.folder && /\.tns$/i.test(r.name) && !/\.\w+$/.test(name)) name += ".tns";
+          const to = files.join(files.parentOf(r.path), name);
+          void files
+            .rename(r.path, to)
+            .then(async () => {
+              if (current.current.openPath === r.path) setOpenPath(to);
+              await refreshFiles();
+            })
+            .catch((err: Error) => setError(`Error: ${err.message}`));
+        }
+        return;
+      }
+      if (built.startsWith("setup:")) {
+        const [text, haptics] = built.slice(6).split(":");
+        const next: Setup = { text: (["Small", "Medium", "Large"].includes(text!) ? text : "Medium") as Setup["text"], haptics: haptics === "Yes" };
+        setSetupState(next);
+        setPref("setup", next);
+        return;
+      }
+      if (built.startsWith("pynew:")) {
+        let name = field("pynew:") || "program";
+        if (!/^[A-Za-z_]\w*(\.py)?$/.test(name)) return setError("Error: A program name is letters, digits and _");
+        if (!name.endsWith(".py")) name += ".py";
+        setDoc((d) => {
+          const p: PythonPage = { kind: "python", id: newId(), problem: problemOf(d.pages[d.active]), file: name, source: "" };
+          const pages = d.pages.slice();
+          pages.splice(d.active + 1, 0, p);
+          return { ...d, pages, active: d.active + 1 };
+        });
+        return;
+      }
+      if (built.startsWith("scatter:")) {
+        const [x, y] = built.slice(8).split(":").map((v) => v.trim().toLowerCase());
+        if (!x || !y) return setError("Error: Choose an x list and a y list");
+        setGraphs((g) => {
+          const used = new Set((g.scatters ?? []).map((sc) => sc.n));
+          let n = 1;
+          while (used.has(n)) n++;
+          return { ...g, scatters: [...(g.scatters ?? []), { n, x, y }] };
+        });
+        return;
+      }
+      if (built.startsWith("ds:") && page?.kind === "datastats") {
+        const [, what, ...args] = built.split(":");
+        if (what === "bins") {
+          const [width, start] = args.map((a) => (a?.trim() ? Number(a) : NaN));
+          if (!args[0]?.trim()) setData((p) => ({ ...p, bins: undefined, window: undefined }));
+          else if (!(width! > 0)) setError("Error: The bin width must be more than 0");
+          else setData((p) => ({ ...p, bins: { width: width!, start: Number.isFinite(start) ? start! : 0 }, window: undefined }));
+        } else if (what === "fn" && args.join(":").trim()) setData((p) => ({ ...p, functions: [...(p.functions ?? []), args.join(":").trim()] }));
+        else if (what === "value" && args.join(":").trim()) setData((p) => ({ ...p, values: [...(p.values ?? []), args.join(":").trim()] }));
+        else if (what === "window") {
+          const [xmin, xmax, ymin, ymax] = args.map(Number);
+          if (![xmin, xmax, ymin, ymax].every(Number.isFinite) || xmin! >= xmax! || ymin! >= ymax!) setError("Error: Invalid window settings");
+          else setData((p) => ({ ...p, window: { xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax!, xscl: 1, yscl: 1 } }));
+        } else if (what === "settings") setData((p) => ({ ...p, digits: args[0], diagnostics: args[1] === "Yes" }));
+        return;
+      }
+      if (built.startsWith("lists:") && page?.kind === "lists") {
+        const parts = built.split(":");
+        if (parts[1] === "seq") {
+          const [, , formula, first, max] = parts;
+          const lo = Number(first) || 1;
+          const count = Math.max(1, Math.min(2500, Number(max) || 10));
+          if (!formula?.trim()) return setError("Error: Enter a formula");
+          const next = sheet.setColumnFormula(page, `=seq(${formula},n,${lo},${lo + count - 1})`);
+          setLists(() => next);
+          void recalcLists(next);
+          return;
+        }
+        if (parts[1] === "stat") {
+          const [, , cmd, xName, yName] = parts;
+          const col = (n: string | undefined) =>
+            page.cols.find((c) => c.name === n?.trim().toLowerCase()) ?? page.cols[(n?.trim().toUpperCase().charCodeAt(0) ?? 0) - 65];
+          const xs = sheet.columnNumbers(col(xName));
+          const ys = sheet.columnNumbers(col(yName));
+          if (!xs.length || (yName !== undefined && !ys.length)) return setError("Error: The list has no numbers");
+          let res: StatResult;
+          try {
+            res = cmd === "OneVar" ? oneVar(xs) : cmd === "TwoVar" ? twoVar(xs, ys) : regression(cmd!, xs, ys);
+          } catch (err) {
+            return setError(`Error: ${(err as Error).message}`);
+          }
+          const show = (v: number | string | number[]) => (Array.isArray(v) ? `{${v.map((x) => +x.toPrecision(8)).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v);
+          setWarning(res.rows.map(([label, v]) => `${label}: ${show(v)}`));
+          return;
+        }
+      }
       if (built.startsWith("settings:")) {
         const [digits, angle, complex, mode] = built.slice(9).split(":");
         const next: Settings = {
@@ -1110,10 +2019,19 @@ export function CasApp() {
         }));
         return;
       }
+      if (built.startsWith("notesattrs:")) {
+        const [, input, output] = built.split(":");
+        notesApi.current?.setAttrs({ hideIn: input === "Hide", hideOut: output === "Hide" });
+        return;
+      }
+      if (page?.kind === "notes") {
+        notesApi.current?.insertMath(built);
+        return;
+      }
       setCalc((p) => ({ ...p, edit: wizardInsert(p.edit, built), sel: null }));
       setGraphs((g) => (g.editing !== null ? { ...g, edit: wizardInsert(g.edit, built) } : g));
     },
-    [setCalc, setGraphs, assign],
+    [setCalc, setGraphs, assign, rows, browse, page, refreshFiles, remember, setLists, recalcLists],
   );
 
   // The catalog's answer to a key or a click: keep it open, or close it and insert.
@@ -1129,6 +2047,27 @@ export function CasApp() {
 
   const handleKey = useCallback(
     (key: Key) => {
+      if (confirm) {
+        if (confirm.buttons) {
+          // Enter is the first choice, Esc the last (Cancel); or the choice's first letter.
+          const pick =
+            key.k === "enter"
+              ? confirm.buttons[0]
+              : key.k === "esc"
+                ? confirm.buttons.at(-1)
+                : key.k === "char"
+                  ? confirm.buttons.find((b) => b.label[0]!.toLowerCase() === key.c.toLowerCase())
+                  : undefined;
+          if (pick) {
+            setConfirm(null);
+            pick.run();
+          }
+        } else if (key.k === "enter") {
+          setConfirm(null);
+          confirm.ok();
+        } else if (key.k === "esc") setConfirm(null);
+        return;
+      }
       if (error) {
         if (key.k === "enter" || key.k === "esc") setError(null);
         return;
@@ -1163,6 +2102,11 @@ export function CasApp() {
       if (menu) {
         const r = menuKeyPress(menu.items, menu.state, key);
         setMenu(r.state ? { items: menu.items, state: r.state } : null);
+        // Leaving New's add-page menu without choosing goes back home.
+        if (!r.state && !r.action && creatingNew.current) {
+          creatingNew.current = false;
+          setView(backTo.current);
+        }
         runAction(r.action);
         return;
       }
@@ -1179,7 +2123,67 @@ export function CasApp() {
         if (r.error) setError(r.error);
         return;
       }
+      // The handheld's own keys, wherever you are.
+      if (key.k === "homeScreen") {
+        void writeNow();
+        setView((v) => (v === "home" ? "doc" : "home"));
+        return;
+      }
+      if (key.k === "scratchpad") {
+        void openScratchpad("calculator");
+        return;
+      }
+      if (key.k === "save") {
+        void saveDocument();
+        return;
+      }
+      if (view === "new") {
+        setView(backTo.current);
+        return;
+      }
+      if (view === "home") {
+        if (key.k === "menu") setMenu({ items: SETTINGS_MENU, state: openMenu() });
+        else if (key.k === "esc") setView("doc");
+        else {
+          const r = homeKeyPress(homeSel, key, recent.length > 0, !isScratch || Boolean(pref<Cached | null>("current", null)));
+          setHomeSel(r.sel);
+          homeAction(r.act);
+        }
+        return;
+      }
+      if (view === "browse") {
+        if (key.k === "menu") setMenu({ items: BROWSE_MENU, state: openMenu() });
+        else if (key.k === "esc") setView("home");
+        else {
+          const r = browseKeyPress(browse, rows, key);
+          setBrowse(r.state);
+          if (r.effect && "open" in r.effect && r.effect.open) void openFile(r.effect.open);
+          if (r.effect && "delete" in r.effect && r.effect.delete) askDelete(r.effect.delete);
+        }
+        return;
+      }
       if (key.k === "menu") {
+        if (page?.kind === "lists") {
+          const name = (i: number) => page.cols[i]?.name ?? sheet.letter(i).toLowerCase();
+          setMenu({ items: listsMenu(name(page.sel.col), name(page.sel.col + 1)), state: openMenu() });
+          return;
+        }
+        if (page?.kind === "datastats") {
+          setMenu({ items: dataMenu(page), state: openMenu() });
+          return;
+        }
+        if (page?.kind === "geometry") {
+          setMenu({ items: geometryMenu(page), state: openMenu() });
+          return;
+        }
+        if (page?.kind === "notes") {
+          setMenu({ items: NOTES_MENU, state: openMenu() });
+          return;
+        }
+        if (page?.kind === "python" || page?.kind === "pyshell") {
+          setMenu({ items: page.kind === "python" ? PYTHON_MENU : SHELL_MENU, state: openMenu() });
+          return;
+        }
         setMenu({
           items:
             page?.kind === "graphs"
@@ -1194,6 +2198,7 @@ export function CasApp() {
         return;
       }
       if (key.k === "insertPage") {
+        creatingNew.current = false;
         setMenu({ items: ADD_PAGE, state: openMenu() });
         return;
       }
@@ -1204,10 +2209,28 @@ export function CasApp() {
         }));
         return;
       }
-      if (key.k === "enter" || key.k === "esc") setHint(null);
+      // Esc steps back: it cancels what's open on the page first, then leaves the document.
+      if (key.k === "esc" && !pageTakesEsc(page, py)) {
+        leaveDocument();
+        return;
+      }
       pageKey(key);
     },
     [
+      leaveDocument,
+      py,
+      confirm,
+      view,
+      homeSel,
+      recent,
+      browse,
+      rows,
+      homeAction,
+      isScratch,
+      openFile,
+      openScratchpad,
+      writeNow,
+      saveDocument,
       error,
       warning,
       sliderPrompt,
@@ -1249,12 +2272,32 @@ export function CasApp() {
         let p = page;
         for (const k of keys) p = graphKey(p, k, takenFns).page;
         setGraphs(() => p);
+      } else if (!error && view === "doc" && page?.kind === "lists") {
+        let p = page;
+        for (const k of keys) p = sheet.listsKey(p, k).page;
+        setLists(() => p);
       } else keys.forEach(handleKey);
     },
-    [finance, wizard, error, menu, catalog, palette, page, setCalc, setGraphs, handleKey, takenFns],
+    [finance, wizard, error, menu, catalog, palette, page, setCalc, setGraphs, setLists, handleKey, takenFns, view],
   );
 
   const onKeyDown = (e: KeyboardEvent) => {
+    // The Python editor is a real text box: it types, selects, copies and undoes
+    // natively. Only the handheld's shortcuts (and Tab, as four spaces) come here.
+    // Notes is a real editable page too: it types, formats (Ctrl+B, Ctrl+U) and undoes natively.
+    if ((e.target as HTMLElement).closest?.("[data-notes-editor]")) {
+      const ctrl = e.ctrlKey || e.metaKey;
+      const ours = ctrl ? ["m", "k", "i", "h", "s", "arrowleft", "arrowright"].includes(e.key.toLowerCase()) : ["Escape", "ContextMenu"].includes(e.key);
+      if (!ours) return;
+    }
+    if ((e.target as HTMLElement).dataset.pyEditor !== undefined) {
+      const ctrl = e.ctrlKey || e.metaKey;
+      // Enter too, so a new line keeps its indent (and indents after a colon), as the handheld's editor does.
+      const ours = ctrl
+        ? ["r", "m", "k", "i", "h", "s", "arrowleft", "arrowright"].includes(e.key.toLowerCase())
+        : ["Escape", "ContextMenu", "Tab", "Enter"].includes(e.key);
+      if (!ours) return;
+    }
     // Ctrl+V reaches onPaste below; let the browser deliver it.
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "v") return;
     const key = keyFromEvent(e);
@@ -1272,7 +2315,7 @@ export function CasApp() {
     if (key.k === "cut") {
       // Ctrl+X: copy the selected part of the entry line, then remove it. History can't be cut, only copied.
       if (page?.kind === "calculator" && page.sel) copySelection();
-      else if (page && selection(page.edit)) {
+      else if ((page?.kind === "calculator" || page?.kind === "graphs") && selection(page.edit)) {
         copySelection();
         handleKey({ k: "delete" });
       }
@@ -1286,7 +2329,7 @@ export function CasApp() {
    * with part of the entry line selected it copies that.
    */
   const copySelection = () => {
-    if (page && !(page.kind === "calculator" && page.sel) && selection(page.edit)) {
+    if ((page?.kind === "calculator" || page?.kind === "graphs") && !(page.kind === "calculator" && page.sel) && selection(page.edit)) {
       void navigator.clipboard?.writeText(selectionText(page.edit)).catch(() => undefined);
       return;
     }
@@ -1304,6 +2347,7 @@ export function CasApp() {
   };
 
   const onPaste = (e: ClipboardEvent) => {
+    if ((e.target as HTMLElement).dataset.pyEditor !== undefined || (e.target as HTMLElement).closest?.("[data-notes-editor]")) return;
     const text = e.clipboardData.getData("text").replace(/\s+/g, " ").trim();
     if (!text) return;
     e.preventDefault();
@@ -1334,8 +2378,11 @@ export function CasApp() {
     if (wizard) say(wizardSaid(wizard));
   }, [wizard?.focus, wizard?.wizard, say]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (error) say(error);
-  }, [error, say]);
+    if (error) {
+      say(error);
+      haptic("error");
+    }
+  }, [error, say, haptic]);
   useEffect(() => {
     if (warning) say(`Warning. ${warning.filter(Boolean).join(" ")}`);
   }, [warning, say]);
@@ -1369,7 +2416,60 @@ export function CasApp() {
     if (tool) say(toolSaid(tool));
   }, [tool, say]);
 
-  // Show me plays over several renders, so it reads the newest state through a ref.
+  const upload = useCallback(
+    async (list: File[]) => {
+      if (!list.length) return;
+      const folder = view === "browse" ? targetFolder(rows, browse.sel) : files.ROOT;
+      try {
+        const n = await addFiles(folder, list);
+        await refreshFiles();
+        setBrowse((b) => ({ ...b, open: [...new Set([...b.open, folder])] }));
+        setView("browse");
+        toast.success(`Added ${n} file${n === 1 ? "" : "s"} to ${files.nameOf(folder)}`);
+      } catch (err) {
+        toast.error(`Couldn't add those files: ${(err as Error).message}`);
+      }
+    },
+    [view, rows, browse.sel, refreshFiles],
+  );
+  // Files dropped anywhere on the page go into My Documents.
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+    let depth = 0;
+    const enter = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      depth++;
+      setDragging(true);
+    };
+    const leave = () => {
+      depth = Math.max(0, depth - 1);
+      if (!depth) setDragging(false);
+    };
+    const over = (e: DragEvent) => {
+      if (hasFiles(e)) e.preventDefault();
+    };
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDragging(false);
+      void uploadRef.current(Array.from(e.dataTransfer?.files ?? []));
+    };
+    window.addEventListener("dragenter", enter);
+    window.addEventListener("dragleave", leave);
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    return () => {
+      window.removeEventListener("dragenter", enter);
+      window.removeEventListener("dragleave", leave);
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+    };
+  }, []);
+  const uploadRef = useRef(upload);
+  uploadRef.current = upload;
+
+  // The window-wide key listener below reads the newest state through a ref.
   const latest = useRef({ doc, page, runAction, handleKey, addPage, setCalc });
   latest.current = { doc, page, runAction, handleKey, addPage, setCalc };
 
@@ -1389,7 +2489,7 @@ export function CasApp() {
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.target !== document.body || e.defaultPrevented) return;
-      if (document.querySelector('[aria-modal="true"]')) return;
+      if (document.querySelector('[aria-modal="true"]') || immersive.current) return;
       if (e.ctrlKey || e.metaKey || e.altKey || e.key.length !== 1 || e.key === "/" || e.key === " ") return;
       e.preventDefault();
       pointerFocus.current = true;
@@ -1399,137 +2499,331 @@ export function CasApp() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
-  // The entry line as the last Show me left it: if it's still that, the next Show me starts it afresh.
-  const shownLine = useRef<string | null>(null);
 
-  /**
-   * "How do I…" Show me: do it on the calculator. A menu way opens the real
-   * menu and steps down to the item, a level at a time, then does what the
-   * item does; a Graphs task moves to a Graphs page first (adding one if
-   * there's none). Nothing is evaluated: the student fills it in and presses
-   * enter. Reduced motion jumps straight there.
-   */
-  const showMe = useCallback(async (entry: HowTo) => {
-    const way = entry.ways[0];
-    if (!way) return;
-    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const wait = (ms: number) => new Promise((r) => setTimeout(r, still ? 30 : ms));
-    setMenu(null);
-    setWizard(null);
-    setCatalog(null);
-    setPalette(null);
-    setFinance(null);
-    const syntax = landedSyntax(entry);
-    setHint(syntax);
-    say(`Showing ${entry.title} on the calculator.${syntax ? ` It's written ${syntax}.` : ""}`);
-    root.current?.focus({ preventScroll: true });
-    const top = root.current?.getBoundingClientRect().top ?? 0;
-    if (top < 64 || top > window.innerHeight * 0.6) root.current?.scrollIntoView({ behavior: still ? "auto" : "smooth", block: "start" });
-
-    // Clear what the last Show me left untouched, so templates don't nest; never the student's own typing.
-    const before = latest.current.page;
-    if (before?.kind === "calculator" && before.edit.row.length && JSON.stringify(before.edit.row) === shownLine.current) {
-      latest.current.setCalc((p) => ({ ...p, edit: emptyEdit(), sel: null }));
-      await wait(30);
-    }
-
-    const kind = way.kind === "menu" && (way.menu === "graphs" || way.menu === "calculator") ? way.menu : null;
-    if (kind && latest.current.page?.kind !== kind) {
-      const at = latest.current.doc.pages.findIndex((p) => p.kind === kind);
-      if (at >= 0) setDoc((d) => ({ ...d, active: at }));
-      else latest.current.addPage(kind);
-      await wait(250);
-    }
-
-    // A graph task on an empty Graphs page draws the card's functions first, so the tool has something to work on.
-    const curves = entry.example.filter((e) => !e.output).map((e) => e.input);
-    const draw = async () => {
-      const g = latest.current.page;
-      if (g?.kind !== "graphs" || g.functions.length || !curves.length) return;
-      for (const [i, text] of curves.entries()) {
-        if (i > 0 || latest.current.page?.kind !== "graphs" || latest.current.page.editing === null) {
-          latest.current.runAction({ kind: "app", id: "entryFunction" });
-          await wait(120);
-        }
-        latest.current.handleKey({ k: "paste", text });
-        await wait(still ? 30 : 500);
-        latest.current.handleKey({ k: "enter" });
-        await wait(still ? 60 : 450);
-      }
-    };
-
-    if (way.kind === "menu") {
-      const r = resolve(way.menu, way.path);
-      if (!r) return;
-      if (way.menu === "graphs" && !way.then) await draw();
-      const p = latest.current.page;
-      const items =
-        way.menu === "calculator"
-          ? calculatorMenu
-          : way.menu === "graphs" && p?.kind === "graphs"
-            ? graphsMenu({ axes: p.axes, entryLine: p.editing !== null, grid: p.grid, table: p.table })
-            : way.menu === "doc"
-              ? DOC_MENU
-              : ADD_PAGE;
-      for (let depth = 0; depth < r.indices.length; depth++) {
-        setMenu({ items, state: { path: r.indices.slice(0, depth + 1) } });
-        await wait(depth === 0 ? 500 : 450);
-      }
+  // The assistant's (and WebMCP agents') hands on the calculator: this render's
+  // state and handlers, rebuilt every render so a tool always gets the newest.
+  // The assistant: off, beside the calculator, or AI mode (the chat takes the page).
+  const [ai, setAi] = useState<"off" | "panel" | "immersive">("off");
+  const aiOpen = ai === "panel";
+  const immersive = useRef(false);
+  immersive.current = ai === "immersive";
+  const [aiSettings, setAiSettings] = useState(false);
+  const dialogNow = (): AgentDialog | null => {
+    if (confirm) return { kind: "message", title: confirm.title, lines: confirm.lines, ...(confirm.buttons ? { buttons: confirm.buttons.map((b) => b.label) } : {}) };
+    if (error) return { kind: "error", lines: [error] };
+    if (warning) return { kind: "warning", lines: warning };
+    if (sliderPrompt) return { kind: "sliders", title: "Create sliders? (OK creates them, Cancel doesn't)", lines: sliderPrompt.names };
+    if (catalog) return { kind: "catalog" };
+    if (palette !== null) return { kind: "templates" };
+    if (menu) return { kind: "menu", lines: menu.items.map((it) => it.label) };
+    if (wizard)
+      return {
+        kind: "dialog",
+        title: wizard.wizard.title,
+        fields: wizard.wizard.fields.map((f, i) => ({ label: f.label, value: wizard.values[i] ?? "", ...(f.check ? { options: ["Yes", "No"] } : f.options && !f.free ? { options: f.options } : {}) })),
+      };
+    if (finance) return { kind: "finance", lines: FINANCE_NAMES.map((n, i) => `${n}: ${finance.values[i] ?? ""}`) };
+    return null;
+  };
+  const agentHost = useRef<AgentHost>(null!);
+  agentHost.current = {
+    snapshot: () => ({
+      view,
+      doc,
+      path: openPath,
+      scratch: isScratch,
+      dirty,
+      settings,
+      engine: status,
+      busy: busy.current,
+      dialog: dialogNow(),
+      menu: menu?.items ?? null,
+      // The pages' own copies of their curves (g12f1_) are plumbing, not the student's variables.
+      variables: [...new Set((engine.current?.saved ?? []).filter((d) => !/^g\d+[frxyd]\d+_/.test(d)))],
+      files: fileList.map((f) => ({ path: f.path, type: f.type, size: f.size })),
+      python: { status: py.status, prompt: py.prompt },
+      highlights: liveHighlights(doc, highlights),
+    }),
+    key: handleKey,
+    keys: handleKeys,
+    pick: (action) => {
       setMenu(null);
-      latest.current.runAction(r.action);
-      for (const k of way.then ?? []) {
-        await wait(still ? 30 : 350);
-        latest.current.handleKey(k);
+      runAction(action);
+    },
+    newDoc: async (first) => {
+      creatingNew.current = false;
+      setMenu(null);
+      await newDoc(first);
+    },
+    openFile,
+    save: async (name) => (name ? wizardDone(`saveas:${name}`) : saveDocument()),
+    discard: () => {
+      setDirty(false);
+      current.current.dirty = false;
+    },
+    close: async () => {
+      setMenu(null);
+      if (isScratch) setView("home");
+      else await closeDocument();
+    },
+    addPage,
+    selectPage: (i) => {
+      setDoc((d) => ({ ...d, active: Math.max(0, Math.min(d.pages.length - 1, i)) }));
+      setView("doc");
+    },
+    go: async (to) => {
+      setMenu(null);
+      if (to === "home") {
+        await writeNow();
+        setView("home");
+      } else if (to === "browse") {
+        await refreshFiles();
+        setView("browse");
+      } else if (to === "current") await openCurrent();
+      else await openScratchpad(to === "scratchGraph" ? "graphs" : "calculator");
+    },
+    graphEntry: (n) => {
+      const num = n ?? (page?.kind === "graphs" ? nextFree(page, takenFns) : 1);
+      setGraphs((g) => openEntry(g, num));
+      return num;
+    },
+    setListColumn: (col, ch) => {
+      if (page?.kind !== "lists") return "The active page isn't Lists & Spreadsheet.";
+      if (ch.name && !/^[a-zA-Z]\w*$/.test(ch.name)) return "A list name is letters, digits and _, starting with a letter.";
+      const cols = page.cols.slice();
+      while (cols.length <= col) cols.push({ cells: [] });
+      const c = { ...cols[col]! };
+      if (ch.name !== undefined) {
+        if (ch.name) c.name = ch.name.toLowerCase();
+        else delete c.name;
       }
-      if (way.menu === "addPage") {
-        await wait(250);
-        await draw();
+      if (ch.values) {
+        c.cells = ch.values.map((v) => v.trim());
+        delete c.formula;
+        delete c.values;
       }
-    } else if (way.kind === "type") {
-      latest.current.handleKey({ k: "text", text: way.text });
-    } else {
-      for (const k of way.play) {
-        latest.current.handleKey(k);
-        await wait(400);
+      if (ch.formula !== undefined) {
+        if (ch.formula.trim()) c.formula = `=${ch.formula.trim().replace(/^=/, "")}`;
+        else delete c.formula;
       }
-    }
-    await wait(60);
-    const after = latest.current.page;
-    shownLine.current = after?.kind === "calculator" ? JSON.stringify(after.edit.row) : null;
-  }, [say]);
+      cols[col] = c;
+      const next = { ...page, cols, edit: null };
+      setLists(() => next);
+      void recalcLists(next);
+      return null;
+    },
+    setPython: (source) => setPython((p) => ({ ...p, source })),
+    setGeometry: (fn) => setGeo(fn),
+    writeNotes: async (paragraphs, replace) => {
+      if (page?.kind !== "notes") return "The active page isn't Notes.";
+      const paras: NotesRun[][] = [];
+      for (const text of paragraphs) {
+        const runs: NotesRun[] = [];
+        // [[…]] is a maths box, worked out in order (so a box can use what an earlier one defined).
+        const bits = text.split(/\[\[([\s\S]*?)\]\]/);
+        for (let i = 0; i < bits.length; i++) {
+          const bit = bits[i]!;
+          if (i % 2) runs.push({ math: bit, out: (await notesEvaluate(bit, false)).text });
+          else if (bit) runs.push(bit);
+        }
+        paras.push(runs);
+      }
+      update("notes", (p) => ({ ...p, paras: replace ? paras : [...p.paras, ...paras] }));
+      return null;
+    },
+    runPython,
+    fillDialog: (values) => {
+      if (!wizard) return "No dialog with fields is open.";
+      const key = (l: string) => l.toLowerCase().replace(/[:.…]/g, "").trim();
+      const out = wizard.values.slice();
+      for (const [label, raw] of Object.entries(values)) {
+        const i = wizard.wizard.fields.findIndex((f) => key(f.label) === key(label));
+        const f = wizard.wizard.fields[i];
+        if (!f) return `No field "${label}". Fields: ${wizard.wizard.fields.map((x) => x.label).join(", ")}`;
+        let v = String(raw);
+        if (f.check) v = /^(yes|true|on|1)$/i.test(v) ? "Yes" : "No";
+        else if (f.options && !f.free) {
+          const o = f.options.find((x) => x.toLowerCase() === v.toLowerCase());
+          if (!o) return `"${f.label}" is one of: ${f.options.join(", ")}`;
+          v = o;
+        }
+        out[i] = v;
+      }
+      setWizard({ ...wizard, values: out, fresh: false });
+      return null;
+    },
+    wizardDone,
+    evaluate: async (text) => {
+      const e = engine.current;
+      if (!e) return { ok: false, text: "The engine isn't loaded." };
+      try {
+        const r = await evaluate(text, e.giac, { settings });
+        return r.ok ? { ok: true, text: r.outputText } : { ok: false, text: r.error };
+      } catch (err) {
+        return { ok: false, text: (err as Error).message };
+      }
+    },
+    screenshot: async () => {
+      // The screen wherever it is now: the calculator, or AI mode's live card. Hidden, it has no width.
+      const el = screenHost.firstElementChild as HTMLElement | null;
+      const w = el?.getBoundingClientRect().width ?? 0;
+      if (!el || w < 1) return null;
+      // About 960 px wide: enough to read the screen's text, small enough to send each time.
+      const blob = await screenPng(el, 960 / w);
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let bin = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    },
+    setHighlights: (hs) => {
+      setHighlights(hs ?? []);
+      say(highlightsSaid(latestDoc.current, hs ?? []));
+    },
+    analyzeGraph: async (spec) => {
+      const d = latestDoc.current;
+      const p = d.pages[d.active];
+      if (p?.kind === "graphs") await runGraphEffect(p, { analyze: spec });
+    },
+  };
+  // A tool holds its host across awaits: each call goes through to the newest render's, never a stale one.
+  const agentProxy = useMemo(() => new Proxy({} as AgentHost, { get: (_, k) => agentHost.current[k as keyof AgentHost] }), []);
+  const agent = useCallback(() => agentProxy, [agentProxy]);
+  useEffect(() => registerWebMcp(agent), [agent]);
+  // Which thread owns the open document. One calculator, many chats: a thread's document is set aside when it's left and put back when it's opened.
+  const docBinding = useRef<DocBinding>(null!);
+  const restoring = useRef<string | null>(null);
+  docBinding.current = {
+    snapshot: (thread) => {
+      const c = current.current;
+      return docOwnerRef.current === thread ? { doc: snapshot(), docPath: c.isScratch ? null : c.openPath } : null;
+    },
+    release: (thread, kept) => {
+      if (docOwnerRef.current !== thread) return;
+      own(null);
+      const c = current.current;
+      // Its changes are safe in the thread: the next chat can replace the document without asking to save it.
+      if (kept && !c.isScratch && c.dirty) {
+        setDirty(false);
+        c.dirty = false;
+        void writeNow();
+      }
+    },
+    restore: async (t) => {
+      if (docOwnerRef.current === t.id || restoring.current === t.id || (!t.doc && !t.docPath)) return;
+      const c = current.current;
+      if (!c.isScratch && c.dirty && docOwnerRef.current === null) {
+        // The student's own unsaved document stays; the chat shows no document until it's saved or closed.
+        toast(`Save or close "${c.doc.title}" to bring back this chat's document.`);
+        return;
+      }
+      restoring.current = t.id;
+      try {
+        const file = t.docPath ? await files.getFile(t.docPath) : undefined;
+        const r = restoreOf(t, file?.type === "file" ? file.doc : undefined);
+        if (!r) return;
+        await openSaved(r.saved, r.path, false, r.dirty);
+        if (r.path) remember(r.path);
+        own(t.id);
+      } finally {
+        restoring.current = null;
+      }
+    },
+    claim: (thread) => {
+      if (docOwnerRef.current !== thread) own(thread);
+    },
+    checkpoint: () => {
+      const c = current.current;
+      return {
+        saved: snapshot(),
+        path: c.isScratch ? null : c.openPath,
+        scratch: c.isScratch,
+        dirty: c.dirty,
+        owner: docOwnerRef.current,
+        view: view === "browse" ? "browse" : view === "doc" ? "doc" : "home",
+        cached: pref<unknown>("current", null),
+      };
+    },
+    clearHighlights: () => setHighlights([]),
+    rollback: async (cp, thread) => {
+      setHighlights([]);
+      await openSaved(cp.saved, cp.path, cp.scratch, cp.dirty);
+      // Home → Current goes back to what it was before the turn, not the document the turn made.
+      setPref("current", cp.cached);
+      own(cp.owner === thread ? thread : null);
+      if (cp.scratch) await writeNow();
+      if (cp.view !== "doc") {
+        if (cp.view === "browse") await refreshFiles();
+        setView(cp.view);
+      }
+    },
+  };
+  const binding = useCallback(() => docBinding.current, []);
+  const assistant = useAssistant(agent, binding);
+  // Back in AI mode with nothing open (a reload, say): the open chat's document comes back.
+  useEffect(() => {
+    if (ai === "immersive" && view !== "doc" && assistant.thread.doc) void docBinding.current.restore(assistant.thread);
+  }, [ai, assistant.thread.id, Boolean(assistant.thread.doc)]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const openFeedback = (kind: FeedbackKind | null = "wrong_answer") =>
-    setReport({
-      kind,
-      source: {
-        page: page?.kind === "graphs" ? "graphs" : "calculator",
-        entries: page?.kind === "calculator" ? page.history : [],
-        selected: page?.kind === "calculator" ? (page.sel?.entry ?? null) : null,
-        settings,
-      },
-    });
-
+  // The screen lives in its own element, moved (never remounted) between the
+  // calculator and AI mode's live view, where the agent's work is watched.
+  const [screenHost] = useState(() => {
+    const el = document.createElement("div");
+    el.dataset.casScreenHost = "";
+    el.className = "w-full";
+    return el;
+  });
+  const [liveSlot, setLiveSlot] = useState<HTMLElement | null>(null);
+  const onLiveSlot = useCallback((el: HTMLDivElement | null) => setLiveSlot(el), []);
+  useLayoutEffect(() => {
+    const to = liveSlot ?? screenBox.current;
+    if (to && screenHost.parentElement !== to) to.appendChild(screenHost);
+  });
+  const pageNames = doc.pages.map((p, i) => `${pageLabel(doc, i)} ${PAGE_APPS[p.kind]}`);
+  const docInfo = {
+    open: ownsOpenDoc(docOwner, assistant.thread.id, view === "doc" || !isScratch),
+    title: isScratch ? "Scratchpad" : doc.title,
+    pages: pageNames,
+    dirty: !isScratch && dirty,
+    saved: !isScratch && Boolean(openPath),
+    highlights: view === "doc" ? shownHighlights.length : 0,
+  };
+  const docActions: DocActions = {
+    open: () => {
+      setAi("panel");
+      if (view !== "doc") void openCurrent();
+    },
+    download: () => runAction({ kind: "app", id: "fileDownload" }),
+    save: () => void saveDocument(),
+    clearHighlights: () => {
+      setHighlights([]);
+      say("Highlights cleared.");
+    },
+    // A page named in a reply ("1.2 Graphs"): that page, on the calculator.
+    openPage: (i) => {
+      agentHost.current.selectPage(i);
+      setAi("panel");
+    },
+  };
   return (
     <>
-      {/* The page's heading with "How do I…" beside it, as a tool page sets its actions. As wide as the calculator below at its largest: the keypad, the gap and the screen (sizes from the row below). */}
-      <div className={cn(DEVICE_WIDTH, "mb-[32px] flex items-center justify-between gap-[16px] max-[600px]:mb-[20px]")}>
-        <h1 className="display-md m-0 text-ink">CAS</h1>
-        {/* After Show me, the command's syntax: beside the field on wide screens, on its own line below on narrow ones. */}
-        {hint && <SyntaxHint text={hint} onHide={() => setHint(null)} className="ml-auto hidden lg:flex" />}
-        {/* Feedback beside "How do I…": its menu names the three kinds, so it reads as more than wrong answers. On phones the bar takes the row; the link under the screen stands in. */}
-        <FeedbackMenu onPick={openFeedback} />
-        <HowToBar
-          onShow={(entry) => void showMe(entry)}
-          onPaste={(text) => {
-            setHint(null);
-            root.current?.focus({ preventScroll: true });
-            handleKey({ k: "paste", text });
-          }}
-        />
-      </div>
-      {hint && (
-        <SyntaxHint text={hint} onHide={() => setHint(null)} className="mx-auto -mt-[12px] mb-[12px] max-w-[34rem] justify-between lg:hidden" />
-      )}
+    {/* On a wide window the calculator moves aside for the assistant rather than sitting under it; AI mode puts it away. */}
+    <div className={cn(DEVICE_WIDTH, aiOpen && "ai-open", ai === "immersive" && "hidden")}>
+      <header className="mb-4 flex items-center justify-between gap-3 px-1">
+        <span className="text-[17px] font-semibold tracking-[-0.019em] text-ink">Axiom</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAi((a) => (a === "panel" ? "off" : "panel"))}
+            aria-expanded={aiOpen}
+            className="flex h-8 items-center gap-1.5 rounded-full border border-white/[0.07] bg-white/[0.02] px-3 text-[13px] font-medium text-neutral-400 transition-[color,background-color,border-color,scale] duration-150 ease-out outline-none hover:border-white/15 hover:bg-white/[0.05] hover:text-neutral-100 focus-visible:ring-2 focus-visible:ring-focus/60 active:scale-[0.97] aria-expanded:border-white/15 aria-expanded:bg-white/[0.06] aria-expanded:text-neutral-100"
+          >
+            <Sparkles size={14} aria-hidden />
+            Assistant
+          </button>
+          <EnginePill status={status} />
+        </div>
+      </header>
+      <ScaleIn>
       <div
         ref={root}
         tabIndex={0}
@@ -1539,7 +2833,9 @@ export function CasApp() {
         aria-describedby="cas-help"
         onKeyDown={onKeyDown}
         onPaste={onPaste}
-        onMouseDown={() => {
+        onMouseDown={(e) => {
+          // A click in the Python editor keeps its own focus (and caret).
+          if ((e.target as HTMLElement).closest("[data-py-editor]")) return;
           pointerFocus.current = true;
           root.current?.focus({ preventScroll: true });
         }}
@@ -1549,12 +2845,13 @@ export function CasApp() {
           setKeyboardFocus(false);
         }}
         className={cn(
-          // Phones and narrow windows: the screen over the keypad, like the
-          // handheld. Wide windows: a large screen with the keypad in a panel to
-          // its left, like the computer software.
-          "mx-auto max-w-[34rem] outline-none lg:flex lg:max-w-none lg:flex-row-reverse lg:items-start lg:justify-center lg:gap-6",
-          keyboardFocus && "ring-2 ring-accent ring-offset-4 ring-offset-bg",
+          // One device body. Phones and narrow windows: the screen over the
+          // keypad, like the handheld. Wide windows: the keypad beside a large
+          // screen, both sized to fit the window's height.
+          "rounded-[28px] border border-white/[0.07] bg-casBody p-[10px] shadow-[0_4px_24px_-4px_rgba(0,0,0,0.5),0_40px_80px_-32px_rgba(0,0,0,0.8),inset_0_1px_0_0_rgba(255,255,255,0.06)] outline-hidden lg:flex lg:flex-row-reverse lg:items-center lg:gap-5 lg:p-5",
+          keyboardFocus && "ring-2 ring-focus ring-offset-4 ring-offset-bg",
         )}
+        style={{ ["--axiom-text" as string]: TEXT_SCALE[setup.text] }}
       >
         <DefinedNames.Provider value={defined}>
           <p id="cas-help" className="sr-only">
@@ -1572,12 +2869,25 @@ export function CasApp() {
           <div
             ref={screenBox}
             data-cas-screen
-            className="sticky top-[64px] z-10 border-4 border-casBody lg:static lg:min-w-0 lg:max-w-[calc((100vh-11rem)*4/3)] lg:flex-1 [@media(max-height:499px)]:static"
+            className="sticky top-2 z-10 overflow-hidden rounded-[4px] ring-1 ring-black lg:static lg:min-w-0 lg:max-w-[calc(var(--cas-h)*4/3)] lg:flex-1 [@media(max-height:499px)]:static"
           >
+            {createPortal(
             <Screen
-              pageLabels={doc.pages.map((_, i) => pageLabel(doc, i))}
+              variant={view === "new" ? "doc" : view}
+              pageLabels={view === "doc" ? doc.pages.map((_, i) => pageLabel(doc, i)) : []}
               active={doc.active}
-              title={doc.title}
+              title={view === "home" ? "Axiom" : view === "browse" ? "My Documents" : view === "new" ? "Untitled" : `${dirty ? "*" : ""}${doc.title}`}
+              onClose={() => {
+                // X closes the document (Save / No / Cancel first when it has changes) and goes back
+                // to where it was opened from; My Documents goes Home.
+                if (view === "doc") leaveDocument();
+                else {
+                  // New's page menu was already past the save question: just go back.
+                  setMenu(null);
+                  creatingNew.current = false;
+                  setView(view === "new" ? backTo.current : "home");
+                }
+              }}
               angle={settings.angle === "rad" ? "RAD" : "DEG"}
               onSelectPage={(i) => setDoc((d) => ({ ...d, active: i }))}
               onToggleAngle={() => {
@@ -1605,14 +2915,17 @@ export function CasApp() {
                       onFocus={(i) => setFinance((f) => (f ? { ...f, focus: i, fresh: true } : f))}
                     />
                   )}
+                  <AnimatePresence>
                   {menu && (
                     <MenuOverlay
+                      key="menu"
                       menu={menu.items}
                       state={menu.state}
                       onPick={pickMenu}
                       onHover={(path) => setMenu((m) => (m ? { ...m, state: { ...m.state, path } } : m))}
                     />
                   )}
+                  </AnimatePresence>
                   {catalog && (
                     <CatalogOverlay state={catalog} onChange={setCatalog} onKey={handleKey} onResult={catalogResult} />
                   )}
@@ -1627,6 +2940,24 @@ export function CasApp() {
                     />
                   )}
                   {error && <ErrorDialog message={error} onClose={() => setError(null)} />}
+                  {confirm && (
+                    <MessageDialog
+                      title={confirm.title}
+                      lines={confirm.lines}
+                      onClose={() => {
+                        setConfirm(null);
+                        confirm.ok();
+                      }}
+                      onCancel={confirm.title === "Status" || confirm.lines[0]?.startsWith("This") ? undefined : () => setConfirm(null)}
+                      buttons={confirm.buttons?.map((b) => ({
+                        label: b.label,
+                        run: () => {
+                          setConfirm(null);
+                          b.run();
+                        },
+                      }))}
+                    />
+                  )}
                   {warning && <MessageDialog title="Warning" lines={warning} onClose={() => setWarning(null)} />}
                   {sliderPrompt && (
                     <SliderPrompt
@@ -1643,9 +2974,65 @@ export function CasApp() {
                 </>
               }
             >
-              {page?.kind === "calculator" && (
+              {view === "home" && <HomeScreen sel={homeSel} hasRecent={recent.length > 0} hasCurrent={!isScratch || Boolean(pref<Cached | null>("current", null))} onPick={(s, act) => {
+                setHomeSel(s);
+                homeAction(act);
+              }} />}
+              {view === "browse" && (
+                <BrowseScreen
+                  rows={rows}
+                  state={browse}
+                  onSelect={(i) => setBrowse((b) => ({ ...b, sel: i }))}
+                  onOpen={(i) => {
+                    const r = rows[i];
+                    if (!r) return;
+                    setBrowse((b) => ({ ...b, sel: i, ...(r.folder ? { open: b.open.includes(r.path) ? b.open.filter((p) => p !== r.path) : [...b.open, r.path] } : {}) }));
+                    if (!r.folder) void openFile(r.path);
+                  }}
+                />
+              )}
+              {view === "doc" && page?.kind === "lists" && <ListsApp page={page} highlights={pageHighlights} onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))} />}
+              {view === "doc" && page?.kind === "notes" && (
+                <NotesApp
+                  page={page}
+                  apiRef={notesApi}
+                  onChange={(paras) => update("notes", (p) => ({ ...p, paras }))}
+                  evaluate={notesEvaluate}
+                />
+              )}
+              {view === "doc" && page?.kind === "datastats" && (
+                <DataStatsApp
+                  page={page}
+                  giac={engine.current?.giac ?? null}
+                  ready={status === "ready" || status === "busy"}
+                  toGiac={(text) => translate(parse(text), settings).giac}
+                  onAxis={(axis) => runAction({ kind: "app", id: `dsAxis:${axis}` })}
+                  onMovable={(m, b) => setData((p) => (p.movable ? { ...p, movable: { ...p.movable, m, b } } : p))}
+                  onWindow={(w) => (dataWindow.current = w)}
+                />
+              )}
+              {view === "doc" && page?.kind === "geometry" && <GeometryApp page={page} highlights={pageHighlights} onChange={setGeo} onError={setError} onAsk={askGeoAmount} />}
+              {view === "doc" && page?.kind === "unsupported" && <UnsupportedApp page={page} />}
+              {view === "doc" && page?.kind === "python" && (
+                <PythonEditor
+                  page={page}
+                  onChange={(source) => setPython((p) => ({ ...p, source }))}
+                  editorRef={(el) => {
+                    pyEditor.current = el;
+                  }}
+                />
+              )}
+              {view === "doc" && page?.kind === "pyshell" && (
+                <>
+                  <PythonShell page={page} prompt={py.prompt} status={py.status} />
+                  {/* The drawing steps aside while input() waits for an answer in the Shell. */}
+                  {py.canvas && py.prompt === null && <PythonCanvas ops={py.canvas} />}
+                </>
+              )}
+              {view === "doc" && page?.kind === "calculator" && (
                 <CalculatorApp
                   page={page}
+                  highlights={pageHighlights}
                   onPick={(entry, part, paste) =>
                     setCalc((p) => {
                       const q = { ...p, sel: { entry, part } };
@@ -1658,9 +3045,10 @@ export function CasApp() {
                   onSelect={(a, b) => setCalc((p) => ({ ...p, sel: null, edit: selectBetween(p.edit, a, b) }))}
                 />
               )}
-              {page?.kind === "graphs" && (
+              {view === "doc" && page?.kind === "graphs" && (
                 <GraphsApp
                   page={page}
+                  highlights={pageHighlights}
                   giac={engine.current?.giac ?? null}
                   ready={status === "ready" || status === "busy"}
                   onSamples={(s) => (samples.current = s)}
@@ -1722,241 +3110,148 @@ export function CasApp() {
                   onSelect={(a, b) => setGraphs((g) => ({ ...g, edit: selectBetween(g.edit, a, b) }))}
                 />
               )}
-              {status === "loading" && <Notice>Loading</Notice>}
-              {status === "failed" && <Notice>The maths engine didn&apos;t load. Reload the page to try again.</Notice>}
-            </Screen>
+              {status === "loading" && (
+                <Notice>
+                  <TextShimmer className="text-casLabel">Loading</TextShimmer>
+                </Notice>
+              )}
+              {status === "failed" && (
+                <Notice>
+                  The maths engine didn&apos;t load{engine.current?.lastError ? ` (${engine.current.lastError})` : ""}. Reload the page to try again.
+                </Notice>
+              )}
+            </Screen>,
+            screenHost,
+            )}
           </div>
-          <div className="[container-type:inline-size] lg:w-[min(21rem,calc((100vh-11rem)/2))] lg:shrink-0">
+          <div className="@container lg:w-[min(24rem,calc(var(--cas-h)/2.1))] lg:shrink-0">
             <Keypad
-              onKey={handleKey}
-              onKeys={handleKeys}
-              onPanel={(p) => setMenu({ items: p.items, state: openMenu(p.cols) })}
-              onOpen={(o) => (o.open === "templates" ? setPalette(0) : setCatalog(openCatalog(o.tab)))}
+              onKey={(k) => {
+                haptic(k.k === "enter" ? "medium" : "light");
+                handleKey(k);
+              }}
+              onKeys={(ks) => {
+                haptic("light");
+                handleKeys(ks);
+              }}
+              onPanel={(p) => {
+                haptic("light");
+                setMenu({ items: p.items, state: openMenu(p.cols) });
+              }}
+              onOpen={(o) => {
+                haptic("light");
+                if (o.open === "templates") setPalette(0);
+                else setCatalog(openCatalog(o.tab));
+              }}
             />
           </div>
         </DefinedNames.Provider>
       </div>
-      {/* Under the screen, at its edges: on wide screens the column under the keypad is left empty. */}
-      <div className={cn(DEVICE_WIDTH, "mt-[16px] lg:grid lg:grid-cols-[min(21rem,calc((100vh-11rem)/2))_minmax(0,1fr)] lg:gap-x-6")}>
-        <div aria-hidden className="hidden lg:block" />
-        <div>
-          <ScreenBar
-            screen={() => screenBox.current?.firstElementChild as HTMLElement | null}
-            label={pageLabel(doc, doc.active)}
-            onClear={clearAll}
-          />
-          <div className="mt-[20px] space-y-[6px] text-sm text-inkMuted">
-            <p className="m-0">
-              Fine for everyday VCE maths. A few commands aren&apos;t here yet, and some answers come out in a slightly
-              different form to the handheld.
-            </p>
-            <Legal />
-            <button
-              type="button"
-              onClick={() => openFeedback(null)}
-              className="font-medium text-ink underline underline-offset-2 hover:text-accentPressed lg:hidden"
-            >
-              Send feedback
-            </button>
+      </ScaleIn>
+      <div className="mt-4 flex flex-col gap-3 px-1">
+        <ScreenBar
+          screen={() => screenHost.firstElementChild as HTMLElement | null}
+          label={pageLabel(doc, doc.active)}
+          onClear={clearAll}
+        />
+        <Legal />
+      </div>
+      <input
+        ref={uploadInput}
+        type="file"
+        multiple
+        accept=".tns,.zip,.py"
+        className="hidden"
+        onChange={(e) => {
+          void upload(Array.from(e.target.files ?? []));
+          e.target.value = "";
+        }}
+      />
+      {dragging && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs">
+          <div className="rounded-3xl border border-white/18 bg-[#181818] px-8 py-6 text-center text-[15px] font-medium text-neutral-200 shadow-[0_4px_24px_-4px_rgba(0,0,0,0.5)]">
+            Drop files to add them to My Documents
+            <div className="mt-1 text-[13px] text-neutral-500">.tns documents, .py programs, or a zip of a whole folder</div>
           </div>
         </div>
-      </div>
-      {report && <FeedbackDialog source={report.source} kind={report.kind} onClose={() => setReport(null)} />}
+      )}
+    </div>
+    <AiPanel open={aiOpen} onClose={() => setAi("off")} onImmersive={() => setAi("immersive")} onSettings={() => setAiSettings(true)} assistant={assistant} doc={docActions} info={docInfo} />
+    <AnimatePresence>
+      {ai === "immersive" && (
+        <AiMode
+          key="ai-mode"
+          assistant={assistant}
+          info={docInfo}
+          doc={docActions}
+          onExit={() => setAi("panel")}
+          onSettings={() => setAiSettings(true)}
+          onLiveSlot={onLiveSlot}
+          onSaveAs={async (name) => {
+            wizardDone(`saveas:${name}`);
+            await new Promise((r) => setTimeout(r, 300));
+          }}
+        />
+      )}
+    </AnimatePresence>
+    <AssistantSettings open={aiSettings} onOpenChange={setAiSettings} config={assistant.config} setConfig={assistant.setConfig} />
     </>
   );
 }
 
-/**
- * Under the screen: copy or download a picture of it, for worked solutions,
- * and clear everything. The image is 3× the screen's size on the page, so it
- * stays sharp when printed. Copy is the one most used, so it's filled; Clear
- * all sits apart at the far edge, quiet until it asks for the second click
- * (the document is saved and undo doesn't reach it).
- */
-function ScreenBar({ screen, label, onClear }: { screen: () => HTMLElement | null; label: string; onClear: () => void }) {
-  const [status, setStatus] = useState("");
-  const [confirming, setConfirming] = useState(false);
-  useEffect(() => {
-    if (!confirming) return;
-    const t = setTimeout(() => {
-      setConfirming(false);
-      setStatus("");
-    }, 4000);
-    return () => clearTimeout(t);
-  }, [confirming]);
-  useEffect(() => {
-    if (status !== "Copied.") return;
-    const t = setTimeout(() => setStatus(""), 2500);
-    return () => clearTimeout(t);
-  }, [status]);
-  const clear = () => {
-    if (!confirming) {
-      setConfirming(true);
-      setStatus("Every page and variable will go.");
-      return;
-    }
-    setConfirming(false);
-    setStatus("");
-    onClear();
-  };
-  const take = async () => {
-    const el = screen();
-    if (!el) throw new Error("No screen");
-    return screenPng(el, 3);
-  };
-  const copy = async () => {
-    try {
-      const blob = await take();
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-      setStatus("Copied.");
-    } catch {
-      setStatus("Couldn't copy here. Download instead.");
-    }
-  };
-  const save = async () => {
-    try {
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
-      download(await take(), `cas-${label}-${stamp}.png`);
-      setStatus("");
-    } catch {
-      setStatus("Couldn't make the image.");
-    }
-  };
-  return (
-    <div className="flex flex-wrap items-center gap-x-[8px] gap-y-[12px]">
-      <Button variant="secondary" onClick={() => void copy()}>
-        <Copy aria-hidden="true" className="size-[16px]" />
-        Copy image
-      </Button>
-      {/* Icon only on phones, so the row still fits Clear all. */}
-      <Button variant="outline" onClick={() => void save()} className="max-sm:px-[14px]">
-        <Download aria-hidden="true" className="size-[16px]" />
-        <span className="max-sm:sr-only">Download PNG</span>
-      </Button>
-      <p role="status" className="m-0 ml-[8px] text-sm text-inkMuted empty:hidden max-sm:order-last max-sm:ml-0 max-sm:basis-full">
-        {status}
-      </p>
-      <button
-        type="button"
-        onClick={clear}
-        className={cn(
-          "ml-auto inline-flex min-h-[44px] items-center gap-[8px] rounded-card px-[12px] text-[15px] tracking-[0.01em] transition-colors duration-fast",
-          confirming ? "border border-signalRed font-medium text-signalRed" : "text-inkMuted hover:text-ink",
-        )}
-      >
-        <Trash2 aria-hidden="true" className="size-[16px]" />
-        {confirming ? "Clear everything" : "Clear all"}
-      </button>
-    </div>
-  );
+/** Whether Esc has something to cancel on the page (a selection, a tool, an entry line, a cell, a running program). */
+function pageTakesEsc(page: Page | undefined, py: { status: PyStatus; canvas: DrawOp[] | null }): boolean {
+  switch (page?.kind) {
+    case "calculator":
+      return page.sel !== null;
+    case "graphs":
+      return page.tool !== null || page.editing !== null;
+    case "geometry":
+      return Boolean(page.tool || page.sel);
+    case "lists":
+      return page.edit !== null;
+    case "pyshell":
+      return py.status === "running" || py.canvas !== null || page.input !== "";
+    default:
+      return false;
+  }
 }
 
-function Notice({ children }: { children: ReactNode }) {
-  return (
-    <div className="pointer-events-none absolute bottom-[1.5cqw] right-[3.5cqw] text-[2.8cqw] text-casLabel">
-      {children}
-    </div>
-  );
-}
+const PAGE_APPS: Record<Page["kind"], string> = {
+  calculator: "Calculator",
+  graphs: "Graphs",
+  lists: "Lists & Spreadsheet",
+  datastats: "Data & Statistics",
+  python: "Python",
+  pyshell: "Python Shell",
+  notes: "Notes",
+  geometry: "Geometry",
+  unsupported: "Unsupported",
+};
 
-/** The handheld's error box: a centred panel with the message and OK. */
-type SliderAsk = { names: string[]; on: boolean[]; focus: number };
-
-/**
- * Create Sliders, after graphing with variables that have no value: a box
- * for each, all ticked. Space or a click ticks and unticks, the arrows move
- * between boxes, Enter is OK.
- */
-function SliderPrompt({
-  ask,
-  onToggle,
-  onAnswer,
-}: {
-  ask: SliderAsk;
-  onToggle: (i: number) => void;
-  onAnswer: (yes: boolean) => void;
-}) {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center font-casui text-[3.9cqw]">
-      <div className="relative">
-        <div aria-hidden className="absolute inset-0 translate-x-[0.6cqw] translate-y-[0.6cqw] bg-casRule" />
-        <div role="dialog" aria-label="Create Sliders" className="relative border border-casRule bg-casScreen px-[2cqw] py-[1.6cqw]">
-          <div className="pb-[2.4cqw] text-[4.3cqw] font-bold">Create Sliders</div>
-          <div className="pb-[1.4cqw] text-casLabel">Create a slider for:</div>
-          {ask.names.map((n, i) => (
-            <button
-              key={n}
-              type="button"
-              tabIndex={-1}
-              role="checkbox"
-              aria-checked={ask.on[i]}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onToggle(i)}
-              className={cn(
-                "mb-[1.2cqw] flex items-center gap-[1.4cqw] border-[0.4cqw] p-[0.6cqw] text-casLabel",
-                i === ask.focus ? "border-casSelect" : "border-transparent",
-              )}
-            >
-              <CheckBox on={Boolean(ask.on[i])} />
-              {n}
-            </button>
-          ))}
-          <div className="flex justify-end gap-[2cqw] pt-[1cqw]">
-            <button
-              type="button"
-              tabIndex={-1}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onAnswer(true)}
-              className="border-[0.25cqw] border-casRule px-[4.4cqw] py-[1cqw]"
-            >
-              OK
-            </button>
-            <button
-              type="button"
-              tabIndex={-1}
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => onAnswer(false)}
-              className="px-[2cqw] py-[1cqw]"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * The handheld's Error and Warning boxes: bold title, the message in grey (a
- * blank line between paragraphs), a centred blue OK, the box sized to its
- * text.
- * A long message scrolls between two rules, one under the title and one
- * over the OK.
- */
-function MessageDialog({ title, lines, onClose }: { title: string; lines: string[]; onClose: () => void }) {
-  return (
-    <div className="absolute inset-0 flex items-center justify-center bg-casInk/20">
-      <div
-        role="alertdialog"
-        aria-label={title}
-        className="flex max-h-[90%] min-w-[40%] max-w-[92%] flex-col border border-casInk bg-casScreen font-casui text-[3.3cqw]"
-      >
-        <div className="px-[2.4cqw] pt-[1.6cqw] text-[3.8cqw] font-bold text-casInk">{title}</div>
-        <div className={cn("overflow-y-auto px-[2.4cqw] py-[2cqw] text-casLabel", lines.length > 3 && "mt-[1cqw] border-y border-casRule")}>
-          {lines.map((l, i) => (l ? <p key={i}>{l}</p> : <p key={i} aria-hidden className="h-[1lh]" />))}
-        </div>
-        <div className="flex justify-center py-[1.6cqw]">
-          <button type="button" onClick={onClose} className="bg-casSelect px-[5cqw] py-[1cqw] text-casScreen">
-            OK
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ErrorDialog({ message, onClose }: { message: string; onClose: () => void }) {
-  const [title, ...rest] = message.split(": ");
-  return <MessageDialog title={title ?? message} lines={[rest.join(": ") || message]} onClose={onClose} />;
-}
+/** The menu key in the Python editor and Shell. */
+const PYTHON_MENU: Menu = [
+  menuApp("Run", "pyRun"),
+  {
+    label: "Built-ins",
+    items: [
+      { label: "def function():", action: { kind: "insert", text: "def f(x):\n    return " } },
+      { label: "if..", action: { kind: "insert", text: "if :\n    " } },
+      { label: "for index in range(size):", action: { kind: "insert", text: "for i in range(10):\n    " } },
+      { label: "while..", action: { kind: "insert", text: "while :\n    " } },
+      { label: "print()", action: { kind: "insert", text: "print()" } },
+      { label: "input()", action: { kind: "insert", text: "input()" } },
+    ],
+  },
+  {
+    label: "Modules",
+    items: [
+      { label: "from math import *", action: { kind: "insert", text: "from math import *\n" } },
+      { label: "from random import *", action: { kind: "insert", text: "from random import *\n" } },
+      { label: "from ti_system import *", action: { kind: "insert", text: "from ti_system import *\n" } },
+      { label: "from ti_draw import *", action: { kind: "insert", text: "from ti_draw import *\n" } },
+      { label: "import ti_plotlib as plt", action: { kind: "insert", text: "import ti_plotlib as plt\n" } },
+    ],
+  },
+];
+const SHELL_MENU: Menu = [menuApp("Clear History", "pyClear")];

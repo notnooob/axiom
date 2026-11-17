@@ -38,7 +38,11 @@ export type Key =
   | { k: "redo" }
   | { k: "selectLeft" }
   | { k: "selectRight" }
-  | { k: "paste"; text: string };
+  | { k: "paste"; text: string }
+  /** The handheld's home key (Ctrl+H), the scratchpad key, and ctrl+scratchpad: save (Ctrl+S). */
+  | { k: "homeScreen" }
+  | { k: "scratchpad" }
+  | { k: "save" };
 
 /** Keyboard → Key, following the handheld's computer software where it has a shortcut. */
 export function keyFromEvent(e: KeyboardEvent | ReactKeyboardEvent): Key | null {
@@ -73,6 +77,10 @@ export function keyFromEvent(e: KeyboardEvent | ReactKeyboardEvent): Key | null 
         return e.shiftKey ? { k: "redo" } : { k: "undo" };
       case "y":
         return { k: "redo" };
+      case "h":
+        return { k: "homeScreen" };
+      case "s":
+        return { k: "save" };
       default:
         return null;
     }

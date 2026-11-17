@@ -91,13 +91,13 @@ export function WizardDialog({
   // A box floating over the page, as on the handheld, with a flat offset shadow.
   return (
     <div className="absolute inset-0 flex items-start justify-center py-[3.4cqw] font-casui text-[3.9cqw]">
-      <div className="relative flex max-h-full w-[76%]">
+      <div className="relative flex max-h-full w-[76%] animate-pop">
         <div aria-hidden className="absolute inset-0 translate-x-[0.6cqw] translate-y-[0.6cqw] bg-casRule" />
         <div role="dialog" aria-label={state.wizard.title} className="relative flex min-h-0 w-full flex-col border border-casRule bg-casScreen">
           <div className="px-[2cqw] pb-[2.4cqw] pt-[1.6cqw] text-[4.3cqw] font-bold">{state.wizard.title}</div>
           <div
             ref={fields}
-            className="relative grid min-h-0 grid-cols-[auto_1fr] items-center gap-x-[2cqw] gap-y-[1.8cqw] overflow-y-auto px-[2cqw] py-[0.4cqw] [scrollbar-width:thin]"
+            className="relative grid min-h-0 grid-cols-[auto_1fr] items-center gap-x-[2cqw] gap-y-[1.8cqw] overflow-y-auto px-[2cqw] py-[0.4cqw] scrollbar-thin"
           >
             {state.wizard.fields.map((f, i) =>
               f.check ? (

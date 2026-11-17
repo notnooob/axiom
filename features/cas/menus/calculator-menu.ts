@@ -31,6 +31,9 @@ const regWizard = (title: string, command: string): MenuItem =>
   );
 
 /** Distributions, under both Probability and Statistics. */
+/** The F distribution's two degrees of freedom, as its wizards ask for them. */
+const F_DF = [{ label: "Numerator df:" }, { label: "Denominator df:" }];
+
 const DISTRIBUTIONS: MenuItem[] = [
   wiz("Normal Pdf...", "Normal Pdf", [{ label: "X Value:" }, ...MU_SIGMA], "normPdf({0},{1},{2})"),
   wiz(
@@ -48,9 +51,14 @@ const DISTRIBUTIONS: MenuItem[] = [
     "tCdf({0},{1},{2})",
   ),
   wiz("Inverse t...", "Inverse t", [{ label: "Area:" }, { label: "Deg of Freedom, df:" }], "invt({0},{1})"),
-  off("χ² Pdf..."),
-  off("χ² Cdf..."),
-  off("Inverse χ²..."),
+  wiz("χ² Pdf...", "χ² Pdf", [{ label: "X Value:" }, { label: "Deg of Freedom, df:" }], "χ²Pdf({0},{1})"),
+  wiz(
+    "χ² Cdf...",
+    "χ² Cdf",
+    [{ label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }, { label: "Deg of Freedom, df:" }],
+    "χ²Cdf({0},{1},{2})",
+  ),
+  wiz("Inverse χ²...", "Inverse χ²", [{ label: "Area:" }, { label: "Deg of Freedom, df:" }], "invχ²({0},{1})"),
   wiz(
     "Binomial Pdf...",
     "Binomial Pdf",
@@ -80,9 +88,9 @@ const DISTRIBUTIONS: MenuItem[] = [
     [{ label: "Cumulative Prob:" }, { label: "Prob Success, p:" }, { label: "Successes, x:" }],
     "invBinomN({0},{1},{2})",
   ),
-  off("F Pdf..."),
-  off("F Cdf..."),
-  off("Inverse F..."),
+  wiz("F Pdf...", "F Pdf", [{ label: "X Value:" }, ...F_DF], "FPdf({0},{1},{2})"),
+  wiz("F Cdf...", "F Cdf", [{ label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }, ...F_DF], "FCdf({0},{1},{2},{3})"),
+  wiz("Inverse F...", "Inverse F", [{ label: "Area:" }, ...F_DF], "invF({0},{1},{2})"),
   wiz("Geometric Pdf...", "Geometric Pdf", [{ label: "Prob Success, p:" }, { label: "X Value:" }], "geomPdf({0},{1})"),
   wiz(
     "Geometric Cdf...",
@@ -106,11 +114,11 @@ export const calculatorMenu: Menu = [
     rule(ins("Delete Variable", "DelVar ")),
     app("Clear a-z...", "clearAZ"),
     app("Clear History", "clearHistory"),
-    rule(off("Insert Comment")),
+    rule(ins("Insert Comment", "©")),
     rule(
       sub("Library", [
         off("Refresh Libraries"),
-        off('Insert "\\" character'),
+        ins('Insert "\\" character', "\\"),
         off("Create Library Shortcut"),
         off("Define LibPriv"),
         off("Define LibPub (Show in Catalog)"),
@@ -278,10 +286,10 @@ export const calculatorMenu: Menu = [
       ),
       regWizard("Linear Regression (mx+b)", "LinRegMx"),
       regWizard("Linear Regression (a+bx)", "LinRegBx"),
-      off("Median-Median Line..."),
+      regWizard("Median-Median Line", "MedMed"),
       regWizard("Quadratic Regression", "QuadReg"),
-      off("Cubic Regression..."),
-      off("Quartic Regression..."),
+      regWizard("Cubic Regression", "CubicReg"),
+      regWizard("Quartic Regression", "QuartReg"),
       regWizard("Power Regression", "PowerReg"),
       regWizard("Exponential Regression", "ExpReg"),
       regWizard("Logarithmic Regression", "LnReg"),
@@ -291,7 +299,7 @@ export const calculatorMenu: Menu = [
       off("Multiple Linear Regression..."),
       off("Correlation Matrix"),
     ]),
-    off("Stat Results"),
+    ins("Stat Results", "stat.results"),
     sub("List Math", [
       ins("Minimum", "min("),
       ins("Maximum", "max("),
@@ -326,7 +334,12 @@ export const calculatorMenu: Menu = [
         [{ label: "σ:" }, { label: "x̄:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
         "zInterval {0},{1},{2},{3}",
       ),
-      off("t Interval..."),
+      wiz(
+        "t Interval...",
+        "t Interval",
+        [{ label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
+        "tInterval {0},{1},{2},{3}",
+      ),
       off("2-Sample z Interval..."),
       off("2-Sample t Interval..."),
       wiz(
@@ -353,10 +366,20 @@ export const calculatorMenu: Menu = [
         ],
         "zTest {0},{1},{2},{3},{4}",
       ),
-      off("t Test..."),
+      wiz(
+        "t Test...",
+        "t Test",
+        [{ label: "μ0:" }, { label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
+        "tTest {0},{1},{2},{3},{4}",
+      ),
       off("2-Sample z Test..."),
       off("2-Sample t Test..."),
-      off("1-Prop z Test..."),
+      wiz(
+        "1-Prop z Test...",
+        "1-Prop z Test",
+        [{ label: "p0:" }, { label: "Successes, x:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
+        "zTest_1Prop {0},{1},{2},{3}",
+      ),
       off("2-Prop z Test..."),
       off("χ² GOF..."),
       off("χ² 2-way Test..."),
@@ -422,20 +445,20 @@ export const calculatorMenu: Menu = [
     app("Finance Solver...", "financeSolver"),
     rule(
       sub("TVM Functions", [
-        off("Number of Periods"),
-        off("Interest Rate per Year"),
-        off("Present Value"),
-        off("Payment Amount"),
-        off("Future Value"),
+        ins("Number of Periods", "tvmN("),
+        ins("Interest Rate per Year", "tvmI("),
+        ins("Present Value", "tvmPV("),
+        ins("Payment Amount", "tvmPmt("),
+        ins("Future Value", "tvmFV("),
       ]),
     ),
-    sub("Amortization", [off("Amortization Table"), off("Balance"), off("Interest Paid"), off("Principal Paid")]),
+    sub("Amortization", [ins("Amortization Table", "amortTbl("), ins("Balance", "bal("), ins("Interest Paid", "ΣInt("), ins("Principal Paid", "ΣPrn(")]),
     sub("Cash Flows", [
-      off("Net Present Value"),
-      off("Internal Rate of Return"),
-      off("Modified Internal Rate of Return"),
+      ins("Net Present Value", "npv("),
+      ins("Internal Rate of Return", "irr("),
+      ins("Modified Internal Rate of Return", "mirr("),
     ]),
-    sub("Interest Conversion", [off("Nominal Interest Rate"), off("Effective Interest Rate")]),
+    sub("Interest Conversion", [ins("Nominal Interest Rate", "nom("), ins("Effective Interest Rate", "eff(")]),
     sub("Days between Dates", [off("Month Day Format"), off("Day Month Format")]),
   ]),
   sub("Functions & Programs", [

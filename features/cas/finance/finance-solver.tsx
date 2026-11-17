@@ -123,14 +123,14 @@ export function FinanceSolver({ state, onFocus }: { state: FinanceState; onFocus
     <div
       role="dialog"
       aria-label="Finance Solver"
-      className="absolute inset-0 flex flex-col bg-casScreen font-casui text-[3.9cqw]"
+      className="absolute inset-0 flex animate-fade flex-col bg-casScreen font-casui text-[3.9cqw]"
     >
       <div className="border-b-[0.25cqw] border-casRule px-[1.4cqw] pb-[1.2cqw] pt-[1.4cqw] text-[4.3cqw] font-bold">
         Finance Solver
       </div>
       <div
         ref={list}
-        className="relative grid min-h-0 flex-1 grid-cols-[auto_1fr] items-center gap-x-[2cqw] gap-y-[1.8cqw] overflow-y-auto py-[1.4cqw] pl-[2cqw] pr-[3cqw] [scrollbar-width:thin]"
+        className="relative grid min-h-0 flex-1 grid-cols-[auto_1fr] items-center gap-x-[2cqw] gap-y-[1.8cqw] overflow-y-auto py-[1.4cqw] pl-[2cqw] pr-[3cqw] scrollbar-thin"
       >
         {FIELDS.map((f, i) => {
           const focused = i === state.focus;

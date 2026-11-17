@@ -10,15 +10,19 @@ import { cn } from "@/shared/lib/utils";
  * the handheld scales.
  */
 export function Screen({
+  variant = "doc",
   pageLabels,
   active,
   title,
   angle,
   onSelectPage,
   onToggleAngle,
+  onClose,
   children,
   overlay,
 }: {
+  /** The home screen and My Documents have a plain bar: no page tabs. */
+  variant?: "doc" | "home" | "browse";
   pageLabels: string[];
   active: number;
   title: string;
@@ -26,19 +30,23 @@ export function Screen({
   onSelectPage: (i: number) => void;
   /** A click on RAD or DEG switches to the other. */
   onToggleAngle?: () => void;
+  /** The X: back to the home screen. */
+  onClose?: () => void;
   children: ReactNode;
   overlay?: ReactNode;
 }) {
   return (
-    <div className="relative aspect-[4/3] w-full select-none overflow-hidden bg-casScreen font-casui text-[3.4cqw] text-casInk [container-type:inline-size]">
+    <div className="relative aspect-4/3 w-full select-none overflow-hidden bg-casScreen font-casui text-[3.4cqw] text-casInk @container">
       <div className="absolute inset-0 flex flex-col">
         <TopBar
+          variant={variant}
           pageLabels={pageLabels}
           active={active}
           title={title}
           angle={angle}
           onSelectPage={onSelectPage}
           onToggleAngle={onToggleAngle}
+          onClose={onClose}
         />
         <div className="relative min-h-0 flex-1">{children}</div>
       </div>
@@ -50,19 +58,23 @@ export function Screen({
 const TABS_SHOWN = 3;
 
 function TopBar({
+  variant,
   pageLabels,
   active,
   title,
   angle,
   onSelectPage,
   onToggleAngle,
+  onClose,
 }: {
+  variant: "doc" | "home" | "browse";
   pageLabels: string[];
   active: number;
   title: string;
   angle: string;
   onSelectPage: (i: number) => void;
   onToggleAngle?: () => void;
+  onClose?: () => void;
 }) {
   // At most three tabs show at once; the window moves only when the active
   // page would leave it, as the handheld's tab strip does.
@@ -75,7 +87,8 @@ function TopBar({
   return (
     <div className="grid h-[8.4cqw] shrink-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end bg-casBar text-[3.4cqw] text-casScreen">
       <div className="flex h-full min-w-0 items-end pl-[0.8cqw]">
-        <Arrow dir="left" dim={active === 0} />
+        {variant === "home" && <HomeGlyph />}
+        {variant === "doc" && <Arrow dir="left" dim={active === 0} />}
         {pageLabels.slice(start, start + TABS_SHOWN).map((label, j) => {
           const i = start + j;
           return (
@@ -95,9 +108,9 @@ function TopBar({
             </button>
           );
         })}
-        <Arrow dir="right" dim={active === pageLabels.length - 1} />
+        {variant === "doc" && <Arrow dir="right" dim={active === pageLabels.length - 1} />}
       </div>
-      <div className="flex h-full max-w-[30cqw] items-center justify-center truncate px-[1cqw]">{title}</div>
+      <div className={cn("flex h-full max-w-[40cqw] items-center justify-center truncate px-[1cqw]", variant === "home" && "text-[4.6cqw] font-bold")}>{title}</div>
       <div className="flex h-full items-center justify-end gap-[1.2cqw] pr-[1.4cqw]">
         <button
           type="button"
@@ -109,11 +122,21 @@ function TopBar({
           {angle}
         </button>
         <Battery />
-        <svg aria-hidden viewBox="0 0 10 10" className="h-[3.2cqw] w-[3.2cqw]">
-          <path d="M1 1 L9 9 M9 1 L1 9" stroke="currentColor" strokeWidth={1} />
-        </svg>
+        <button type="button" tabIndex={-1} aria-label="Home" title="Home (Ctrl+H)" onMouseDown={(e) => e.preventDefault()} onClick={onClose}>
+          <svg aria-hidden viewBox="0 0 10 10" className="h-[3.2cqw] w-[3.2cqw]">
+            <path d="M1 1 L9 9 M9 1 L1 9" stroke="currentColor" strokeWidth={1} />
+          </svg>
+        </button>
       </div>
     </div>
+  );
+}
+
+function HomeGlyph() {
+  return (
+    <svg aria-hidden viewBox="0 0 12 12" className="mb-[1.6cqw] ml-[1cqw] h-[5cqw] w-[5cqw]">
+      <path d="M1 6.2 L6 1.6 L11 6.2 M2.6 5 L2.6 10.6 L9.4 10.6 L9.4 5 M5 10.6 L5 7.6 L7 7.6 L7 10.6" fill="none" stroke="currentColor" strokeWidth="0.9" />
+    </svg>
   );
 }
 

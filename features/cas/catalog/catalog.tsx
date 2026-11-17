@@ -180,7 +180,7 @@ export function CatalogOverlay({
     <div
       role="dialog"
       aria-label="Catalog"
-      className="absolute inset-0 flex flex-col bg-casScreen font-casui text-[3.9cqw]"
+      className="absolute inset-0 flex animate-fade flex-col bg-casScreen font-casui text-[3.9cqw]"
     >
       <div role="tablist" className="flex h-[10cqw] shrink-0 items-end gap-[0.4cqw] bg-casRowAlt pl-[1.2cqw]">
         {TABS.map((t) => (
@@ -211,7 +211,7 @@ export function CatalogOverlay({
             ref={list}
             role="listbox"
             aria-label="Commands"
-            className="min-h-0 flex-1 overflow-y-auto border border-casDim [scrollbar-width:thin]"
+            className="min-h-0 flex-1 overflow-y-auto border border-casDim scrollbar-thin"
           >
             {CATALOG.map((e, i) => (
               <button

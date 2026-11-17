@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
 import { useLayoutEffect, useRef } from "react";
+import { motion } from "framer-motion";
 import { cn } from "@/shared/lib/utils";
+import { presets } from "@/src/lib/presets";
+import { AppIcon } from "../files/home";
 import type { Key } from "../keys";
 import { isEnabled, menuIndexForKey, menuKey, type Menu, type MenuAction, type MenuItem } from "./types";
+
+/** amicro motion: lists open in 200ms from their top-left corner, close in 140ms. */
+const EASE = [0.16, 1, 0.3, 1] as const;
+const OPEN = { initial: { opacity: 0, scale: 0.96 }, animate: { opacity: 1, scale: 1 }, transition: { duration: 0.2, ease: EASE } };
+// Clicks go through a closing menu to the page under it (it's still fading for a moment).
+const CLOSE = { opacity: 0, pointerEvents: "none" as const, transition: { duration: 0.14, ease: [0.25, 0.46, 0.45, 0.94] as const } };
 
 /**
  * The menu overlay: a numbered list over the top-left of the app, each
@@ -136,23 +145,25 @@ export function MenuOverlay({
   if (state.cols) return <PanelGrid menu={menu} cols={state.cols} sel={state.path[0] ?? 0} onPick={onPick} onHover={onHover} />;
   const deepest = state.path.length - 1;
   return (
-    <div ref={box} className="absolute inset-0 font-casui text-[3.9cqw]">
+    <motion.div ref={box} exit={CLOSE} className="absolute inset-0 font-casui text-[3.9cqw]">
       {state.path.map((sel, depth) => {
         const items = listAt(menu, state.path, depth);
         return (
-          <div
+          <motion.div
             key={depth}
             ref={(el) => {
               lists.current[depth] = el;
             }}
             role="menu"
-            className="absolute left-0 top-0 max-h-full w-max min-w-[28cqw] max-w-[75cqw] overflow-y-auto border border-casRule bg-casScreen [scrollbar-width:none]"
+            {...OPEN}
+            className="absolute left-0 top-0 max-h-full w-max min-w-[28cqw] max-w-[75cqw] origin-top-left overflow-y-auto border border-casRule bg-casScreen shadow-[0.6cqw_0.6cqw_0_rgba(0,0,0,0.12)] scrollbar-none"
           >
             {items.map((item, i) => (
               <MenuRow
                 key={`${depth}-${i}`}
                 item={item}
                 index={i}
+                depth={depth}
                 state={i !== sel ? "idle" : depth === deepest ? "selected" : "parent"}
                 onClick={() => onPick([...state.path.slice(0, depth), i])}
                 onHover={() => {
@@ -162,10 +173,10 @@ export function MenuOverlay({
                 }}
               />
             ))}
-          </div>
+          </motion.div>
         );
       })}
-    </div>
+    </motion.div>
   );
 }
 
@@ -189,8 +200,8 @@ function PanelGrid({
 }) {
   const blanks = (cols - (menu.length % cols)) % cols;
   return (
-    <div className="absolute inset-0 font-casui text-[3.9cqw]">
-      <div className="absolute left-[3cqw] top-[40%]">
+    <motion.div exit={CLOSE} className="absolute inset-0 font-casui text-[3.9cqw]">
+      <motion.div {...OPEN} className="absolute left-[3cqw] top-[40%] origin-top-left">
         <div aria-hidden className="absolute inset-0 translate-x-[0.4cqw] translate-y-[0.4cqw] bg-casRule" />
         <div
           role="menu"
@@ -222,20 +233,22 @@ function PanelGrid({
             <span key={`blank-${i}`} className="bg-casScreen" />
           ))}
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
 function MenuRow({
   item,
   index,
+  depth,
   state,
   onClick,
   onHover,
 }: {
   item: MenuItem;
   index: number;
+  depth: number;
   state: "idle" | "selected" | "parent";
   onClick: () => void;
   onHover: () => void;
@@ -251,18 +264,25 @@ function MenuRow({
       onClick={onClick}
       onMouseEnter={state === "idle" ? onHover : undefined}
       className={cn(
-        "flex h-[6.2cqw] w-full items-center whitespace-nowrap pl-[2cqw] pr-[1.4cqw] text-left",
+        "relative flex h-[6.2cqw] w-full items-center whitespace-nowrap pl-[2cqw] pr-[1.4cqw] text-left",
         item.rule && "border-t border-casRule",
-        state === "selected" && "bg-casSelect text-casScreen",
+        state === "selected" && "text-casScreen",
         state === "parent" && "bg-casSelectParent text-casInk",
         state === "idle" && (enabled ? "text-casInk" : "text-casDim"),
       )}
     >
-      <span className="mr-[1.6cqw] shrink-0">{menuKey(index)}</span>
-      <span className="flex-1">{item.label}</span>
-      {item.hint && <span className="ml-[3cqw] text-[3.3cqw]">({item.hint})</span>}
+      {/* The handheld's blue bar, sliding to the selected row instead of jumping. */}
+      {state === "selected" && <motion.span aria-hidden layoutId={`menu-bar-${depth}`} transition={presets.snappy} className="absolute inset-0 bg-casSelect" />}
+      {item.icon && (
+        <span className="relative">
+          <AppIcon app={item.icon} />
+        </span>
+      )}
+      <span className="relative mr-[1.6cqw] shrink-0">{menuKey(index)}</span>
+      <span className="relative flex-1">{item.label}</span>
+      {item.hint && <span className="relative ml-[3cqw] text-[3.3cqw]">({item.hint})</span>}
       {item.items && (
-        <svg aria-hidden viewBox="0 0 6 10" className="ml-[3cqw] h-[2.2cqw] w-[1.3cqw] shrink-0">
+        <svg aria-hidden viewBox="0 0 6 10" className="relative ml-[3cqw] h-[2.2cqw] w-[1.3cqw] shrink-0">
           <path d="M0.5 0.5 L5.5 5 L0.5 9.5 Z" fill="currentColor" />
         </svg>
       )}

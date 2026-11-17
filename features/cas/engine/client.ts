@@ -23,6 +23,8 @@ export class CasEngine {
   private settings: Settings;
   private listeners = new Set<(s: EngineStatus) => void>();
   status: EngineStatus = "loading";
+  /** Why the worker stopped, when it did: shown with "didn't load". */
+  lastError = "";
 
   constructor(settings: Settings) {
     this.settings = settings;
@@ -42,7 +44,7 @@ export class CasEngine {
 
   private start() {
     this.setStatus("loading");
-    const worker = new Worker("/cas/worker.js");
+    const worker = new Worker(`${import.meta.env.BASE_URL}cas/worker.js`);
     this.worker = worker;
     this.ready = new Promise((resolve, reject) => {
       worker.onmessage = (e: MessageEvent) => {
@@ -63,7 +65,8 @@ export class CasEngine {
           queueMicrotask(() => this.restart());
         } else p.resolve(d.out ?? "");
       };
-      worker.onerror = () => {
+      worker.onerror = (ev: ErrorEvent) => {
+        this.lastError = ev.message || "its worker stopped";
         this.setStatus("failed");
         reject(new Error("engine failed to load"));
       };
