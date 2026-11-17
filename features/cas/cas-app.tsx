@@ -44,14 +44,16 @@ import {
   openParametric,
   openPolar,
   openSequence,
+  startZoomBox,
+  zoomBoxAt,
   openRelation,
   startTool,
   type GraphEffect,
 } from "./graphs/graph-keys";
 import { GraphsApp } from "./graphs/graphs-app";
 import { deDefinition, pageDefinitions, polarXY } from "./graphs/definitions";
-import { seqDefinition } from "./graphs/sequence";
-import { autoScale, fnName, parNames, relName, zoomed, type Samples } from "./graphs/model";
+import { parseTerms, SEQ_TERMS, seqDefinition, seqName, seqTermsCommand } from "./graphs/sequence";
+import { autoScale, fnName, parNames, relName, STANDARD, zoomed, type Samples } from "./graphs/model";
 import { Keypad } from "./keypad/keypad";
 import { keyFromEvent, type Key } from "./keys";
 import { parse, type Ast } from "./math/ast";
@@ -1073,6 +1075,7 @@ export function CasApp() {
           other === undefined ? undefined : fnName(p.id, other),
           a,
           b,
+          other,
         );
         if (!mark) setError("Error: Nothing found between the bounds");
         else {
@@ -1611,8 +1614,51 @@ export function CasApp() {
     [newDoc, openScratchpad, recent, refreshFiles, startNew, openCurrent, leaveOk],
   );
 
+  /** Zoom – Data: a window round every scatter plot's and sequence's points, with a margin, as the handheld fits data. */
+  const zoomToData = async () => {
+    const e = engine.current;
+    const g = page?.kind === "graphs" ? page : null;
+    if (!e || !g) return;
+    const pts: [number, number][] = [];
+    const nums = (raw: string) => raw.trim().replace(/^(list)?\[|\]$/g, "").split(",").map(Number);
+    for (const sc of g.scatters ?? []) {
+      if (sc.hidden) continue;
+      const xs = nums(await e.giac(`evalf(${translate(parse(sc.x), settings).giac})`));
+      const ys = nums(await e.giac(`evalf(${translate(parse(sc.y), settings).giac})`));
+      xs.forEach((x, i) => pts.push([x, ys[i]!]));
+    }
+    if (g.sequences?.length) {
+      await e.giac(SEQ_TERMS);
+      for (const s of g.sequences) {
+        if (s.hidden) continue;
+        parseTerms(await e.giac(seqTermsCommand(seqName(g.id, s.n), s.depth, s.initValues, s.nmin, s.nmax))).forEach((v, i) => pts.push([s.nmin + i, v]));
+      }
+    }
+    const ok = pts.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+    if (!ok.length) return setError("Error: No data to zoom to: add a scatter plot or a sequence");
+    const fit = (vs: number[]) => {
+      let [lo, hi] = [Math.min(...vs), Math.max(...vs)];
+      if (hi - lo < 1e-9) [lo, hi] = [lo - 1, hi + 1];
+      const pad = (hi - lo) * 0.1;
+      return [lo - pad, hi + pad] as const;
+    };
+    const [xmin, xmax] = fit(ok.map((p) => p[0]));
+    const [ymin, ymax] = fit(ok.map((p) => p[1]));
+    setGraphs((q) => ({ ...q, window: { xmin, xmax, ymin, ymax, xscl: autoScale(xmin, xmax), yscl: autoScale(ymin, ymax) }, marks: [] }));
+  };
+
   const graphAction = useCallback(
     (id: string) => {
+      if (id === "zoomBox") return setGraphs((g) => startZoomBox(g));
+      if (id === "traceAll") return setGraphs((g) => startTool(g, "traceAll"));
+      if (id === "traceStep") {
+        const step = page?.kind === "graphs" ? page.traceStep : undefined;
+        return setWizard(
+          openWizard({ kind: "wizard", title: "Trace Step", arrows: false, fields: [{ label: "Trace Step:", value: step === undefined ? "Auto" : String(step), options: ["Auto"], free: true }], build: "tracestep:{0}" }),
+        );
+      }
+      if (id === "zoomUser") return setGraphs((g) => ({ ...g, window: g.userWindow ?? STANDARD, marks: [] }));
+      if (id === "zoomData") return void zoomToData();
       if (id.startsWith("zoom")) {
         setGraphs((g) => ({ ...g, window: zoomed(id, g.window, samples.current, 1.5), marks: [] }));
       } else if (id === "windowSettings" && page?.kind === "graphs") {
@@ -1648,6 +1694,13 @@ export function CasApp() {
         setGraphs((g) => (g.editing === null ? openEntry(g, nextFree(g, takenFns)) : { ...g, editing: null }));
       else if (id === "entryFunction") setGraphs((g) => openEntry(g, nextFree(g, takenFns)));
       else if (id === "entryRelation") setGraphs((g) => openRelation(g));
+      else if (id.startsWith("eqtpl:")) {
+        const form = astToRow(parse(id.slice(6)));
+        setGraphs((g) => {
+          const o = openRelation(g);
+          return { ...o, edit: { row: form, cursor: { path: [], index: form.length } } };
+        });
+      }
       else if (id === "insertSlider") {
         const taken = new Set([...defined, ...(page?.kind === "graphs" ? (page.sliders ?? []).map((sl) => sl.name) : [])]);
         let n = 1;
@@ -2160,6 +2213,13 @@ export function CasApp() {
         setDoc((d) => renameProblem(d, n, built.slice(14)));
         return;
       }
+      if (built.startsWith("tracestep:")) {
+        const v = built.slice(10).trim();
+        const step = v === "Auto" || !v ? undefined : Number(v);
+        if (step !== undefined && !(step > 0)) return setError("Error: The step is a positive number, or Auto");
+        setGraphs((g) => ({ ...g, traceStep: step }));
+        return;
+      }
       if (built.startsWith("seqcustom:")) {
         const [x, y] = built.slice(10).split(":").map((v) => Number(v.trim().slice(1)));
         setGraphs((g) => {
@@ -2404,10 +2464,8 @@ export function CasApp() {
           setError("Error: Invalid window settings");
           return;
         }
-        setGraphs((g) => ({
-          ...g,
-          window: { xmin: xmin!, xmax: xmax!, xscl: xscl!, ymin: ymin!, ymax: ymax!, yscl: yscl! },
-        }));
+        const window = { xmin: xmin!, xmax: xmax!, xscl: xscl!, ymin: ymin!, ymax: ymax!, yscl: yscl! };
+        setGraphs((g) => ({ ...g, window, userWindow: window }));
         return;
       }
       if (built.startsWith("notesattrs:")) {
@@ -3536,6 +3594,7 @@ export function CasApp() {
                   onSamples={(s) => (samples.current = s)}
                   onWindow={(window) => setGraphs((g) => ({ ...g, window }))}
                   onToolX={onToolX}
+                  onBox={(x, y, set) => setGraphs((g) => (!g.zoomBox ? g : set ? zoomBoxAt(g, x, y) : { ...g, zoomBox: { ...g.zoomBox, x, y } }))}
                   onToolFn={(n, pick) =>
                     setGraphs((g) =>
                       g.tool?.kind === "bounds"

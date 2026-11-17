@@ -153,6 +153,12 @@ export type GraphsPage = {
   /** The parametric entry line's five fields (x, y, tmin, tmax, tstep), or a Diff Eq's three (f, x0, y0), while it's open; `field` is the one being edited. */
   parDraft?: { field: number; rows: Row[]; fresh?: boolean; polar?: boolean };
   window: GraphWindow;
+  /** Trace Step: how far one arrow press moves a trace along x; unset is Auto (a hundredth of the window). */
+  traceStep?: number;
+  /** The window last set in Window Settings, which Zoom – User goes back to. */
+  userWindow?: GraphWindow;
+  /** Zoom – Box: the crosshair, and the first corner once it's set. */
+  zoomBox?: { x: number; y: number; first?: { x: number; y: number } };
   /** The entry line: which f (or rel) it's editing, or null when hidden. */
   editing: number | null;
   /** "rel", "par" or "de" while the entry line edits a relation, a parametric or a Diff Eq, else a function. */

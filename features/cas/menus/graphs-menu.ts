@@ -13,6 +13,9 @@ import { app, off, rule, sub, wiz, type Menu } from "./types";
 /** The page state the menu's labels depend on. */
 export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean };
 
+/** An equation template: the relation entry opened with this form in it. */
+const tpl = (label: string, form: string) => app(label, `eqtpl:${form}`);
+
 export function graphsMenu(s: GraphsMenuState): Menu {
   const grid = (label: string, id: string, kind: GraphsMenuState["grid"]) => (s.grid === kind ? off(label) : app(label, id));
   return [
@@ -50,12 +53,18 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         app("Function", "entryFunction"),
         app("Relation", "entryRelation"),
         sub("Equation Templates", [
-          sub("Line", [off("Line Slope Intercept"), off("Vertical Line"), off("Line Standard")]),
-          sub("Parabola", [off("Vertex form"), off("Standard form"), off("Vertex form"), off("Standard form")]),
-          sub("Circle", [off("Center form"), off("Standard form")]),
-          sub("Ellipse", [off("Center form")]),
-          sub("Hyperbola", [off("East-West"), off("South-North")]),
-          sub("Conic", [off("General")]),
+          // Each opens the relation entry with the form filled in; the letters left in it become sliders when it's plotted.
+          sub("Line", [tpl("Line Slope Intercept", "y=m*x+b"), tpl("Vertical Line", "x=a"), tpl("Line Standard", "a*x+b*y=c")]),
+          sub("Parabola", [
+            tpl("Vertex form", "y=a*(x-h)^2+k"),
+            tpl("Standard form", "y=a*x^2+b*x+c"),
+            tpl("Vertex form", "x=a*(y-k)^2+h"),
+            tpl("Standard form", "x=a*y^2+b*y+c"),
+          ]),
+          sub("Circle", [tpl("Center form", "(x-h)^2+(y-k)^2=r^2"), tpl("Standard form", "a*x^2+a*y^2+b*x+c*y+d=0")]),
+          sub("Ellipse", [tpl("Center form", "(x-h)^2/a^2+(y-k)^2/b^2=1")]),
+          sub("Hyperbola", [tpl("East-West", "(x-h)^2/a^2-(y-k)^2/b^2=1"), tpl("South-North", "(y-k)^2/b^2-(x-h)^2/a^2=1")]),
+          sub("Conic", [tpl("General", "a*x^2+b*x*y+c*y^2+d*x+e*y+f=0")]),
         ]),
         app("Parametric", "entryParametric"),
         app("Polar", "entryPolar"),
@@ -66,22 +75,22 @@ export function graphsMenu(s: GraphsMenuState): Menu {
     ),
     sub("Window / Zoom", [
       app("Window Settings...", "windowSettings"),
-      rule(off("Zoom – Box")),
+      rule(app("Zoom – Box", "zoomBox")),
       app("Zoom – In", "zoomIn"),
       app("Zoom – Out", "zoomOut"),
       rule(app("Zoom – Standard", "zoomStandard")),
       app("Zoom – Quadrant 1", "zoomQuadrant1"),
-      off("Zoom – User"),
+      app("Zoom – User", "zoomUser"),
       app("Zoom – Trig", "zoomTrig"),
-      off("Zoom – Data"),
+      app("Zoom – Data", "zoomData"),
       app("Zoom – Fit", "zoomFit"),
       rule(app("Zoom – Square", "zoomSquare")),
       app("Zoom – Decimal", "zoomDecimal"),
     ]),
     sub("Trace", [
       app("Graph Trace", "graphTrace"),
-      off("Trace All"),
-      off("Trace Step..."),
+      app("Trace All", "traceAll"),
+      app("Trace Step...", "traceStep"),
       sub("Path Plot", [off("Function"), off("Parametric"), off("Polar"), off("Path Setup...")]),
       off("Geometry Trace"),
       off("Erase Geometry Trace"),
@@ -94,7 +103,7 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       app("Inflection", "analyzeInflection"),
       app("dy/dx", "analyzeDydx"),
       app("Integral", "analyzeIntegral"),
-      off("Bounded Area"),
+      app("Bounded Area", "analyzeBounded"),
       sub(
         "Analyze Conics",
         ["Center", "Vertices", "Foci", "Axes of Symmetry", "Directrix", "Asymptotes", "Radius", "Eccentricity", "Latus Rectum"].map(off),

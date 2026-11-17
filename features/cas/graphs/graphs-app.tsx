@@ -64,6 +64,7 @@ export function GraphsApp({
   onSamples,
   onWindow,
   onToolX,
+  onBox,
   onConfirm,
   onToolFn,
   onEditFn,
@@ -87,6 +88,8 @@ export function GraphsApp({
   onWindow: (w: GraphWindow) => void;
   /** The mouse moved a trace point or a bound. */
   onToolX: (x: number) => void;
+  /** Zoom – Box: the pointer moved the crosshair (set: false) or clicked a corner (set: true). */
+  onBox?: (x: number, y: number, set: boolean) => void;
   /** A click that sets a bound at x, as Enter does. */
   onConfirm: (x: number) => void;
   /**
@@ -122,6 +125,8 @@ export function GraphsApp({
   const [size, setSize] = useState({ w: 0, h: 0, sw: 0 });
   const [samples, setSamples] = useState<Samples[]>([]);
   const [toolY, setToolY] = useState<number>(NaN);
+  /** Trace All: each visible function's value at the trace's x. */
+  const [allYs, setAllYs] = useState<{ n: number; y: number }[]>([]);
   const [slope, setSlope] = useState<number>(NaN);
   const w = page.window;
 
@@ -357,9 +362,13 @@ export function GraphsApp({
     void (async () => {
       const y = await valueAt(giac, fnName(page.id, tool.fn), tool.x);
       const s = tool.kind === "dydx" ? await slopeAt(giac, fnName(page.id, tool.fn), tool.x) : NaN;
+      const all: { n: number; y: number }[] = [];
+      if (tool.kind === "trace" && tool.all)
+        for (const f of page.functions) if (!f.hidden && f.text.trim()) all.push({ n: f.n, y: await valueAt(giac, fnName(page.id, f.n), tool.x) });
       if (!cancelled) {
         setToolY(y);
         setSlope(s);
+        setAllYs(all);
       }
     })();
     return () => {
@@ -455,6 +464,10 @@ export function GraphsApp({
     },
     onPointerDown: (e: ReactPointerEvent) => {
       if (e.button !== 0) return;
+      if (page.zoomBox) {
+        onBox?.(xAt(e.clientX), yAt(e.clientY), true);
+        return;
+      }
       if (tool) {
         if (choosing) {
           const n = graphAt(e);
@@ -467,6 +480,10 @@ export function GraphsApp({
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
     onPointerMove: (e: ReactPointerEvent) => {
+      if (page.zoomBox) {
+        onBox?.(xAt(e.clientX), yAt(e.clientY), false);
+        return;
+      }
       if (moving) {
         placeAt(moving, e);
         return;
@@ -763,7 +780,8 @@ export function GraphsApp({
             </div>
           );
         })}
-        {tool && <ToolOverlay page={page} y={toolY} slope={slope} curvePt={curvePt} fs={fs} px={px} py={py} />}
+        {page.zoomBox && <ZoomBoxOverlay box={page.zoomBox} px={px} py={py} />}
+        {tool && <ToolOverlay page={page} y={toolY} slope={slope} curvePt={curvePt} fs={fs} px={px} py={py} allYs={allYs} />}
         {page.editing !== null && (
           <div
             onPointerDown={(e) => e.stopPropagation()}
@@ -828,10 +846,12 @@ function ToolOverlay({
   fs,
   px,
   py,
+  allYs = [],
 }: {
   page: GraphsPage;
   y: number;
   slope: number;
+  allYs?: { n: number; y: number }[];
   /** The trace point on a relation or parametric curve. */
   curvePt: [number, number] | null;
   fs: number;
@@ -865,6 +885,21 @@ function ToolOverlay({
     );
   }
   const colour = curveColour(tool.fn);
+  if (tool.kind === "trace" && tool.all) {
+    // Trace All: a mark on each function, and each one's point listed in its colour.
+    return (
+      <>
+        {allYs.map((p) => Number.isFinite(p.y) && <TraceMark key={p.n} x={px(tool.x)} y={py(p.y)} colour={curveColour(p.n)} fs={fs} />)}
+        <div className="absolute bottom-[1.2cqw] right-[1.6cqw] flex flex-col items-end whitespace-nowrap" style={{ fontSize: fs }}>
+          {allYs.map((p) => (
+            <span key={p.n} className="font-casui" style={{ color: curveColour(p.n) }}>
+              <b className="font-casmath">f{p.n}:</b> ({fmt3(tool.x)} , {Number.isFinite(p.y) ? fmt3(p.y) : "undef"})
+            </span>
+          ))}
+        </div>
+      </>
+    );
+  }
   if (tool.kind === "bounds") {
     const line = (x: number) => (
       <div
@@ -1045,6 +1080,27 @@ function relLabelAt(grid: RelGrid | undefined, W: number, H: number, fs: number,
 function rgb(colour: string): [number, number, number] {
   const n = parseInt(colour.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** Zoom – Box: the crosshair, and the box from the first corner to it. */
+function ZoomBoxOverlay({ box, px, py }: { box: NonNullable<GraphsPage["zoomBox"]>; px: (x: number) => number; py: (y: number) => number }) {
+  const [X, Y] = [px(box.x), py(box.y)];
+  const f = box.first;
+  return (
+    <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+      {f && (
+        <rect
+          x={Math.min(px(f.x), X)}
+          y={Math.min(py(f.y), Y)}
+          width={Math.abs(X - px(f.x))}
+          height={Math.abs(Y - py(f.y))}
+          className="fill-casSelect/10 stroke-casInk"
+          strokeDasharray="4 3"
+        />
+      )}
+      <path d={`M${X - 10} ${Y}H${X + 10}M${X} ${Y - 10}V${Y + 10}`} className="stroke-casInk" strokeWidth={1.5} />
+    </svg>
+  );
 }
 
 /** What an entry line reports from the mouse: a click places the cursor, a drag selects. */
@@ -1429,6 +1485,17 @@ function draw(
     if (!s) continue;
     g.fillStyle = palette.casShade;
     g.beginPath();
+    const o = m.other === undefined ? undefined : samples.find((x) => x.n === m.other);
+    if (o) {
+      // Bounded Area: along one graph, back along the other.
+      const inside = (xs: number[], ys: number[]) => xs.flatMap((x, i) => (x >= m.a && x <= m.b && Number.isFinite(ys[i]!) ? [[px(x), py(ys[i]!)] as const] : []));
+      const top = inside(s.xs, s.ys);
+      const bottom = inside(o.xs, o.ys).reverse();
+      [...top, ...bottom].forEach(([X, Y], k) => (k ? g.lineTo(X, Y) : g.moveTo(X, Y)));
+      g.closePath();
+      g.fill();
+      continue;
+    }
     g.moveTo(px(m.a), py(0));
     s.xs.forEach((x, i) => {
       const y = s.ys[i]!;

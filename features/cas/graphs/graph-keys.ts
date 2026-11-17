@@ -5,7 +5,7 @@ import { parse } from "../math/ast";
 import * as E from "../math/editor";
 import { astToRow, chars, rowToLinear } from "../math/tree";
 import type { GraphsPage } from "../state/document";
-import type { AnalyzeKind } from "./model";
+import { autoScale, type AnalyzeKind } from "./model";
 
 /**
  * The Graphs page's response to a key. Defining a function and finishing an
@@ -131,9 +131,11 @@ export function graphKey(
 ): { page: GraphsPage; effect: GraphEffect } {
   const done = (q: Partial<GraphsPage>, effect: GraphEffect = null) => ({ page: { ...p, ...q }, effect });
   const visible = p.functions.filter((f) => !f.hidden).map((f) => f.n);
-  const step = (p.window.xmax - p.window.xmin) / 100;
+  const step = p.traceStep ?? (p.window.xmax - p.window.xmin) / 100;
 
   if (key.k === "table") return done({ table: !p.table });
+
+  if (p.zoomBox) return { page: zoomBoxKey(p, key), effect: null };
 
   if (p.tool) {
     const tool = p.tool;
@@ -306,6 +308,48 @@ export function graphKey(
   }
 }
 
+/** Zoom – Box: the crosshair starts in the middle of the window. */
+export function startZoomBox(p: GraphsPage): GraphsPage {
+  const w = p.window;
+  return { ...p, tool: null, editing: null, zoomBox: { x: (w.xmin + w.xmax) / 2, y: (w.ymin + w.ymax) / 2 } };
+}
+
+/** A corner of the box set at (x, y): the first, or the second, which zooms to the box. */
+export function zoomBoxAt(p: GraphsPage, x: number, y: number): GraphsPage {
+  const b = p.zoomBox;
+  if (!b) return p;
+  if (!b.first) return { ...p, zoomBox: { x, y, first: { x, y } } };
+  const [xmin, xmax] = [Math.min(b.first.x, x), Math.max(b.first.x, x)];
+  const [ymin, ymax] = [Math.min(b.first.y, y), Math.max(b.first.y, y)];
+  // A box with no width or height leaves the window as it was.
+  if (xmax - xmin < 1e-9 || ymax - ymin < 1e-9) return { ...p, zoomBox: undefined };
+  return { ...p, zoomBox: undefined, window: { xmin, xmax, ymin, ymax, xscl: autoScale(xmin, xmax), yscl: autoScale(ymin, ymax) } };
+}
+
+/** Zoom – Box's keys: the arrows move the crosshair a fiftieth of the window, Enter sets a corner, esc cancels. */
+function zoomBoxKey(p: GraphsPage, key: Key): GraphsPage {
+  const b = p.zoomBox!;
+  const w = p.window;
+  const dx = (w.xmax - w.xmin) / 50;
+  const dy = (w.ymax - w.ymin) / 50;
+  switch (key.k) {
+    case "left":
+      return { ...p, zoomBox: { ...b, x: b.x - dx } };
+    case "right":
+      return { ...p, zoomBox: { ...b, x: b.x + dx } };
+    case "up":
+      return { ...p, zoomBox: { ...b, y: b.y + dy } };
+    case "down":
+      return { ...p, zoomBox: { ...b, y: b.y - dy } };
+    case "enter":
+      return zoomBoxAt(p, b.x, b.y);
+    case "esc":
+      return { ...p, zoomBox: undefined };
+    default:
+      return p;
+  }
+}
+
 /** How far one arrow press moves the trace along a relation's curve (0.076 on the standard window). */
 const relStep = (p: GraphsPage) => (p.window.xmax - p.window.xmin) / 264;
 
@@ -345,8 +389,11 @@ export function startTool(p: GraphsPage, id: string): GraphsPage {
     analyzeInflection: "inflection",
     analyzeIntegral: "integral",
     analyzeIntersection: "intersection",
+    analyzeBounded: "bounded",
   };
   if (id === "graphTrace") return { ...p, editing: null, tool: { kind: "trace", fn, x } };
+  // Trace All: every function at the same x, each with its point.
+  if (id === "traceAll") return { ...p, editing: null, tool: { kind: "trace", fn, x, all: true } };
   if (id === "analyzeDydx") return { ...p, editing: null, tool: { kind: "dydx", fn, x } };
   const type = kinds[id];
   if (!type) return p;
