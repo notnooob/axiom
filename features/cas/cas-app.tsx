@@ -52,6 +52,7 @@ import {
 } from "./graphs/graph-keys";
 import { GraphsApp } from "./graphs/graphs-app";
 import { deDefinition, pageDefinitions, polarXY } from "./graphs/definitions";
+import { recognise } from "./graphs/mathdraw";
 import { classify as classifyConic, feature as conicFeature, type ConicFeature } from "./graphs/conics";
 import { parseTerms, SEQ_TERMS, seqDefinition, seqName, seqTermsCommand } from "./graphs/sequence";
 import { autoScale, fnName, parNames, relName, STANDARD, zoomed, type Mark, type Samples } from "./graphs/model";
@@ -1648,6 +1649,173 @@ export function CasApp() {
     setGraphs((q) => ({ ...q, window: { xmin, xmax, ymin, ymax, xscl: autoScale(xmin, xmax), yscl: autoScale(ymin, ymax) }, marks: [] }));
   };
 
+  /** The page's graphs by name (f1, rel1, x1 or r1, u1, s1, d1), for the Actions dialogs. */
+  const graphList = (g: GraphsPage) => [
+    ...g.functions.map((f) => ({ name: `f${f.n}`, kind: "fn" as const, n: f.n, hidden: f.hidden })),
+    ...(g.relations ?? []).map((r) => ({ name: `rel${r.n}`, kind: "rel" as const, n: r.n, hidden: r.hidden })),
+    ...(g.parametrics ?? []).map((c) => ({ name: `${c.polar ? "r" : "x"}${c.n}`, kind: "par" as const, n: c.n, hidden: c.hidden })),
+    ...(g.sequences ?? []).map((s) => ({ name: `u${s.n}`, kind: "seq" as const, n: s.n, hidden: s.hidden })),
+    ...(g.scatters ?? []).map((s) => ({ name: `s${s.n}`, kind: "scatter" as const, n: s.n, hidden: s.hidden })),
+    ...(g.des ?? []).map((d) => ({ name: `d${d.n}`, kind: "de" as const, n: d.n, hidden: d.hidden })),
+  ];
+
+  /** Graphs ▸ Actions: true when the id was one of them. */
+  const graphsActions = (id: string): boolean => {
+    const g = page?.kind === "graphs" ? page : null;
+    if (!g) return false;
+    const fns = g.functions.map((f) => `f${f.n}`);
+    const needFns = () => (fns.length ? false : (setError("Error: No functions on this page"), true));
+    const w = g.window;
+    const centre = (v: number) => String(Number(v.toPrecision(4)));
+    switch (id) {
+      case "pointer":
+        setGraphs((q) => ({ ...q, tool: null, zoomBox: undefined, mathDraw: undefined, selected: undefined }));
+        return true;
+      case "selectRegion":
+        setGraphs((q) => ({ ...startZoomBox(q), zoomBox: { ...startZoomBox(q).zoomBox!, select: true } }));
+        return true;
+      case "selectImage":
+        setError("Error: This page has no image to select");
+        return true;
+      case "selectGrid":
+        setWizard(openWizard({ kind: "wizard", title: "Grid", arrows: false, fields: [{ label: "Grid:", value: { none: "No Grid", dot: "Dot Grid", line: "Lined Grid" }[g.grid], options: ["No Grid", "Dot Grid", "Lined Grid"] }], build: "gridtype:{0}" }));
+        return true;
+      case "hideShow": {
+        const all = graphList(g).slice(0, 10);
+        if (!all.length) return setError("Error: No graphs on this page"), true;
+        setWizard(openWizard({ kind: "wizard", title: "Hide/Show", arrows: false, fields: all.map((x) => ({ label: `Show ${x.name}`, value: x.hidden ? "No" : "Yes", check: true })), build: `hideshow:${all.map((x) => x.name).join(",")}:${all.map((_, i) => `{${i}}`).join(":")}` }));
+        return true;
+      }
+      case "attributes": {
+        if (needFns()) return true;
+        const a = g.functions[0]!.attrs;
+        setWizard(
+          openWizard({
+            kind: "wizard",
+            title: "Attributes",
+            arrows: false,
+            fields: [
+              { label: "Graph:", value: fns[0], options: fns },
+              { label: "Line Weight:", value: a?.weight ?? "Medium", options: ["Thin", "Medium", "Thick"] },
+              { label: "Line Style:", value: a?.style ?? "Continuous", options: ["Continuous", "Dotted", "Dashed"] },
+              { label: "Colour:", value: a?.colour ?? "Auto", options: ["Auto", "Blue", "Red", "Green", "Orange", "Purple", "Teal", "Black"] },
+            ],
+            build: "attrs:{0}:{1}:{2}:{3}",
+          }),
+        );
+        return true;
+      }
+      case "setConditions":
+        if (needFns()) return true;
+        setWizard(openWizard({ kind: "wizard", title: "Set Conditions", arrows: false, fields: [{ label: "Graph:", value: fns[0], options: fns }, { label: "Show when:", value: g.functions[0]!.condition?.text ?? "", hint: "a>0 (blank: always)" }], build: "condition:{0}:{1}" }));
+        return true;
+      case "graphText":
+        setWizard(openWizard({ kind: "wizard", title: "Text", arrows: false, fields: [{ label: "Text:", value: "" }, { label: "x:", value: centre((w.xmin + w.xmax) / 2) }, { label: "y:", value: centre((w.ymin + w.ymax) / 2) }], build: "gtext:{1}:{2}:{0}" }));
+        return true;
+      case "coordinates":
+        if (needFns()) return true;
+        setWizard(openWizard({ kind: "wizard", title: "Coordinates and Equations", arrows: false, fields: [{ label: "Point on:", value: fns[0], options: fns }, { label: "x:", value: "0" }], build: "coords:{0}:{1}" }));
+        return true;
+      case "graphCalculate":
+        setWizard(openWizard({ kind: "wizard", title: "Calculate", arrows: false, fields: [{ label: "Expression:", value: "", hint: "f1(2)-f2(2)" }], build: "gcalc:{0}" }));
+        return true;
+      case "redefine": {
+        const all = graphList(g).filter((x) => x.kind !== "scatter");
+        if (!all.length) return setError("Error: No graphs on this page"), true;
+        setWizard(openWizard({ kind: "wizard", title: "Redefine", arrows: false, fields: [{ label: "Graph:", value: all[0]!.name, options: all.map((x) => x.name) }], build: "redefine:{0}" }));
+        return true;
+      }
+      case "mathDraw":
+        setGraphs((q) => ({ ...q, tool: null, editing: null, zoomBox: undefined, mathDraw: !q.mathDraw }));
+        say("MathDraw: draw a line or a circle on the graph. Esc stops.");
+        return true;
+    }
+    return false;
+  };
+
+  /** The dialogs Graphs ▸ Actions opened, once filled in. */
+  const graphsWizard = async (built: string) => {
+    const e = engine.current;
+    const [kind, ...rest] = built.split(":");
+    const arg = rest.join(":").trim();
+    const num = async (t: string) => (e ? Number((await e.giac(`evalf(${translate(parse(t || "0"), settings).giac})`)).trim()) : NaN);
+    switch (kind) {
+      case "gridtype":
+        return setGraphs((g) => ({ ...g, grid: arg === "Dot Grid" ? "dot" : arg === "Lined Grid" ? "line" : "none" }));
+      case "hideshow": {
+        const [names = "", ...vals] = rest;
+        const shown = new Map(names.split(",").map((n, i) => [n, vals[i]?.trim() !== "No"]));
+        const hide = (name: string, h: boolean | undefined) => (shown.has(name) ? !shown.get(name) || undefined : h);
+        return setGraphs((g) => ({
+          ...g,
+          functions: g.functions.map((f) => ({ ...f, hidden: hide(`f${f.n}`, f.hidden) })),
+          relations: g.relations?.map((r) => ({ ...r, hidden: hide(`rel${r.n}`, r.hidden) })),
+          parametrics: g.parametrics?.map((c) => ({ ...c, hidden: hide(`${c.polar ? "r" : "x"}${c.n}`, c.hidden) })),
+          sequences: g.sequences?.map((s) => ({ ...s, hidden: hide(`u${s.n}`, s.hidden) })),
+          scatters: g.scatters?.map((s) => ({ ...s, hidden: hide(`s${s.n}`, s.hidden) })),
+          des: g.des?.map((d) => ({ ...d, hidden: hide(`d${d.n}`, d.hidden) })),
+        }));
+      }
+      case "attrs": {
+        const [fn = "", weight, style, colour] = rest.map((s) => s.trim());
+        const n = Number(fn.slice(1));
+        return setGraphs((g) => ({
+          ...g,
+          functions: g.functions.map((f) => (f.n !== n ? f : { ...f, attrs: { weight: weight as "Thin", style: style as "Continuous", colour: colour === "Auto" ? undefined : colour } })),
+        }));
+      }
+      case "condition": {
+        const [fn = "", ...cond] = rest;
+        const n = Number(fn.trim().slice(1));
+        const text = cond.join(":").trim();
+        let condition: { text: string; giac: string } | undefined;
+        if (text) {
+          try {
+            condition = { text, giac: translate(parse(text), settings).giac };
+          } catch {
+            return setError("Error: Syntax");
+          }
+        }
+        return setGraphs((g) => ({ ...g, functions: g.functions.map((f) => (f.n === n ? { ...f, condition } : f)) }));
+      }
+      case "gtext": {
+        const [xs = "", ys = "", ...text] = rest;
+        const [x, y] = [await num(xs), await num(ys)];
+        if (![x, y].every(Number.isFinite)) return setError("Error: The place is two numbers, x and y");
+        return setGraphs((g) => ({ ...g, texts: [...(g.texts ?? []), { x, y, text: text.join(":") }] }));
+      }
+      case "coords": {
+        const [fn = "", xs = ""] = rest.map((s) => s.trim());
+        const n = Number(fn.slice(1));
+        const x = await num(xs);
+        const p = page?.kind === "graphs" ? page : null;
+        if (!e || !p || !Number.isFinite(x)) return setError("Error: x is a number");
+        const y = Number((await e.giac(`evalf(${fnName(p.id, n)}(${x}))`)).trim());
+        if (!Number.isFinite(y)) return setError(`Error: f${n} is undefined at x = ${x}`);
+        const mark: Mark = { kind: "point", fn: n, x, y, title: "point" };
+        setGraphs((g) => ({ ...g, marks: [...g.marks, mark] }));
+        return say(markSaid(mark));
+      }
+      case "gcalc": {
+        if (!e) return;
+        const r = await evaluate(arg, e.giac, { settings });
+        if (!r.ok) return setError(r.error);
+        const w = page?.kind === "graphs" ? page.window : STANDARD;
+        // The result goes near the top left, under any already there.
+        setGraphs((g) => ({ ...g, texts: [...(g.texts ?? []), { x: w.xmin + (w.xmax - w.xmin) * 0.05, y: w.ymax - (w.ymax - w.ymin) * (0.2 + 0.07 * (g.texts?.length ?? 0)), text: `${arg} = ${r.outputText}` }] }));
+        return say(`${arg} = ${r.outputText}`);
+      }
+      case "redefine": {
+        const m = /^(f|rel|x|r|u|s|d)(\d+)$/.exec(arg);
+        if (!m) return;
+        const n = Number(m[2]);
+        return setGraphs((g) =>
+          m[1] === "f" ? openEntry(g, n) : m[1] === "rel" ? openRelation(g, n) : m[1] === "x" ? openParametric(g, settings.angle === "deg", n) : m[1] === "r" ? openPolar(g, settings.angle === "deg", n) : m[1] === "u" ? openSequence(g, n) : m[1] === "d" ? openDE(g, n) : g,
+        );
+      }
+    }
+  };
+
   /**
    * Analyze Conics on the page's conic: the first shown relation that is one
    * (its coefficients read from the engine), the result added as marks.
@@ -1688,6 +1856,7 @@ export function CasApp() {
   const graphAction = useCallback(
     (id: string) => {
       if (id.startsWith("conic:")) return void analyzeConic(id.slice(6) as ConicFeature);
+      if (graphsActions(id)) return;
       if (id === "zoomBox") return setGraphs((g) => startZoomBox(g));
       if (id === "traceAll") return setGraphs((g) => startTool(g, "traceAll"));
       if (id === "traceStep") {
@@ -2250,6 +2419,10 @@ export function CasApp() {
       if (built.startsWith("problemrename:")) {
         const n = problemOf(latestDoc.current.pages[latestDoc.current.active]);
         setDoc((d) => renameProblem(d, n, built.slice(14)));
+        return;
+      }
+      if (/^(gridtype|hideshow|attrs|condition|gtext|coords|gcalc|redefine):/.test(built)) {
+        void graphsWizard(built);
         return;
       }
       if (built.startsWith("tracestep:")) {
@@ -3633,6 +3806,14 @@ export function CasApp() {
                   onSamples={(s) => (samples.current = s)}
                   onWindow={(window) => setGraphs((g) => ({ ...g, window }))}
                   onToolX={onToolX}
+                  onMathDraw={(pts) => {
+                    const rel = recognise(pts, page.window.xmax - page.window.xmin);
+                    if (!rel) return;
+                    const n = Math.max(0, ...(page.relations ?? []).map((r) => r.n)) + 1;
+                    const row = astToRow(parse(rel));
+                    const next = { ...page, edit: { row, cursor: { path: [], index: row.length } } };
+                    void runGraphEffect(next, { relation: { n, text: rel } });
+                  }}
                   onBox={(x, y, set) => setGraphs((g) => (!g.zoomBox ? g : set ? zoomBoxAt(g, x, y) : { ...g, zoomBox: { ...g.zoomBox, x, y } }))}
                   onToolFn={(n, pick) =>
                     setGraphs((g) =>

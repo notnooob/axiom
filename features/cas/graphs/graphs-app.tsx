@@ -37,6 +37,18 @@ import { RENAME_IN } from "../engine/translate";
 
 export const CURVE = [palette.casF1, palette.casF2, palette.casF3, palette.casF4, palette.casF5, palette.casF6];
 export const curveColour = (n: number) => CURVE[(n - 1) % CURVE.length]!;
+/** Attributes' colours, by the names the dialog lists. */
+export const NAMED_COLOURS: Record<string, string> = {
+  Blue: palette.casF1,
+  Red: palette.casF2,
+  Green: palette.casF3,
+  Orange: palette.casF4,
+  Purple: palette.casF5,
+  Teal: palette.casF6,
+  Black: palette.casInk,
+};
+/** A function's colour: its Attributes' choice, or its place in the palette. */
+const fnColour = (page: GraphsPage, n: number) => NAMED_COLOURS[page.functions.find((f) => f.n === n)?.attrs?.colour ?? ""] ?? curveColour(n);
 /** Relations take the next colours after the functions'. */
 const relColour = (page: GraphsPage, n: number) => curveColour(page.functions.length + n);
 /** Parametric curves take the colours after the relations'. */
@@ -65,6 +77,7 @@ export function GraphsApp({
   onWindow,
   onToolX,
   onBox,
+  onMathDraw,
   onConfirm,
   onToolFn,
   onEditFn,
@@ -88,6 +101,8 @@ export function GraphsApp({
   onWindow: (w: GraphWindow) => void;
   /** The mouse moved a trace point or a bound. */
   onToolX: (x: number) => void;
+  /** MathDraw: a finished stroke, in graph units. */
+  onMathDraw?: (pts: [number, number][]) => void;
   /** Zoom – Box: the pointer moved the crosshair (set: false) or clicked a corner (set: true). */
   onBox?: (x: number, y: number, set: boolean) => void;
   /** A click that sets a bound at x, as Enter does. */
@@ -127,6 +142,8 @@ export function GraphsApp({
   const [toolY, setToolY] = useState<number>(NaN);
   /** Trace All: each visible function's value at the trace's x. */
   const [allYs, setAllYs] = useState<{ n: number; y: number }[]>([]);
+  /** MathDraw: the stroke being drawn, in graph units. */
+  const [stroke, setStroke] = useState<[number, number][] | null>(null);
   const [slope, setSlope] = useState<number>(NaN);
   const w = page.window;
 
@@ -143,7 +160,7 @@ export function GraphsApp({
   // Resample whenever the functions or the window change.
   // Slider values are part of every curve's key: moving one redraws them.
   const sliderKey = (page.sliders ?? []).map((sl) => `${sl.name}=${sl.value}`).join("|");
-  const fnKey = page.functions.map((f) => `${f.n}:${f.text}:${f.hidden ? 1 : 0}`).join("|") + sliderKey;
+  const fnKey = page.functions.map((f) => `${f.n}:${f.text}:${f.hidden ? 1 : 0}:${f.condition?.giac ?? ""}`).join("|") + sliderKey;
   useEffect(() => {
     if (!giac || !ready) return;
     let cancelled = false;
@@ -151,6 +168,8 @@ export function GraphsApp({
       const out: Samples[] = [];
       for (const f of page.functions) {
         if (f.hidden) continue;
+        // Set Conditions: drawn only while its condition holds.
+        if (f.condition && !/^(true|1)$/.test((await giac(`evalb(${f.condition.giac})`)).trim())) continue;
         out.push(await sample(giac, fnName(page.id, f.n), f.n, w));
       }
       if (!cancelled) {
@@ -468,6 +487,11 @@ export function GraphsApp({
         onBox?.(xAt(e.clientX), yAt(e.clientY), true);
         return;
       }
+      if (page.mathDraw) {
+        setStroke([[xAt(e.clientX), yAt(e.clientY)]]);
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        return;
+      }
       if (tool) {
         if (choosing) {
           const n = graphAt(e);
@@ -482,6 +506,10 @@ export function GraphsApp({
     onPointerMove: (e: ReactPointerEvent) => {
       if (page.zoomBox) {
         onBox?.(xAt(e.clientX), yAt(e.clientY), false);
+        return;
+      }
+      if (stroke) {
+        setStroke([...stroke, [xAt(e.clientX), yAt(e.clientY)]]);
         return;
       }
       if (moving) {
@@ -502,6 +530,10 @@ export function GraphsApp({
     },
     onPointerUp: () => {
       drag.current = null;
+      if (stroke) {
+        if (stroke.length > 4) onMathDraw?.(stroke);
+        setStroke(null);
+      }
     },
   };
 
@@ -611,7 +643,7 @@ export function GraphsApp({
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={() => onEditFn(f.n)}
             className={cn("absolute cursor-pointer", passThrough)}
-            style={{ left, top, color: curveColour(f.n), fontSize: fs }}
+            style={{ left, top, color: fnColour(page, f.n), fontSize: fs }}
           >
             <span className="inline-flex items-center font-bold">
               <span className="font-casmath">f{f.n}</span>
@@ -742,6 +774,24 @@ export function GraphsApp({
           />
         )}
         <ConicMarks page={page} px={px} py={py} fs={fs} />
+        {(page.texts ?? []).map((t, i) => (
+          <div
+            key={`text${i}`}
+            className={cn("pointer-events-none absolute whitespace-nowrap font-casui text-casInk", page.selected?.texts.includes(i) && "outline-dashed outline-1 outline-casSelect")}
+            style={{ left: px(t.x), top: py(t.y), fontSize: fs }}
+          >
+            {t.text}
+          </div>
+        ))}
+        {page.selected?.marks.map((i) => {
+          const m = page.marks[i];
+          return m?.kind === "point" ? <div key={`sel${i}`} className="pointer-events-none absolute rounded-full border-2 border-casSelect" style={{ left: px(m.x) - fs * 0.6, top: py(m.y) - fs * 0.6, width: fs * 1.2, height: fs * 1.2 }} /> : null;
+        })}
+        {stroke && stroke.length > 1 && (
+          <svg className="pointer-events-none absolute inset-0 h-full w-full">
+            <polyline points={stroke.map(([x, y]) => `${px(x)},${py(y)}`).join(" ")} fill="none" className="stroke-casInk" strokeWidth={2} />
+          </svg>
+        )}
         {page.marks.map((m, i) =>
           m.kind === "line" || m.kind === "value" ? null : m.kind === "point" ? (
             <div
@@ -1638,8 +1688,11 @@ function draw(
   // An Analyze Graph tool's graph is drawn bolder, so it's clear which one it searches.
   const searched = page.tool?.kind === "bounds" && samples.length > 1 ? page.tool.fn : undefined;
   for (const s of samples) {
-    g.strokeStyle = curveColour(s.n);
-    g.lineWidth = Math.max(1.2, W * 0.004) * (s.n === searched ? 2 : 1);
+    const attrs = page.functions.find((f) => f.n === s.n)?.attrs;
+    g.strokeStyle = fnColour(page, s.n);
+    const weight = attrs?.weight === "Thin" ? 0.6 : attrs?.weight === "Thick" ? 1.9 : 1;
+    g.lineWidth = Math.max(1.2, W * 0.004) * weight * (s.n === searched ? 2 : 1);
+    g.setLineDash(attrs?.style === "Dotted" ? [1.5, 4] : attrs?.style === "Dashed" ? [8, 5] : []);
     const path = new Path2D();
     let pen = false;
     for (let i = 0; i < s.xs.length; i++) {
@@ -1668,6 +1721,8 @@ function draw(
     }
     g.stroke(path);
   }
+
+  g.setLineDash([]);
 
   // Parametric curves: the points at each t step, joined.
   for (const p of pars) {

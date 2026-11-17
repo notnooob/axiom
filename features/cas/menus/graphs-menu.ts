@@ -20,18 +20,18 @@ export function graphsMenu(s: GraphsMenuState): Menu {
   const grid = (label: string, id: string, kind: GraphsMenuState["grid"]) => (s.grid === kind ? off(label) : app(label, id));
   return [
     sub("Actions", [
-      off("Pointer"),
-      sub("Select", [off("Region"), off("Image"), off("Grid")]),
-      off("Hide/Show"),
-      rule(off("Attributes")),
-      off("Set Conditions"),
+      app("Pointer", "pointer"),
+      sub("Select", [app("Region", "selectRegion"), app("Image", "selectImage"), app("Grid", "selectGrid")]),
+      app("Hide/Show", "hideShow"),
+      rule(app("Attributes", "attributes")),
+      app("Set Conditions", "setConditions"),
       app("Delete all", "deleteAll"),
-      rule(off("Text")),
-      off("Coordinates and Equations"),
-      off("Calculate"),
-      off("Redefine"),
+      rule(app("Text", "graphText")),
+      app("Coordinates and Equations", "coordinates"),
+      app("Calculate", "graphCalculate"),
+      app("Redefine", "redefine"),
       app("Insert Slider", "insertSlider"),
-      rule(off("MathDraw")),
+      rule(app("MathDraw", "mathDraw")),
     ]),
     sub("View", [
       off("Graphing"),

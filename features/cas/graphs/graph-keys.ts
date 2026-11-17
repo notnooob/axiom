@@ -136,6 +136,13 @@ export function graphKey(
   if (key.k === "table") return done({ table: !p.table });
 
   if (p.zoomBox) return { page: zoomBoxKey(p, key), effect: null };
+  if (p.mathDraw && key.k === "esc") return done({ mathDraw: undefined });
+  // What Select ▸ Region picked: del deletes it, esc lets it go.
+  if (p.selected && (key.k === "delete" || key.k === "backspace")) {
+    const s = p.selected;
+    return done({ marks: p.marks.filter((_, i) => !s.marks.includes(i)), texts: (p.texts ?? []).filter((_, i) => !s.texts.includes(i)), selected: undefined });
+  }
+  if (p.selected && key.k === "esc") return done({ selected: undefined });
 
   if (p.tool) {
     const tool = p.tool;
@@ -318,9 +325,16 @@ export function startZoomBox(p: GraphsPage): GraphsPage {
 export function zoomBoxAt(p: GraphsPage, x: number, y: number): GraphsPage {
   const b = p.zoomBox;
   if (!b) return p;
-  if (!b.first) return { ...p, zoomBox: { x, y, first: { x, y } } };
+  if (!b.first) return { ...p, zoomBox: { ...b, x, y, first: { x, y } } };
   const [xmin, xmax] = [Math.min(b.first.x, x), Math.max(b.first.x, x)];
   const [ymin, ymax] = [Math.min(b.first.y, y), Math.max(b.first.y, y)];
+  if (b.select) {
+    // Select ▸ Region: the marked points and texts inside the box.
+    const inside = (px: number, py: number) => px >= xmin && px <= xmax && py >= ymin && py <= ymax;
+    const marks = p.marks.flatMap((m, i) => (m.kind === "point" && inside(m.x, m.y) ? [i] : []));
+    const texts = (p.texts ?? []).flatMap((t, i) => (inside(t.x, t.y) ? [i] : []));
+    return { ...p, zoomBox: undefined, selected: marks.length || texts.length ? { marks, texts } : undefined };
+  }
   // A box with no width or height leaves the window as it was.
   if (xmax - xmin < 1e-9 || ymax - ymin < 1e-9) return { ...p, zoomBox: undefined };
   return { ...p, zoomBox: undefined, window: { xmin, xmax, ymin, ymax, xscl: autoScale(xmin, xmax), yscl: autoScale(ymin, ymax) } };

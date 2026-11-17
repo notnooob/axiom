@@ -58,7 +58,14 @@ export type GraphFunction = {
   text: string;
   row: Row;
   hidden?: boolean;
+  /** Attributes: line weight, style and colour (a palette name); unset is the handheld's default. */
+  attrs?: { weight?: "Thin" | "Medium" | "Thick"; style?: "Continuous" | "Dotted" | "Dashed"; colour?: string };
+  /** Set Conditions: shown only while this holds (as typed, and as Giac tests it). */
+  condition?: { text: string; giac: string };
 };
+
+/** A Text on a Graphs page, at a point of the graph. */
+export type GraphText = { x: number; y: number; text: string };
 
 /** A relation in x and y: x²+y²=4 draws a curve, y<x+1 shades a region. */
 export type RelationOp = "=" | "<" | ">" | "≤" | "≥" | "≠";
@@ -157,8 +164,14 @@ export type GraphsPage = {
   traceStep?: number;
   /** The window last set in Window Settings, which Zoom – User goes back to. */
   userWindow?: GraphWindow;
-  /** Zoom – Box: the crosshair, and the first corner once it's set. */
-  zoomBox?: { x: number; y: number; first?: { x: number; y: number } };
+  /** Zoom – Box (and Select ▸ Region): the crosshair, and the first corner once it's set. */
+  zoomBox?: { x: number; y: number; first?: { x: number; y: number }; select?: boolean };
+  /** Texts placed with Actions ▸ Text and Calculate. */
+  texts?: GraphText[];
+  /** What Select ▸ Region picked: marks and texts by index, which del deletes. */
+  selected?: { marks: number[]; texts: number[] };
+  /** MathDraw: a stroke drawn on the graph becomes the line or circle it looks like. */
+  mathDraw?: boolean;
   /** The entry line: which f (or rel) it's editing, or null when hidden. */
   editing: number | null;
   /** "rel", "par" or "de" while the entry line edits a relation, a parametric or a Diff Eq, else a function. */
