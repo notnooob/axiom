@@ -4,18 +4,21 @@ import type { Settings } from "../engine/evaluate";
 import { bumpIds, type CasDocument } from "./document";
 
 /**
- * The document kept in this browser between visits: pages, history,
- * settings, and the definitions to replay into the engine. Storage can be
+ * The Scratchpad: the file-less document kept in this browser between visits
+ * (pages, history, settings, and the definitions to replay into the engine).
+ * Named documents live in My Documents (files/store.ts). Storage can be
  * missing or full (private windows, blocked site data), so every access is
  * guarded and the page works the same without it.
  */
-const KEY = "vcehub.cas.v1";
+const KEY = "axiom.scratchpad";
+/** Before the rename, the one auto-saved document lived here; it becomes the Scratchpad. */
+const OLD_KEY = "vcehub.cas.v1";
 
 export type Saved = { doc: CasDocument; settings: Settings; definitions: string[] };
 
 export function load(): Saved | null {
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(KEY) ?? window.localStorage.getItem(OLD_KEY);
     if (!raw) return null;
     const saved = JSON.parse(raw) as Saved;
     if (!saved?.doc?.pages?.length) return null;
@@ -29,14 +32,34 @@ export function load(): Saved | null {
 export function save(s: Saved): void {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(s));
+    window.localStorage.removeItem(OLD_KEY);
   } catch {
     // Storage unavailable: carry on without it.
   }
 }
 
-export function clearSaved(): void {
+/** Small preferences (recent files, handheld setup), each guarded the same way. */
+export function pref<T>(key: string, fallback: T): T {
   try {
-    window.localStorage.removeItem(KEY);
+    const raw = window.localStorage.getItem(`axiom.${key}`);
+    return raw ? (JSON.parse(raw) as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+export function setPref(key: string, value: unknown): void {
+  try {
+    window.localStorage.setItem(`axiom.${key}`, JSON.stringify(value));
+  } catch {
+    // As above.
+  }
+}
+
+/** Restore Factory Defaults: every axiom.* key. */
+export function clearPrefs(): void {
+  try {
+    for (const k of Object.keys(window.localStorage)) if (k.startsWith("axiom.") || k === OLD_KEY) window.localStorage.removeItem(k);
   } catch {
     // Nothing to clear.
   }

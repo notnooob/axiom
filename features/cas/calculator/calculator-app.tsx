@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { Cursor } from "../math/cursor";
 import { selection, type EditState } from "../math/editor";
 import { followDrag, MathView, useCaretInView } from "../math/render";
+import type { Highlight } from "../ai/highlights";
 import type { CalculatorPage } from "../state/document";
 import { HistoryRow } from "./history";
 
@@ -18,6 +19,7 @@ export function CalculatorApp({
   onWarning,
   onCursor,
   onSelect,
+  highlights = [],
 }: {
   page: CalculatorPage;
   onPick: (entry: number, part: "input" | "output", paste: boolean) => void;
@@ -28,6 +30,8 @@ export function CalculatorApp({
   onCursor: (c: Cursor) => void;
   /** A drag across the entry line selects that stretch of it. */
   onSelect: (from: Cursor, to: Cursor) => void;
+  /** The assistant's highlights on this page. */
+  highlights?: Highlight[];
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const selected = useRef<HTMLDivElement>(null);
@@ -45,7 +49,7 @@ export function CalculatorApp({
 
   return (
     <div className="absolute inset-0 flex">
-      <div ref={scroller} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden text-[4.4cqw] [scrollbar-width:none]">
+      <div ref={scroller} className="min-w-0 flex-1 overflow-y-auto overflow-x-hidden text-[4.4cqw] scrollbar-none">
         {page.history.map((e, i) => (
           <div key={e.id} ref={page.sel?.entry === i ? selected : undefined}>
             <HistoryRow
@@ -57,13 +61,14 @@ export function CalculatorApp({
               onPick={(part, paste) => onPick(i, part, paste)}
               onCaret={(part, caret) => onCaret(i, part, caret)}
               onWarning={() => onWarning(i)}
+              flag={flagOf(highlights, e.id)}
             />
           </div>
         ))}
         {/* The whole entry band takes clicks: past the end puts the cursor at the end, and a drag from there selects back. */}
         <div
           ref={entry}
-          className="cursor-text overflow-x-auto px-[2cqw] py-[2.2cqw] [scrollbar-width:none]"
+          className="cursor-text overflow-x-auto px-[2cqw] py-[2.2cqw] scrollbar-none"
           onMouseDown={(e) => {
             const line = e.currentTarget.firstElementChild;
             if (e.target !== e.currentTarget || !(line instanceof HTMLElement)) return;
@@ -99,4 +104,10 @@ function ScrollRail() {
       </svg>
     </div>
   );
+}
+
+/** The highlight on a history entry, if the assistant put one there. */
+function flagOf(hs: Highlight[], id: number) {
+  const h = hs.find((x) => x.target.kind === "entry" && x.target.id === id);
+  return h ? { n: h.n, tone: h.tone } : undefined;
 }

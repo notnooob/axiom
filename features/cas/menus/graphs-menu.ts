@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { app, off, rule, sub, type Menu } from "./types";
+import { app, off, rule, sub, wiz, type Menu } from "./types";
 
 /**
  * The Graphs app's menu. Item positions are the contract (see types.ts):
@@ -59,21 +59,21 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         ]),
         app("Parametric", "entryParametric"),
         off("Polar"),
-        off("Scatter Plot"),
+        wiz("Scatter Plot...", "Scatter Plot", [{ label: "x:", value: "" }, { label: "y:", value: "" }], "scatter:{0}:{1}"),
         sub("Sequence", [off("Sequence"), off("Custom")]),
         app("Diff Eq", "entryDiffEq"),
       ]),
     ),
     sub("Window / Zoom", [
       app("Window Settings...", "windowSettings"),
-      rule(app("Zoom – Box", "zoomBox")),
+      rule(off("Zoom – Box")),
       app("Zoom – In", "zoomIn"),
       app("Zoom – Out", "zoomOut"),
       rule(app("Zoom – Standard", "zoomStandard")),
       app("Zoom – Quadrant 1", "zoomQuadrant1"),
-      app("Zoom – User", "zoomUser"),
+      off("Zoom – User"),
       app("Zoom – Trig", "zoomTrig"),
-      app("Zoom – Data", "zoomData"),
+      off("Zoom – Data"),
       app("Zoom – Fit", "zoomFit"),
       rule(app("Zoom – Square", "zoomSquare")),
       app("Zoom – Decimal", "zoomDecimal"),
@@ -81,7 +81,7 @@ export function graphsMenu(s: GraphsMenuState): Menu {
     sub("Trace", [
       app("Graph Trace", "graphTrace"),
       off("Trace All"),
-      app("Trace Step...", "traceStep"),
+      off("Trace Step..."),
       sub("Path Plot", [off("Function"), off("Parametric"), off("Polar"), off("Path Setup...")]),
       off("Geometry Trace"),
       off("Erase Geometry Trace"),
@@ -136,6 +136,6 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         sub("Transformation", ["Symmetry", "Reflection", "Translation", "Rotation", "Dilation"].map(off)),
       ]),
     ),
-    rule(app("Settings...", "graphSettings")),
+    rule(off("Settings...")),
   ];
 }

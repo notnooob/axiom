@@ -91,12 +91,18 @@ export const COMMAND_WORDS = new Set([
   "LinRegMx",
   "LinRegBx",
   "QuadReg",
+  "CubicReg",
+  "QuartReg",
   "ExpReg",
   "PowerReg",
   "LnReg",
   "zInterval_1Prop",
   "zInterval",
   "zTest",
+  "tInterval",
+  "tTest",
+  "zTest_1Prop",
+  "MedMed",
   "Disp",
 ]);
 
@@ -167,6 +173,11 @@ export function tokenize(src: string, asTyped = false): Tok[] {
       i++;
       continue;
     }
+    // © starts a comment, to the end of the line, as on the handheld (Actions ▸ Insert Comment).
+    if (c === "©") {
+      while (i < chars.length && peek() !== "\n") i++;
+      continue;
+    }
     // Numbers: 12, 1.5, .5, 1.2E-6 (E or the small-cap ᴇ the handheld uses).
     if (isDigit(c) || (c === "." && isDigit(peek(1)))) {
       let v = "";
@@ -204,6 +215,16 @@ export function tokenize(src: string, asTyped = false): Tok[] {
         if (!ARROW_NAMES.has(`${v}▶${rest}`)) break;
         v = `${v}▶${rest}`;
         i = j;
+      }
+      // χ²Pdf, invχ², χ²GOF …: the square is part of the command's name, not a power.
+      if (peek() === "²") {
+        let rest = "";
+        let j = i + 1;
+        while (j < chars.length && isIdPart(chars[j] ?? "")) rest += chars[j++];
+        if (isCommand(`${v}²${rest}`)) {
+          v = `${v}²${rest}`;
+          i = j;
+        }
       }
       // sin⁻¹, cosh⁻¹ …: the inverse is part of the name, not a power.
       if (INVERTIBLE.has(v) && peek() === "⁻" && peek(1) === "¹") {

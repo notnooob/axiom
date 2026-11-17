@@ -16,10 +16,12 @@
  * New components should use the semantic tokens, not the aliases.
  */
 
+// The page is amicro's dark theme (#121212, #f0f0f0, neutral-400); the screen
+// and keypad below keep the handheld's own colours.
 export const palette = {
   // === Surface — plaster cream warming into stone ===
-  bg:             "#faf8f3",
-  surface:        "#f3eee1",
+  bg:             "#121212",
+  surface:        "#1c1c1c",
   // Full-bleed page bands ONLY — never card-scale, that is what `surface` is for.
   // 1.24:1 against bg, ~2.5x the separation `surface` gives, which is the
   // difference between "did something change?" and "that's a different panel".
@@ -29,19 +31,19 @@ export const palette = {
   // Inside a surfaceDeep band: inkMuted -> inkBody, accent-as-text ->
   // accentPressed, hairline borders -> borderStrong. See docs/design.md.
   surfaceDeep:    "#e9e0cb",   // 1.24:1 on bg; inkBody 6.28, inkMuted 4.06 (too low — do not use)
-  surfaceHover:   "#ece5d4",
-  hairline:       "#e3dac7",
+  surfaceHover:   "#2a2a2a",
+  hairline:       "#262626",
   borderStrong:   "#9b8f72",   // 3.01:1 on bg — the one border that carries weight
 
   // === Ink — timber, never neutral grey ===
-  ink:            "#261f18",   // 15.32:1 on bg
+  ink:            "#f0f0f0",
   inkStrong:      "#332a21",   // 13.24:1
-  inkBody:        "#574d42",   //  7.77:1
-  inkMuted:       "#736a5b",   //  5.02:1 on bg, 4.60:1 on surface — but 4.24:1 on surfaceHover: never put muted text on a hover fill; use inkBody there
+  inkBody:        "#d4d4d4",
+  inkMuted:       "#a3a3a3",
 
   // === Accent — reading-lamp emerald. Interactive / "lit" only. ===
-  accent:         "#0f7a3c",   // 5.11:1 on bg; 5.43:1 under accentOn
-  accentPressed:  "#09661e",   // 6.75:1 on bg; text on accentSoft uses THIS
+  accent:         "#5aaee6",
+  accentPressed:  "#3d93cf",
   accentSoft:     "#e5efe3",   // tint fill only — pair with accentPressed (6.07:1)
   accentOn:       "#ffffff",
 
@@ -66,7 +68,7 @@ export const palette = {
   oxide:          "#a03327",   // 6.60:1 on bg — same row as signalRed
 
   // === Signal — status only, never interactive. Muted to sit on cream. ===
-  signalRed:      "#a03327",   // 6.60:1 on bg
+  signalRed:      "#f87171",
   signalAmber:    "#8f6430",   // 4.91:1
   signalGreen:    "#557a3a",   // 4.68:1
 
@@ -107,6 +109,10 @@ export const palette = {
   casShade:       "#c4c4c4",   // integral shading
   casBattery:     "#3cb043",
   casWarn:        "#f5c518",   // the ⚠ triangle beside an entry with a warning (casInk outline and !)
+  // The assistant's highlights (ai/highlights.ts): a ring and a numbered badge, white numbers on the fill.
+  // Crimson rather than casF2's red, so a highlight never reads as a curve.
+  casFlag:        "#c8104e",   // a mistake: 5.8:1 with white, 5.2:1 on casRowAlt
+  casLook:        "#9a5b00",   // something to look at: 5.4:1 with white, 4.9:1 on casRowAlt
   // Graph colours, f1 onward. f1 and f2 are taken from screenshots; the
   // rest of the order is unconfirmed.
   casF1:          "#1f4fd8",
@@ -143,23 +149,23 @@ export const palette = {
 
 export type PaletteToken = keyof typeof palette;
 
-// === CAS keypad (2026-11) ===
-// The /cas keypad and the screen's frame: warm near-black, cream number keys,
-// lamplight labels, a green ctrl. Only features/cas uses these.
+// === CAS keypad: the handheld's own colours ===
+// Black face, white function keys, slate number keys, blue ctrl and blue
+// second-function labels. Only features/cas uses these.
 export const casKeypad = {
-  casBody:        "#1d1b18", // keypad frame and screen frame
-  casBodyLow:     "#28251f", // keypad deck
-  casKeyFn:       "#13110f", // function and letter keys
-  casKeyFnText:   "#f3eee4",
-  casKeyNum:      "#ece5d6", // number keys
-  casKeyNumText:  "#1d1b18", // 14:1 on casKeyNum
-  casKeyLight:    "#b0a898", // x, y, z
-  casKeyLightText:"#13110f", // 8.2:1
-  casKeyLip:      "#0b0a09", // the shadow under each key
-  casKeyAlt:      "#f2c98a", // ctrl functions printed above the keys (lampLight, 11:1 on the deck)
-  casCtrl:        "#13804a", // the ctrl key
-  casCtrlText:    "#ffffff", // 4.9:1
-  casPad:         "#2d2a25", // touchpad
-  casPadRim:      "#45413a",
-  casPadText:     "#f3eee4", // the touchpad arrows
+  casBody:        "#18191b", // keypad face and screen bezel, a step above the #121212 page
+  casBodyLow:     "#18191b", // keypad deck (one face, as on the handheld)
+  casKeyFn:       "#f6f6f4", // function and letter keys
+  casKeyFnText:   "#141516",
+  casKeyNum:      "#4e5359", // number keys
+  casKeyNumText:  "#ffffff", // 7.9:1
+  casKeyLight:    "#4e5359", // x, y, z match the number keys
+  casKeyLightText:"#ffffff",
+  casKeyLip:      "#000000", // the shadow under each key, and the seam in a key pair
+  casKeyAlt:      "#6cc4f0", // ctrl functions printed above the keys (9.6:1 on the face)
+  casCtrl:        "#5aaee6", // the ctrl key
+  casCtrlText:    "#0b2236", // 7.3:1
+  casPad:         "#f6f6f4", // touchpad
+  casPadRim:      "#c9cbcd",
+  casPadText:     "#3a3d41", // the touchpad arrows
 } as const;

@@ -298,7 +298,7 @@ function RowView({
           <span key={`p${i}`} className="inline-flex items-start">
             {view}
             {here === i + 1 && <Caret hidden={Boolean(sel)} />}
-            <span className="-mt-[0.15em] inline-flex items-center text-[0.72em]">
+            <span className="mt-[-0.15em] inline-flex items-center text-[0.72em]">
               <RowView row={next.exp} path={childPath2(path, i + 1)} cursor={cursor} pick={pick} />
             </span>
           </span>,
@@ -403,7 +403,7 @@ function NodeView({
         <span className="inline-flex items-start">
           {/* Euler's number is a bold upright e on the handheld, unlike an italic variable e. */}
           <span className="font-casmath font-bold">e</span>
-          <span className="-mt-[0.15em] inline-flex items-center text-[0.72em]">{slot("exp")}</span>
+          <span className="mt-[-0.15em] inline-flex items-center text-[0.72em]">{slot("exp")}</span>
         </span>
       );
     case "sqrt":
@@ -411,7 +411,7 @@ function NodeView({
       return (
         <span className="inline-flex items-stretch">
           {node.t === "root" && (
-            <span className="-mr-[0.35em] inline-flex items-center self-start text-[0.55em]">{slot("idx")}</span>
+            <span className="mr-[-0.35em] inline-flex items-center self-start text-[0.55em]">{slot("idx")}</span>
           )}
           <span aria-hidden className="relative inline-block min-h-[1.2em] w-[0.6em] self-stretch">
             <svg viewBox="0 0 20 100" preserveAspectRatio="none" className="absolute inset-0 h-full w-full">
@@ -543,7 +543,7 @@ function NodeView({
       return (
         <span className="inline-flex items-end">
           <span>log</span>
-          <span className="-mb-[0.55em] inline-flex items-center text-[0.62em]">{slot("base")}</span>
+          <span className="mb-[-0.55em] inline-flex items-center text-[0.62em]">{slot("base")}</span>
           <Grouped open="(">{slot("arg")}</Grouped>
         </span>
       );
@@ -557,7 +557,7 @@ function Char({ c, prev, style }: { c: string; prev?: Node; style: Style }) {
     // Negation: the handheld's short raised dash, a bold minus narrowed (a
     // hyphen all but vanished in an exponent). Subtraction: a full-width minus.
     return neg ? (
-      <span className="relative -top-[0.13em] -mx-[0.06em] inline-block scale-x-[0.66]">−</span>
+      <span className="relative top-[-0.13em] mx-[-0.06em] inline-block scale-x-[0.66]">−</span>
     ) : (
       <span className="px-[0.1em]">−</span>
     );

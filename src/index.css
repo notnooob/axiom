@@ -1,0 +1,510 @@
+@import 'tailwindcss';
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/math/dist/*.js";
+/*
+  ---break---
+*/
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-bg: #121212;
+  --color-surface: #1c1c1c;
+  --color-surfaceDeep: #e9e0cb;
+  --color-surfaceHover: #2a2a2a;
+  --color-hairline: #262626;
+  --color-borderStrong: #9b8f72;
+  --color-ink: #f0f0f0;
+  --color-inkStrong: #332a21;
+  --color-inkBody: #d4d4d4;
+  --color-inkMuted: #a3a3a3;
+  --color-focus: #5aaee6;
+  --color-accentPressed: #3d93cf;
+  --color-accentSoft: #e5efe3;
+  --color-accentOn: #ffffff;
+  --color-accentWarm: #9d622b;
+  --color-lampLight: #f2c98a;
+  --color-lampCore: #fdf3e2;
+  --color-oxide: #a03327;
+  --color-signalRed: #f87171;
+  --color-signalAmber: #8f6430;
+  --color-signalGreen: #557a3a;
+  --color-subject1: #3b5f8f;
+  --color-subject2: #2b7470;
+  --color-subject3: #a8496a;
+  --color-subject4: #7a5288;
+  --color-subject5: #5e6b78;
+  --color-subject6: #3787a8;
+  --color-subject7: #764d64;
+  --color-subject8: #2f3d63;
+  --color-casBar: #3d3d3d;
+  --color-casTab: #f4f4f4;
+  --color-casTabIdle: #c4c4c4;
+  --color-casScreen: #ffffff;
+  --color-casRowAlt: #f2f2f2;
+  --color-casRule: #cfcfcf;
+  --color-casInk: #0a0a0a;
+  --color-casDim: #8a8a8a;
+  --color-casLabel: #5c5c5c;
+  --color-casSelect: #2c64c8;
+  --color-casSelectSoft: #cddff7;
+  --color-casHistorySelect: #6cbfe6;
+  --color-casSelectParent: #9dbfea;
+  --color-casStrip: #3d9fd8;
+  --color-casShade: #c4c4c4;
+  --color-casBattery: #3cb043;
+  --color-casWarn: #f5c518;
+  --color-casFlag: #c8104e;
+  --color-casLook: #9a5b00;
+  --color-casF1: #1f4fd8;
+  --color-casF2: #d6271c;
+  --color-casF3: #1e8c2f;
+  --color-casF4: #c96a00;
+  --color-casF5: #7b2fbf;
+  --color-casF6: #00838f;
+  --color-fg: #261f18;
+  --color-hoverFill: #ece5d4;
+  --color-subtleBorder: #e3dac7;
+  --color-cardDesc: #574d42;
+  --color-tagline: #574d42;
+  --color-prose: #332a21;
+  --color-tableHead: #f3eee1;
+  --color-tableLabel: #736a5b;
+  --color-tableText: #574d42;
+  --color-white: #ffffff;
+  --color-avatarFill: #93876a;
+  --color-faint: #b9b09b;
+  --color-casBody: #18191b;
+  --color-casBodyLow: #18191b;
+  --color-casKeyFn: #f6f6f4;
+  --color-casKeyFnText: #141516;
+  --color-casKeyNum: #4e5359;
+  --color-casKeyNumText: #ffffff;
+  --color-casKeyLight: #4e5359;
+  --color-casKeyLightText: #ffffff;
+  --color-casKeyLip: #000000;
+  --color-casKeyAlt: #6cc4f0;
+  --color-casCtrl: #5aaee6;
+  --color-casCtrlText: #0b2236;
+  --color-casPad: #f6f6f4;
+  --color-casPadRim: #c9cbcd;
+  --color-casPadText: #3a3d41;
+
+  --font-sans: 'Outfit Variable', Outfit, system-ui, sans-serif;
+  --font-casui:
+    'Source Sans 3 Variable', 'Source Sans 3', system-ui, sans-serif;
+  --font-casmath: 'STIX Two Text Variable', 'STIX Two Text', Cambria, serif;
+  --font-casmono: ui-monospace, Consolas, monospace;
+
+  --text-ui: 15px;
+  --text-ui--line-height: 22px;
+  --text-uiSm: 13px;
+  --text-uiSm--line-height: 18px;
+  --text-meta: 12px;
+  --text-meta--line-height: 16px;
+
+  --radius-card: 6px;
+  --radius-hero: 18px;
+
+  --transition-duration-fast: 150ms;
+
+  /* The motion curves (Emil Kowalski's): they replace Tailwind's weaker ease-out and ease-in-out. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --animate-pop: pop 200ms var(--ease-out);
+  --animate-fade: fade 150ms var(--ease-out);
+
+  @keyframes pop {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  /* The calculator was drawn with Tailwind v3's default border colour; shadcn's default is for the assistant. */
+  [role="application"] *,
+  [data-cas-screen-host] * {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer utilities {
+}
+
+html {
+  @apply bg-bg font-sans text-ink antialiased;
+  color-scheme: dark;
+}
+
+/* One soft light over the stage the calculator stands on (amicro's preview stage, as page light). */
+body {
+  background: radial-gradient(60rem 40rem at 50% 35%, rgba(255, 255, 255, 0.045), transparent 70%) fixed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+  /* Reduced, not none: the chrome's surfaces still fade, without moving. */
+  .ui-pop,
+  .ui-modal,
+  .ui-backdrop,
+  .ui-sheet,
+  .ui-rise,
+  .ui-fade,
+  .ui-swap {
+    transition-property: opacity !important;
+    transition-duration: 150ms !important;
+  }
+}
+
+/*
+  The chrome's motion (not the calculator screen's). Base UI marks a popup's
+  first and last frames with data-starting-style and data-ending-style, so
+  these are transitions: they retarget when opened and closed quickly.
+*/
+
+/* Menus, selects, popovers, tooltips: out of their trigger, and away a little faster. */
+.ui-pop {
+  transform-origin: var(--transform-origin);
+  transition:
+    opacity 160ms var(--ease-out),
+    transform 160ms var(--ease-out);
+}
+.ui-pop[data-starting-style],
+.ui-pop[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.96);
+}
+.ui-pop[data-ending-style] {
+  transition-duration: 110ms;
+}
+/* Once one tooltip is open, the next one along opens at once. */
+.ui-pop[data-instant] {
+  transition-duration: 0ms;
+}
+
+/* Dialogs: centred, so they grow from the middle; the backdrop fades with them. */
+.ui-modal {
+  transition:
+    opacity 220ms var(--ease-out),
+    transform 220ms var(--ease-out);
+}
+.ui-modal[data-starting-style],
+.ui-modal[data-ending-style] {
+  opacity: 0;
+  transform: scale(0.96);
+}
+.ui-modal[data-ending-style] {
+  transition-duration: 150ms;
+}
+.ui-backdrop {
+  transition: opacity 220ms var(--ease-out);
+}
+.ui-backdrop[data-starting-style],
+.ui-backdrop[data-ending-style] {
+  opacity: 0;
+}
+
+/* AI mode's chat list on a phone: a sheet from the left edge. */
+.ui-sheet {
+  transition: transform 420ms var(--ease-drawer);
+}
+.ui-sheet[data-starting-style],
+.ui-sheet[data-ending-style] {
+  transform: translateX(-100%);
+}
+.ui-sheet[data-ending-style] {
+  transition-duration: 280ms;
+}
+
+/* Something the agent just added (a step, a question, a reply): it settles in from just below. */
+.ui-rise {
+  transition:
+    opacity 260ms var(--ease-out),
+    translate 260ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+.ui-fade {
+  transition: opacity 200ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+  }
+}
+/* One control standing in for another in the same place (Send and Stop). */
+.ui-swap {
+  transition:
+    opacity 160ms var(--ease-out),
+    scale 160ms var(--ease-out);
+  @starting-style {
+    opacity: 0;
+    scale: 0.85;
+  }
+}
+
+/* The assistant open on a wide window: the calculator moves left and narrows to the room beside it, never under it. */
+@media (min-width: 1100px) {
+  .ai-open {
+    margin-right: 412px;
+    max-width: min(calc(100vw - 412px - 3rem), calc(min(24rem, var(--cas-h) / 2.1) + 1.25rem + var(--cas-h) * 4 / 3 + 2.5rem));
+  }
+}
+/*
+  ---break---
+*/
+@theme inline {
+  --font-heading: var(--font-sans);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+/*
+  ---break---
+*/
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --radius: 0.625rem;
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+/*
+  ---break---
+*/
+.dark {
+  --background: #121212;
+  --foreground: oklch(0.985 0 0);
+  --card: #181818;
+  --card-foreground: oklch(0.985 0 0);
+  --popover: #1c1c1c;
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: #232323;
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: #232323;
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: #262626;
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: #161616;
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+/*
+  AI mode's live view: a turning light round the screen the agent is working
+  on, and a sweep across it. Both are transforms (they stay smooth while the
+  page is busy), and both fade in and out with the live state rather than
+  snapping; once faded they're display: none, so nothing spins unseen.
+*/
+.live-border,
+.live-sweep {
+  transition:
+    opacity 400ms var(--ease-out),
+    display 400ms allow-discrete;
+  @starting-style {
+    opacity: 0;
+  }
+}
+[data-live="false"] .live-border,
+[data-live="false"] .live-sweep {
+  display: none;
+  opacity: 0;
+}
+.live-border {
+  background: conic-gradient(from 0deg, transparent 0deg, #5aaee6 70deg, #a78bfa 140deg, transparent 220deg);
+  animation: live-spin 3.2s linear infinite;
+}
+@keyframes live-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+.live-sweep {
+  overflow: hidden;
+}
+.live-sweep::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 30%, rgba(90, 174, 230, 0.14) 50%, transparent 70%);
+  animation: live-sweep 2.4s var(--ease-in-out) infinite;
+}
+@keyframes live-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* Notes: maths and chem boxes in the text, and comments. */
+.nb-box {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.45em;
+  margin: 0 0.15em;
+  padding: 0 0.35em;
+  border: 1px solid #cfcfcf;
+  border-radius: 0.3em;
+}
+.nb-box:focus-within {
+  border-color: #2c64c8;
+}
+.nb-box [data-in] {
+  min-width: 0.6em;
+  outline: none;
+}
+.nb-math [data-in],
+.nb-math [data-out] {
+  font-family: var(--font-casmath);
+}
+.nb-math [data-out]:not(:empty)::before {
+  content: "▸ ";
+  color: #5c5c5c;
+}
+.nb-math [data-out][data-error] {
+  color: #c62828;
+}
+.nb-math[data-hide-in] [data-in],
+.nb-math[data-hide-out] [data-out] {
+  display: none;
+}
+.nb-comment {
+  color: #1f4fd8;
+}
+.nb-comment[data-comment="Reviewer"] {
+  color: #a8496a;
+}
+.nb-comment::before {
+  content: attr(data-comment) ": ";
+  font-weight: 600;
+}
+.nb-comment [data-in] {
+  display: inline-block;
+  min-width: 0.6em;
+  outline: none;
+}

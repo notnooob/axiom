@@ -169,7 +169,7 @@ export function SliderView({
             else if (e.key === "Escape") typed(false);
           }}
           onBlur={() => typed(true)}
-          className="w-[5em] border border-casSelect bg-casScreen px-[0.2em] font-casmono text-casInk outline-none"
+          className="w-[5em] border border-casSelect bg-casScreen px-[0.2em] font-casmono text-casInk outline-hidden"
         />
       )}
       <button
@@ -178,7 +178,7 @@ export function SliderView({
         aria-label={`${s.name} slider menu`}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => onMenu(e.clientX, e.clientY)}
-        className="-my-[0.6em] ml-[0.2em] hidden min-h-[2em] min-w-[2em] items-center justify-center text-[1.3em] leading-none text-casInk [@media(pointer:coarse)]:inline-flex"
+        className="my-[-0.6em] ml-[0.2em] hidden min-h-[2em] min-w-[2em] items-center justify-center text-[1.3em] leading-none text-casInk pointer-coarse:inline-flex"
       >
         ⋯
       </button>
@@ -299,7 +299,7 @@ export function SliderView({
           {label}
           {bar}
           {!s.hideScale && (
-            <div className="-ml-[0.6em] flex w-[8.4em] justify-between">
+            <div className="ml-[-0.6em] flex w-[8.4em] justify-between">
               {scale(s.min)}
               {scale(s.max)}
             </div>

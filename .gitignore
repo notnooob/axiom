@@ -1,0 +1,21 @@
+node_modules
+dist
+public/pyodide
+public/cas/giac/1.9.0/
+# Agent skill packs installed locally (tooling for coding agents, not part of Axiom)
+.agents/
+.claude/
+skills-lock.json
+
+# The assistant eval's reports (scripts/ai-eval.mjs)
+eval-out/
+
+# Cloudflare Workers: wrangler's local state and your own account's config and secrets
+.wrangler/
+wrangler.toml
+wrangler.json
+wrangler.jsonc
+.dev.vars*
+
+# The maintainer's own agent instructions (see AGENTS.md)
+AGENTS.private.md

@@ -17,6 +17,7 @@ export async function screenPng(el: HTMLElement, scale = 3): Promise<Blob> {
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w * scale}" height="${h * scale}" viewBox="0 0 ${w} ${h}">` +
+    `<defs><style>${await embeddedFonts()}</style></defs>` +
     `<foreignObject x="0" y="0" width="${w}" height="${h}">` +
     `<div xmlns="http://www.w3.org/1999/xhtml">${new XMLSerializer().serializeToString(clone)}</div>` +
     `</foreignObject></svg>`;
@@ -33,6 +34,41 @@ export async function screenPng(el: HTMLElement, scale = 3): Promise<Blob> {
   return new Promise((resolve, reject) =>
     canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("No image"))), "image/png"),
   );
+}
+
+/**
+ * An SVG drawn as an image can't load the page's fonts, so the screen's two
+ * (Source Sans 3, STIX Two) go in as data: URLs; without them the text falls
+ * back to wider fonts and wraps. Read once, from the page's own @font-face rules.
+ */
+let fonts: Promise<string> | null = null;
+function embeddedFonts(): Promise<string> {
+  fonts ??= (async () => {
+    const out: string[] = [];
+    for (const sheet of Array.from(document.styleSheets)) {
+      let rules: CSSRuleList;
+      try {
+        rules = sheet.cssRules;
+      } catch {
+        continue; // A stylesheet from another origin can't be read (there are none; don't fail on one).
+      }
+      for (const r of Array.from(rules)) {
+        if (!(r instanceof CSSFontFaceRule) || !/Source Sans 3|STIX Two/.test(r.style.getPropertyValue("font-family"))) continue;
+        const m = /url\(["']?([^"')]+)["']?\)/.exec(r.style.getPropertyValue("src"));
+        if (!m) continue;
+        try {
+          const bytes = new Uint8Array(await (await fetch(new URL(m[1]!, sheet.href ?? location.href))).arrayBuffer());
+          let bin = "";
+          for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+          out.push(r.cssText.replace(m[0], `url(data:font/woff2;base64,${btoa(bin)})`));
+        } catch {
+          // A face that won't load leaves its characters in a fallback font.
+        }
+      }
+    }
+    return out.join("\n");
+  })();
+  return fonts;
 }
 
 /** Copy computed styles onto the clone, element by element; canvases become images. */
