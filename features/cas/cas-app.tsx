@@ -2150,7 +2150,7 @@ export function CasApp() {
       }
       if (view === "home") {
         if (key.k === "menu") setMenu({ items: SETTINGS_MENU, state: openMenu() });
-        else if (key.k === "esc") setView("doc");
+        else if (key.k === "esc") void openCurrent();
         else {
           const r = homeKeyPress(homeSel, key, recent.length > 0, !isScratch || Boolean(pref<Cached | null>("current", null)));
           setHomeSel(r.sel);
@@ -2234,6 +2234,7 @@ export function CasApp() {
       rows,
       homeAction,
       isScratch,
+      openCurrent,
       openFile,
       openScratchpad,
       writeNow,
