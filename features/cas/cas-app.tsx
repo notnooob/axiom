@@ -21,7 +21,7 @@ import { TextShimmer } from "@/src/components/amicro/text-shimmer";
 import { useWebHaptics } from "@/src/hooks/use-web-haptics";
 import { cn } from "@/shared/lib/utils";
 import { historySaid, markSaid, menuSaid, pageSaid, toolSaid, wizardSaid } from "./a11y";
-import { calcKey, wizardInsert } from "./calculator/calc-keys";
+import { calcKey, isTemplateWizard, wizardInsert, wizardLinear } from "./calculator/calc-keys";
 import { CalculatorApp } from "./calculator/calculator-app";
 import { CasEngine, definedFunctions, definedNames, type EngineStatus } from "./engine/client";
 import { DEFAULT_SETTINGS, evaluate, type Settings } from "./engine/evaluate";
@@ -2025,7 +2025,13 @@ export function CasApp() {
         return;
       }
       if (page?.kind === "notes") {
-        notesApi.current?.insertMath(built);
+        notesApi.current?.insertMath(wizardLinear(built));
+        return;
+      }
+      // A template from the palette's dialogs (Matrix, m by n) goes into the
+      // selected cell, starting an edit the way a template key does.
+      if (page?.kind === "lists" && isTemplateWizard(built)) {
+        setLists((p) => ({ ...p, edit: wizardInsert(p.edit ?? emptyEdit(), built) }));
         return;
       }
       setCalc((p) => ({ ...p, edit: wizardInsert(p.edit, built), sel: null }));

@@ -4,7 +4,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { cn } from "@/shared/lib/utils";
 import type { Key } from "../keys";
 import { calculatorMenu } from "../menus/calculator-menu";
-import { CellGrid, gridMove, PALETTE, PALETTE_COLS, TEMPLATE_CELLS, type GridCell } from "../menus/palette";
+import { CellGrid, gridMove, PALETTE, PALETTE_COLS, pickCell, TEMPLATE_CELLS, type GridCell } from "../menus/palette";
 import type { MenuAction, MenuItem, TemplateId } from "../menus/types";
 import { CATALOG, catalogInsert } from "./commands";
 
@@ -89,6 +89,18 @@ const sortKey = (n: string) => n.replace(/^[▶Δ]/, "").toLowerCase();
 
 export type CatalogResult = { state: CatalogState | null; insert?: string; template?: TemplateId; wizard?: Wizard };
 
+/**
+ * Picking a cell on the Templates tab, the same as in the templates palette:
+ * insert its template, or close and open its dialog (Matrix, m by n asks for
+ * a size first). A cell that does neither leaves the catalog as it was.
+ */
+function templatePick(s: CatalogState, index: number): CatalogResult {
+  const r = pickCell(index);
+  if (r.insert) return { state: null, template: r.insert };
+  if (r.wizard) return { state: null, wizard: r.wizard };
+  return { state: s };
+}
+
 export function catalogKeyPress(s: CatalogState, key: Key): CatalogResult {
   if (key.k === "esc") return { state: null };
   if (key.k === "char" && /^[1-6]$/.test(key.c)) return { state: { ...s, tab: Number(key.c) } };
@@ -130,10 +142,7 @@ export function catalogKeyPress(s: CatalogState, key: Key): CatalogResult {
   if (s.tab === 5) {
     const r = gridMove(s.template, key, PALETTE.length, PALETTE_COLS);
     if (r === "esc") return { state: null };
-    if (r === "enter") {
-      const id = PALETTE[s.template]?.id;
-      return id ? { state: null, template: id } : { state: s };
-    }
+    if (r === "enter") return templatePick(s, s.template);
     return { state: { ...s, template: r } };
   }
   if (key.k === "left" || key.k === "right")
@@ -279,8 +288,8 @@ export function CatalogOverlay({
             index={state.template}
             label="Templates"
             onPick={(i) => {
-              const id = PALETTE[i]?.id;
-              if (id) onResult({ state: null, template: id });
+              const r = templatePick(state, i);
+              if (r.state === null) onResult(r);
             }}
           />
         </div>

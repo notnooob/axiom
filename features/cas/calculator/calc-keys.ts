@@ -235,3 +235,18 @@ export function wizardInsert(s: E.EditState, built: string): E.EditState {
   }
   return E.insertText(s, built);
 }
+
+/** Dialogs whose OK builds a template (or a command to fill in) rather than finished text. */
+const TEMPLATE_WIZARDS = new Set(["system", "linsystem", "matrix", "polyroots", "derivat"]);
+
+/** Whether a wizard's build is one wizardInsert turns into a template. */
+export const isTemplateWizard = (built: string): boolean => TEMPLATE_WIZARDS.has(built.split(":")[0] ?? "");
+
+/**
+ * A wizard's result as linear text, for a Notes maths box, which has no 2D
+ * entry line: the same template the Calculator would get, written out, so
+ * "matrix:2:3" becomes an empty 2 by 3 matrix rather than those words.
+ */
+export function wizardLinear(built: string): string {
+  return isTemplateWizard(built) ? E.rowText(wizardInsert(E.emptyEdit(), built)) : built;
+}
