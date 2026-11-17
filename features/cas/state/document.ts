@@ -4,6 +4,7 @@ import { emptyEdit, type EditState } from "../math/editor";
 import type { Row } from "../math/tree";
 import { STANDARD, type GraphWindow, type Mark, type Tool } from "../graphs/model";
 import type { GeoObj, GeoTool } from "../geometry/model";
+import type { PageGroup } from "./layout";
 
 /**
  * One document of problems, each with any number of pages (1.1, 1.2, 2.1 …).
@@ -248,6 +249,10 @@ export type CasDocument = {
    * Define f(x)=…), by problem: evaluated the first time the problem is shown.
    */
   pendingSym?: Record<string, string[]>;
+  /** Names given with Problem ▸ Rename, by problem number. */
+  problemNames?: Record<string, string>;
+  /** Pages sharing one screen (doc ▸ Page Layout), state/layout.ts. */
+  groups?: PageGroup[];
 };
 
 let nextId = 1;
@@ -291,11 +296,20 @@ export function newDocument(first: AppKind = "calculator", title = "Untitled"): 
 
 export const problemOf = (p: Page | undefined): number => p?.problem ?? 1;
 
-/** A page's label, problem.page: 2.1 is the first page of problem 2. */
+/** A page's label, problem.page: 2.1 is the first page of problem 2. Pages laid out together on one screen share theirs. */
 export function pageLabel(doc: CasDocument, i: number): string {
   const p = doc.pages[i];
   const n = problemOf(p);
-  const within = doc.pages.slice(0, i + 1).filter((q) => problemOf(q) === n).length;
+  const groupOf = (id: number) => (doc.groups ?? []).findIndex((g) => g.slots.includes(id));
+  const counted = new Set<number>();
+  let within = 0;
+  for (const q of doc.pages) {
+    const g = groupOf(q.id);
+    const unit = g < 0 || !counted.has(g);
+    if (g >= 0) counted.add(g);
+    if (unit && problemOf(q) === n) within++;
+    if (q === p || (g >= 0 && g === groupOf(p?.id ?? -1))) break;
+  }
   return `${n}.${within}`;
 }
 

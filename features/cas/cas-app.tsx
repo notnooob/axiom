@@ -11,6 +11,7 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence } from "framer-motion";
@@ -25,6 +26,10 @@ import { calcKey, isTemplateWizard, wizardInsert, wizardLinear } from "./calcula
 import { CalculatorApp } from "./calculator/calculator-app";
 import { CasEngine, definedFunctions, definedNames, type EngineStatus } from "./engine/client";
 import { definedSources } from "./engine/program";
+import { fillRegion, groupIndex, groupWithNext, moveSplit, nextRegion, selectLayout, swapApp, ungroup, unitOf, units } from "./state/layout";
+import { deletePage, deleteProblem, movePage, renameProblem } from "./state/pages";
+import { LayoutFrame } from "./screen/layout-frame";
+import { PageSorter } from "./screen/page-sorter";
 import { libraryDefinition, loadLibraries } from "./files/library";
 import { DEFAULT_SETTINGS, evaluate, type Settings } from "./engine/evaluate";
 import type { ProgramIO } from "./engine/eval-program";
@@ -267,6 +272,16 @@ export function CasApp() {
   const afterSave = useRef<(() => void) | null>(null);
   const [setup, setSetupState] = useState<Setup>(() => pref<Setup>("setup", { text: "Medium", haptics: true }));
   const [recent, setRecent] = useState<string[]>(() => pref<string[]>("recent", []));
+  /** The Page Sorter's chosen page, while it's open. */
+  const [sorter, setSorter] = useState<number | null>(null);
+  /** Custom Split is moving a layout's divider. */
+  const [splitting, setSplitting] = useState(false);
+  /** An empty layout region waiting for the app chosen in the add-page menu. */
+  const fillTarget = useRef<{ group: number; slot: number } | null>(null);
+  /** Edit ▸ Copy and Cut: the latest render's (they read the selection). */
+  const editOps = useRef({ copy: () => {}, cut: () => {} });
+  /** A Notes page in another region gets its own handle, so the active one's isn't replaced. */
+  const otherNotes = useRef<NotesApi | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; lines: string[]; ok: () => void; buttons?: Choice[] } | null>(null);
   const [dragging, setDragging] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
@@ -1265,13 +1280,19 @@ export function CasApp() {
   // A new page is a clean sheet: a new Graphs page has no curves on it.
   const addPage = useCallback(
     (kind: "calculator" | "graphs" | "lists" | "python" | "pyshell" | "datastats" | "notes" | "geometry") => {
+      const target = fillTarget.current;
+      fillTarget.current = null;
       setDoc((d) => {
         const pages = d.pages.slice();
         const page = newPage(kind, problemOf(d.pages[d.active]));
         // Its entry line starts on the problem's next free function number.
         if (page.kind === "graphs") page.editing = nextFree(page, takenFns);
-        pages.splice(d.active + 1, 0, page);
-        return { ...d, pages, active: d.active + 1 };
+        if (target) return fillRegion(d, target.group, target.slot, page);
+        // After the whole of a page laid out with several apps, not between them.
+        const u = units(d)[unitOf(d, d.active)];
+        const at = u ? Math.max(...u.pages) + 1 : d.active + 1;
+        pages.splice(at, 0, page);
+        return { ...d, pages, active: at };
       });
     },
     [takenFns],
@@ -1615,6 +1636,83 @@ export function CasApp() {
     [page, setGraphs, settings.angle, takenFns, defined],
   );
 
+  /**
+   * A change to the document's pages or problems (delete, rename, the Page
+   * Sorter). When the shown problem is the one deleted, the problem shown
+   * next has its variables brought back from the document; when it's only
+   * renumbered, the engine already has the right ones.
+   */
+  const restructure = useCallback(
+    (next: CasDocument | null, refused: string) => {
+      if (!next) return setError(refused);
+      const d = latestDoc.current;
+      const e = engine.current;
+      const before = problemOf(d.pages[d.active]);
+      const shownId = next.pages[next.active]!.id;
+      const was = problemOf(d.pages.find((p) => p.id === shownId));
+      const now = problemOf(next.pages[next.active]);
+      shownProblem.current = now;
+      if (was === before) return setDoc(next);
+      const arriving = d.problems?.[String(was)] ?? [];
+      const problems = { ...(next.problems ?? {}) };
+      delete problems[String(now)];
+      setDoc({ ...next, problems });
+      lastAns.current = undefined;
+      if (e)
+        void (async () => {
+          await e.clearAll();
+          await e.restore(arriving);
+          setDefined(definedNames(arriving));
+          await applyPending(now);
+        })();
+    },
+    [applyPending],
+  );
+
+  /** Ctrl+Tab and a click on another region: the app there takes the keys; an empty region asks which app to put there. */
+  const focusRegion = useCallback((dir: 1 | -1) => {
+    const r = nextRegion(latestDoc.current, dir);
+    if (!r) return;
+    if ("active" in r) setDoc((d) => ({ ...d, active: r.active }));
+    else askRegion(r.group, r.slot);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function askRegion(group: number, slot: number) {
+    fillTarget.current = { group, slot };
+    creatingNew.current = false;
+    setMenu({ items: ADD_PAGE, state: openMenu() });
+  }
+
+  /** The Page Sorter's keys: choose, open, move or delete a page. */
+  const sorterKey = useCallback(
+    (key: Key) => {
+      const d = latestDoc.current;
+      const sel = sorter ?? 0;
+      const all = units(d);
+      const u = unitOf(d, sel);
+      if (key.k === "esc") return setSorter(null);
+      if (key.k === "enter") {
+        setDoc((x) => ({ ...x, active: sel }));
+        return setSorter(null);
+      }
+      if (key.k === "left" || key.k === "up" || key.k === "right" || key.k === "down") {
+        const step = key.k === "left" || key.k === "up" ? -1 : 1;
+        return setSorter(all[Math.max(0, Math.min(all.length - 1, u + step))]?.pages[0] ?? sel);
+      }
+      if (key.k === "selectLeft" || key.k === "selectRight") {
+        const r = movePage(d, sel, key.k === "selectLeft" ? -1 : 1);
+        setDoc(r.doc);
+        return setSorter(r.index);
+      }
+      if (key.k === "delete" || key.k === "backspace" || key.k === "cut") {
+        const next = deletePage(d, sel);
+        restructure(next, "Error: A document keeps at least one page");
+        if (next) setSorter(Math.min(sel, next.pages.length - 1));
+      }
+    },
+    [sorter, restructure],
+  );
+
   const runAction = useCallback(
     (action: MenuAction | undefined) => {
       if (!action) return;
@@ -1625,6 +1723,44 @@ export function CasApp() {
       else if (action.kind === "template") pageKey({ k: "template", id: action.template });
       else if (action.kind === "wizard") setWizard(openWizard(action));
       else if (action.id === "insertProblem") setDoc(insertProblem);
+      else if (action.id === "editUndo" || action.id === "editRedo") stepUndo(action.id === "editUndo");
+      else if (action.id === "editCopy") editOps.current.copy();
+      else if (action.id === "editCut") editOps.current.cut();
+      else if (action.id === "editPaste")
+        void navigator.clipboard
+          ?.readText()
+          .then((t) => t.trim() && pageKey({ k: "paste", text: t.replace(/\s+/g, " ").trim() }))
+          .catch(() => setError("Error: The browser didn't allow reading the clipboard. Use Ctrl+V."));
+      else if (action.id === "editDelete") pageKey({ k: "delete" });
+      else if (action.id === "pageSorter") setSorter(doc.active);
+      else if (action.id === "problemRename")
+        setWizard(openWizard({ kind: "wizard", title: "Rename Problem", arrows: false, fields: [{ label: "Name:", value: doc.problemNames?.[String(problemOf(page))] ?? "" }], build: "problemrename:{0}" }));
+      else if (action.id === "problemDelete") {
+        const n = problemOf(page);
+        setConfirm({
+          title: "Delete Problem",
+          lines: [`Delete problem ${n} and its pages?`, "", "Its variables go with it."],
+          ok: () => restructure(deleteProblem(latestDoc.current, n), "Error: A document keeps at least one problem"),
+        });
+      } else if (/^layout[1-8]$/.test(action.id)) {
+        const next = selectLayout(doc, Number(action.id.slice(6)));
+        setDoc(next);
+        // A new empty region asks for its app straight away.
+        const g = groupIndex(next, next.pages[next.active]!.id);
+        const empty = g < 0 ? -1 : next.groups![g]!.slots.indexOf(null);
+        if (empty >= 0) askRegion(g, empty);
+      } else if (action.id === "layoutCustom") {
+        if (groupIndex(doc, page?.id ?? -1) < 0) setError("Error: Choose a layout with more than one app first");
+        else setSplitting(true);
+      } else if (action.id === "layoutSwap") setDoc(swapApp);
+      else if (action.id === "layoutDelete") {
+        if (groupIndex(doc, page?.id ?? -1) < 0) setError("Error: This page has only one app");
+        else restructure(deletePage(doc, doc.active), "Error: A document keeps at least one page");
+      } else if (action.id === "layoutGroup") {
+        const next = groupWithNext(doc);
+        if (next === doc) setError("Error: Group needs a next page in the same problem, and at most four apps");
+        else setDoc(next);
+      } else if (action.id === "layoutUngroup") setDoc(ungroup);
       else if (/^add(Calculator|Graphs|Lists|Python|Shell|Data|Notes|Geometry)$/.test(action.id)) {
         const kinds = { addCalculator: "calculator", addGraphs: "graphs", addLists: "lists", addPython: "python", addShell: "pyshell", addData: "datastats", addNotes: "notes", addGeometry: "geometry" } as const;
         const kind = kinds[action.id as keyof typeof kinds];
@@ -1952,6 +2088,11 @@ export function CasApp() {
       const badName = (n: string) => !n || /[/\\:*?"<>|]/.test(n);
       if (/^(prgmnew|prgmopen|prgmview|recalldef|libimport|libshortcut):/.test(built)) {
         void programWizard(built);
+        return;
+      }
+      if (built.startsWith("problemrename:")) {
+        const n = problemOf(latestDoc.current.pages[latestDoc.current.active]);
+        setDoc((d) => renameProblem(d, n, built.slice(14)));
         return;
       }
       if (built.startsWith("request:")) {
@@ -2287,6 +2428,7 @@ export function CasApp() {
         const r = menuKeyPress(menu.items, menu.state, key);
         setMenu(r.state ? { items: menu.items, state: r.state } : null);
         // Leaving New's add-page menu without choosing goes back home.
+        if (!r.state && !r.action) fillTarget.current = null;
         if (!r.state && !r.action && creatingNew.current) {
           creatingNew.current = false;
           setView(backTo.current);
@@ -2305,6 +2447,20 @@ export function CasApp() {
         if (r.state) lastFinance.current = r.state;
         setFinance(r.state);
         if (r.error) setError(r.error);
+        return;
+      }
+      if (sorter !== null) {
+        sorterKey(key);
+        return;
+      }
+      if (splitting) {
+        if (key.k === "left" || key.k === "up") setDoc((d) => moveSplit(d, -0.05));
+        else if (key.k === "right" || key.k === "down") setDoc((d) => moveSplit(d, 0.05));
+        else if (key.k === "enter" || key.k === "esc") setSplitting(false);
+        return;
+      }
+      if (key.k === "switchApp") {
+        focusRegion(1);
         return;
       }
       // The handheld's own keys, wherever you are.
@@ -2387,10 +2543,12 @@ export function CasApp() {
         return;
       }
       if (key.k === "prevPage" || key.k === "nextPage") {
-        setDoc((d) => ({
-          ...d,
-          active: Math.max(0, Math.min(d.pages.length - 1, d.active + (key.k === "prevPage" ? -1 : 1))),
-        }));
+        // By page tab: a page laid out with several apps is one step.
+        setDoc((d) => {
+          const all = units(d);
+          const u = Math.max(0, Math.min(all.length - 1, unitOf(d, d.active) + (key.k === "prevPage" ? -1 : 1)));
+          return all[u]!.pages.includes(d.active) ? d : { ...d, active: all[u]!.pages[0]! };
+        });
         return;
       }
       // Esc steps back: it cancels what's open on the page first, then leaves the document.
@@ -2401,6 +2559,8 @@ export function CasApp() {
       pageKey(key);
     },
     [
+      sorter,
+      splitting,
       leaveDocument,
       py,
       confirm,
@@ -2529,6 +2689,64 @@ export function CasApp() {
     if (!h) return;
     const text = page.sel.part === "input" ? h.inputText : h.outputText;
     void navigator.clipboard?.writeText(text).catch(() => undefined);
+  };
+
+  editOps.current = {
+    copy: copySelection,
+    cut: () => {
+      if (page?.kind === "calculator" && page.sel) copySelection();
+      else if ((page?.kind === "calculator" || page?.kind === "graphs") && selection(page.edit)) {
+        copySelection();
+        handleKey({ k: "delete" });
+      }
+    },
+  };
+
+  /** Another region's app on a page laid out with several: drawn as it stands, taking no keys. */
+  const renderOther = (p: Page): ReactNode => {
+    const none = () => undefined;
+    const ready = status === "ready" || status === "busy";
+    switch (p.kind) {
+      case "calculator":
+        return <CalculatorApp page={p} onPick={none} onCaret={none} onWarning={none} onCursor={none} onSelect={none} />;
+      case "graphs":
+        return (
+          <GraphsApp
+            page={{ ...p, editing: null, tool: null }}
+            giac={engine.current?.giac ?? null}
+            ready={ready}
+            onSamples={none}
+            onWindow={none}
+            onToolX={none}
+            onConfirm={none}
+            onToolFn={none}
+            onEditFn={none}
+            onEditRel={none}
+            onEditPar={none}
+            onDESettings={none}
+            onSlider={none}
+            onSliderTyped={none}
+            onSliderAction={none}
+            onSliderPlace={none}
+            onCursor={none}
+            onSelect={none}
+          />
+        );
+      case "lists":
+        return <ListsApp page={p} onSelect={none} />;
+      case "notes":
+        return <NotesApp page={p} apiRef={otherNotes} onChange={none} evaluate={notesEvaluate} />;
+      case "datastats":
+        return <DataStatsApp page={p} giac={engine.current?.giac ?? null} ready={ready} toGiac={(text) => translate(parse(text), settings).giac} onAxis={none} onMovable={none} onWindow={none} />;
+      case "geometry":
+        return <GeometryApp page={p} onChange={none} onError={none} onAsk={none} />;
+      case "python":
+        return <PythonEditor page={p} onChange={none} editorRef={none} />;
+      case "pyshell":
+        return <PythonShell page={p} prompt={null} status={py.status} />;
+      default:
+        return <UnsupportedApp page={p} />;
+    }
   };
 
   const onPaste = (e: ClipboardEvent) => {
@@ -3059,8 +3277,8 @@ export function CasApp() {
             {createPortal(
             <Screen
               variant={view === "new" ? "doc" : view}
-              pageLabels={view === "doc" ? doc.pages.map((_, i) => pageLabel(doc, i)) : []}
-              active={doc.active}
+              pageLabels={view === "doc" ? units(doc).map((u) => pageLabel(doc, u.pages[0]!)) : []}
+              active={unitOf(doc, doc.active)}
               title={view === "home" ? "Axiom" : view === "browse" ? "My Documents" : view === "new" ? "Untitled" : `${dirty ? "*" : ""}${doc.title}`}
               onClose={() => {
                 // X closes the document (Save / No / Cancel first when it has changes) and goes back
@@ -3074,7 +3292,7 @@ export function CasApp() {
                 }
               }}
               angle={settings.angle === "rad" ? "RAD" : "DEG"}
-              onSelectPage={(i) => setDoc((d) => ({ ...d, active: i }))}
+              onSelectPage={(u) => setDoc((d) => ({ ...d, active: units(d)[u]?.pages[0] ?? d.active }))}
               onToggleAngle={() => {
                 const next: Settings = { ...settings, angle: settings.angle === "rad" ? "deg" : "rad" };
                 setSettings(next);
@@ -3177,6 +3395,11 @@ export function CasApp() {
                   }}
                 />
               )}
+              {view === "doc" && sorter !== null && (
+                <PageSorter doc={doc} sel={sorter} names={PAGE_APPS} onPick={(i, open) => (open ? (setDoc((d) => ({ ...d, active: i })), setSorter(null)) : setSorter(i))} />
+              )}
+              {view === "doc" && sorter === null && (
+              <LayoutFrame doc={doc} renderOther={renderOther} splitting={splitting} onFocus={(id) => setDoc((d) => ({ ...d, active: Math.max(0, d.pages.findIndex((p) => p.id === id)) }))} onEmpty={askRegion}>
               {view === "doc" && page?.kind === "lists" && <ListsApp page={page} highlights={pageHighlights} onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))} />}
               {view === "doc" && page?.kind === "notes" && (
                 <NotesApp
@@ -3295,6 +3518,8 @@ export function CasApp() {
                   onCursor={(cursor) => setGraphs((g) => ({ ...g, edit: { row: g.edit.row, cursor } }))}
                   onSelect={(a, b) => setGraphs((g) => ({ ...g, edit: selectBetween(g.edit, a, b) }))}
                 />
+              )}
+              </LayoutFrame>
               )}
               {status === "loading" && (
                 <Notice>

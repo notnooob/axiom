@@ -42,7 +42,9 @@ export type Key =
   /** The handheld's home key (Ctrl+H), the scratchpad key, and ctrl+scratchpad: save (Ctrl+S). */
   | { k: "homeScreen" }
   | { k: "scratchpad" }
-  | { k: "save" };
+  | { k: "save" }
+  /** Ctrl+Tab: the next app on a page laid out with several. */
+  | { k: "switchApp" };
 
 /** Keyboard → Key, following the handheld's computer software where it has a shortcut. */
 export function keyFromEvent(e: KeyboardEvent | ReactKeyboardEvent): Key | null {
@@ -57,6 +59,8 @@ export function keyFromEvent(e: KeyboardEvent | ReactKeyboardEvent): Key | null 
         return { k: "doc" };
       case "i":
         return { k: "insertPage" };
+      case "tab":
+        return { k: "switchApp" };
       case "arrowleft":
         return { k: "prevPage" };
       case "arrowright":

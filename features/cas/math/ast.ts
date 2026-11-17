@@ -74,7 +74,7 @@ type Tok =
 const SYMBOL_CHARS = new Set(["π", "ℯ", "∞", "𝑖", "θ", "?"]);
 /** Prefix operators that take a parenthesised argument: √(x), ∫(…), Σ(…). */
 const PREFIX_FUNCS = new Set(["√", "∫", "Σ", "Π", "∂"]);
-const POSTFIX = new Set(["!", "%", "°", "'", "ᵀ", "⁻¹", "²", "³"]);
+const POSTFIX = new Set(["!", "%", "°", "ʳ", "ᵍ", "'", "ᵀ", "⁻¹", "²", "³"]);
 const WORD_OPS = new Set(["and", "or", "xor", "not"]);
 /** Commands written without parentheses: "DelVar a,b", "Define f(x)=…". */
 export const COMMAND_WORDS = new Set([
@@ -156,7 +156,7 @@ export const isCommand = (name: string) => COMMANDS.get(name.toLowerCase()) === 
 
 const isDigit = (c: string) => c >= "0" && c <= "9";
 const isIdStart = (c: string) =>
-  /\p{L}/u.test(c) && !SYMBOL_CHARS.has(c) && !PREFIX_FUNCS.has(c) && c !== "ᵀ" && c !== "ᴇ";
+  /\p{L}/u.test(c) && !SYMBOL_CHARS.has(c) && !PREFIX_FUNCS.has(c) && c !== "ᵀ" && c !== "ʳ" && c !== "ᵍ" && c !== "ᴇ";
 const isIdPart = (c: string) => isIdStart(c) || isDigit(c) || c === "_";
 
 /**
