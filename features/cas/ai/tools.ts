@@ -286,7 +286,7 @@ export function describeScreen(s: AgentSnapshot): string {
         if (hidden.length) out.push(`Hidden: ${hidden.map((f) => `f${f.n}`).join(", ")}.`);
         if (p.relations?.length) out.push(`Relations: ${p.relations.map((r) => r.text).join("; ")}.`);
         if (p.marks.length)
-          out.push(`Marked: ${p.marks.map((m) => (m.kind === "area" ? `area ${said(m.value)} under f${m.fn} on [${said(m.a)}, ${said(m.b)}]` : `${m.title ?? "point"} (${said(m.x)}, ${said(m.y)})`)).join("; ")}.`);
+          out.push(`Marked: ${p.marks.map((m) => (m.kind === "area" ? `area ${said(m.value)} under f${m.fn} on [${said(m.a)}, ${said(m.b)}]` : m.kind === "line" ? `${m.title} ${said(m.a)}x+${said(m.b)}y=${said(m.c)}` : m.kind === "value" ? `${m.title} ${said(m.value)}` : `${m.title ?? "point"} (${said(m.x)}, ${said(m.y)})`)).join("; ")}.`);
         if (p.sliders?.length) out.push(`Sliders: ${p.sliders.map((x) => `${x.name} = ${x.value}`).join(", ")}.`);
         break;
       }
@@ -673,6 +673,7 @@ export const TOOLS: AgentTool[] = [
       const mark = q?.kind === "graphs" && q.marks.length > before ? q.marks[q.marks.length - 1] : undefined;
       if (!mark) throw new Error("No result came back; try again.");
       const between = { lower: lo, upper: hi };
+      if (mark.kind === "line" || mark.kind === "value") throw new Error("No result came back; try again.");
       return mark.kind === "area"
         ? { fn: `f${fn}(x)`, integral: sig(mark.value), ...between, shown: "shaded on the graph" }
         : { fn: `f${fn}(x)`, [mark.title ?? kind]: { x: sig(mark.x), y: sig(mark.y) }, ...(other !== undefined ? { with: `f${other}(x)` } : {}), ...between, shown: "marked on the graph" };

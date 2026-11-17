@@ -28,9 +28,13 @@ export type Tool =
   | { kind: "dydx"; fn: number; x: number };
 
 export type Mark =
-  | { kind: "point"; fn: number; x: number; y: number; title?: string }
+  /** rel: the point is on a relation (Analyze Conics), not a function. */
+  | { kind: "point"; fn: number; x: number; y: number; title?: string; rel?: number }
   /** other: Bounded Area's second function; without it the area is under fn (∫). */
-  | { kind: "area"; fn: number; a: number; b: number; value: number; other?: number };
+  | { kind: "area"; fn: number; a: number; b: number; value: number; other?: number }
+  /** Analyze Conics: a line a·x + b·y = c (an axis, a directrix, an asymptote), and a value (e, r, latus rectum) of relation rel. */
+  | { kind: "line"; rel: number; a: number; b: number; c: number; title: string }
+  | { kind: "value"; rel: number; title: string; value: number };
 
 /** Plotted values for one function across the window. */
 export type Samples = { n: number; xs: number[]; ys: number[] };

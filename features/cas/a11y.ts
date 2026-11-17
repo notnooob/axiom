@@ -49,7 +49,9 @@ export function toolSaid(tool: Tool | null): string {
 export function markSaid(mark: Mark): string {
   if (mark.kind === "area" && mark.other !== undefined) return `Area between f${mark.fn} and f${mark.other} from ${fmt3(mark.a)} to ${fmt3(mark.b)}: ${fmt3(mark.value)}`;
   if (mark.kind === "area") return `Integral of f${mark.fn} from ${fmt3(mark.a)} to ${fmt3(mark.b)}: ${fmt3(mark.value)}`;
-  return `${mark.title ? `${mark.title}, ` : ""}f${mark.fn}: (${fmt3(mark.x)}, ${fmt3(mark.y)})`;
+  if (mark.kind === "line") return `${mark.title} of rel${mark.rel}: ${fmt3(mark.a)}x + ${fmt3(mark.b)}y = ${fmt3(mark.c)}`;
+  if (mark.kind === "value") return `${mark.title} of rel${mark.rel}: ${fmt3(mark.value)}`;
+  return `${mark.title ? `${mark.title}, ` : ""}${mark.rel !== undefined ? `rel${mark.rel}` : `f${mark.fn}`}: (${fmt3(mark.x)}, ${fmt3(mark.y)})`;
 }
 
 /** The graph canvas's text alternative. */

@@ -52,8 +52,9 @@ import {
 } from "./graphs/graph-keys";
 import { GraphsApp } from "./graphs/graphs-app";
 import { deDefinition, pageDefinitions, polarXY } from "./graphs/definitions";
+import { classify as classifyConic, feature as conicFeature, type ConicFeature } from "./graphs/conics";
 import { parseTerms, SEQ_TERMS, seqDefinition, seqName, seqTermsCommand } from "./graphs/sequence";
-import { autoScale, fnName, parNames, relName, STANDARD, zoomed, type Samples } from "./graphs/model";
+import { autoScale, fnName, parNames, relName, STANDARD, zoomed, type Mark, type Samples } from "./graphs/model";
 import { Keypad } from "./keypad/keypad";
 import { keyFromEvent, type Key } from "./keys";
 import { parse, type Ast } from "./math/ast";
@@ -1647,8 +1648,46 @@ export function CasApp() {
     setGraphs((q) => ({ ...q, window: { xmin, xmax, ymin, ymax, xscl: autoScale(xmin, xmax), yscl: autoScale(ymin, ymax) }, marks: [] }));
   };
 
+  /**
+   * Analyze Conics on the page's conic: the first shown relation that is one
+   * (its coefficients read from the engine), the result added as marks.
+   */
+  const analyzeConic = async (f: ConicFeature) => {
+    const e = engine.current;
+    const g = page?.kind === "graphs" ? page : null;
+    if (!e || !g) return;
+    for (const r of g.relations ?? []) {
+      if (r.hidden || r.op !== "=") continue;
+      const P = `expand(${relName(g.id, r.n)}(x_,y_))`;
+      // Ax²+Bxy+Cy²+Dx+Ey+F from the derivatives at the origin.
+      const at0 = (d: string) => `subst(${d},[x_,y_],[0,0])`;
+      const terms = [at0("diff(P_,x_,2)/2"), at0("diff(diff(P_,x_),y_)"), at0("diff(P_,y_,2)/2"), at0("diff(P_,x_)"), at0("diff(P_,y_)"), at0("P_")];
+      await e.giac(`P_:=${P}`);
+      // Second degree in x and y together, or it isn't a conic.
+      const degree = Number((await e.giac("degree(subst(P_,[x_,y_],[t_*x_,t_*y_]),t_)")).trim());
+      const raw = degree === 2 ? await e.giac(`evalf([${terms.join(",")}])`) : "";
+      await e.giac("purge(P_)");
+      const coeffs = raw.trim().replace(/^\[|\]$/g, "").split(",").map(Number);
+      if (coeffs.length !== 6 || coeffs.some((v) => !Number.isFinite(v))) continue;
+      const k = classifyConic(coeffs);
+      if (!k) continue;
+      const res = conicFeature(k, f);
+      if (!res) return setError(`Error: This ${k.kind} has no ${f === "latus" ? "latus rectum" : f === "axes" ? "axes of symmetry" : f}`);
+      const marks: Mark[] = [
+        ...res.points.map((p) => ({ kind: "point" as const, fn: 0, rel: r.n, x: p.pt[0], y: p.pt[1], title: p.title })),
+        ...res.lines.map((l) => ({ kind: "line" as const, rel: r.n, ...l.line, title: l.title })),
+        ...res.values.map((v) => ({ kind: "value" as const, rel: r.n, ...v })),
+      ];
+      setGraphs((q) => ({ ...q, marks: [...q.marks, ...marks] }));
+      say(marks.map(markSaid).join(". "));
+      return;
+    }
+    setError("Error: No conic on this page: enter one as a relation, such as x^2+y^2=4");
+  };
+
   const graphAction = useCallback(
     (id: string) => {
+      if (id.startsWith("conic:")) return void analyzeConic(id.slice(6) as ConicFeature);
       if (id === "zoomBox") return setGraphs((g) => startZoomBox(g));
       if (id === "traceAll") return setGraphs((g) => startTool(g, "traceAll"));
       if (id === "traceStep") {

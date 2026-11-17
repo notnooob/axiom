@@ -106,7 +106,19 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       app("Bounded Area", "analyzeBounded"),
       sub(
         "Analyze Conics",
-        ["Center", "Vertices", "Foci", "Axes of Symmetry", "Directrix", "Asymptotes", "Radius", "Eccentricity", "Latus Rectum"].map(off),
+        (
+          [
+            ["Center", "center"],
+            ["Vertices", "vertices"],
+            ["Foci", "foci"],
+            ["Axes of Symmetry", "axes"],
+            ["Directrix", "directrix"],
+            ["Asymptotes", "asymptotes"],
+            ["Radius", "radius"],
+            ["Eccentricity", "eccentricity"],
+            ["Latus Rectum", "latus"],
+          ] as const
+        ).map(([label, id]) => app(label, `conic:${id}`)),
       ),
     ]),
     sub("Table", [

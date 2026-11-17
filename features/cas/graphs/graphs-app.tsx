@@ -741,8 +741,9 @@ export function GraphsApp({
             onClose={() => setSliderMenu(null)}
           />
         )}
+        <ConicMarks page={page} px={px} py={py} fs={fs} />
         {page.marks.map((m, i) =>
-          m.kind === "point" ? (
+          m.kind === "line" || m.kind === "value" ? null : m.kind === "point" ? (
             <div
               key={i}
               className="pointer-events-none absolute flex items-center whitespace-nowrap font-casui text-casInk"
@@ -1100,6 +1101,44 @@ function ZoomBoxOverlay({ box, px, py }: { box: NonNullable<GraphsPage["zoomBox"
       )}
       <path d={`M${X - 10} ${Y}H${X + 10}M${X} ${Y - 10}V${Y + 10}`} className="stroke-casInk" strokeWidth={1.5} />
     </svg>
+  );
+}
+
+/**
+ * Analyze Conics' lines (axes, directrices, asymptotes) drawn dashed across
+ * the window, and its values (e, r, latus rectum) listed at the top left.
+ */
+function ConicMarks({ page, px, py, fs }: { page: GraphsPage; px: (x: number) => number; py: (y: number) => number; fs: number }) {
+  const w = page.window;
+  const lines = page.marks.filter((m) => m.kind === "line");
+  const values = page.marks.filter((m) => m.kind === "value");
+  if (!lines.length && !values.length) return null;
+  const ends = (m: { a: number; b: number; c: number }): [number, number, number, number] | null => {
+    if (Math.abs(m.b) > 1e-12) {
+      const y = (x: number) => (m.c - m.a * x) / m.b;
+      return [w.xmin, y(w.xmin), w.xmax, y(w.xmax)];
+    }
+    if (Math.abs(m.a) > 1e-12) return [m.c / m.a, w.ymin, m.c / m.a, w.ymax];
+    return null;
+  };
+  return (
+    <>
+      <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-hidden">
+        {lines.map((m, i) => {
+          const e = ends(m);
+          return e && <line key={i} x1={px(e[0])} y1={py(e[1])} x2={px(e[2])} y2={py(e[3])} stroke={relColour(page, m.rel)} strokeWidth={1.2} strokeDasharray="6 4" />;
+        })}
+      </svg>
+      {values.length > 0 && (
+        <div className="pointer-events-none absolute left-[1.2cqw] top-[10cqw] flex flex-col font-casui text-casInk" style={{ fontSize: fs * 0.95 }}>
+          {values.map((m, i) => (
+            <span key={i}>
+              {m.title}: {fmt3(m.value)}
+            </span>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -1680,7 +1719,7 @@ function draw(
   };
   for (const m of page.marks) {
     if (m.kind === "point") dot(px(m.x), py(m.y));
-    else {
+    else if (m.kind === "area") {
       const s = samples.find((x) => x.n === m.fn);
       for (const b of [m.a, m.b]) {
         const i = s ? s.xs.reduce((best, x, k) => (Math.abs(x - b) < Math.abs(s.xs[best]! - b) ? k : best), 0) : -1;
