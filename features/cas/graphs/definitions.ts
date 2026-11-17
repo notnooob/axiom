@@ -3,8 +3,10 @@
 import type { Settings } from "../engine/evaluate";
 import { translate } from "../engine/translate";
 import { mapAst, parse, sym } from "../math/ast";
+import { print } from "../math/print";
 import type { GraphsPage } from "../state/document";
 import { deName, fnName, parNames, relName } from "./model";
+import { seqDefinition } from "./sequence";
 
 /**
  * The engine definitions that give one Graphs page its own copies of its
@@ -35,7 +37,15 @@ export function pageDefinitions(page: GraphsPage, settings: Settings): string[] 
   for (const c of page.parametrics ?? []) {
     try {
       const [xn, yn] = parNames(page.id, c.n);
-      out.push(`${xn}(t):=${t(c.x)}`, `${yn}(t):=${t(c.y)}`);
+      const [x, y] = c.polar ? polarXY(c.x) : [c.x, c.y];
+      out.push(`${xn}(t):=${t(x)}`, `${yn}(t):=${t(y)}`);
+    } catch {
+      // As above.
+    }
+  }
+  for (const s of page.sequences ?? []) {
+    try {
+      out.push(seqDefinition(page.id, s.n, s.rhs, settings).def);
     } catch {
       // As above.
     }
@@ -48,6 +58,12 @@ export function pageDefinitions(page: GraphsPage, settings: Settings): string[] 
     }
   }
   return out;
+}
+
+/** A polar curve's r(θ) as the parametric pair it's drawn with: x = r·cos θ, y = r·sin θ, in t. */
+export function polarXY(r: string): [string, string] {
+  const inT = print(mapAst(parse(r), (a) => (a.k === "sym" && a.name === "θ" ? sym("t") : a)));
+  return [`(${inT})*cos(t)`, `(${inT})*sin(t)`];
 }
 
 /** d1: y1′ = x·y1 becomes the slope function g…d1_(x,y) = x·y. */

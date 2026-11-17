@@ -30,6 +30,7 @@ import { formatFloat } from "../engine/format";
 import { SliderView } from "./sliders";
 import { autoScale, deName, fmt3, fnName, parNames, relName, type GraphWindow, type Samples } from "./model";
 import { graphSaid } from "../a11y";
+import { parseTerms, SEQ_TERMS, seqName, seqTermsCommand } from "./sequence";
 import type { Highlight } from "../ai/highlights";
 import { FlagBadge, flagHex } from "../screen/flag";
 import { RENAME_IN } from "../engine/translate";
@@ -42,6 +43,10 @@ const relColour = (page: GraphsPage, n: number) => curveColour(page.functions.le
 const parColour = (page: GraphsPage, n: number) =>
   curveColour(page.functions.length + (page.relations?.length ?? 0) + n);
 /** Diff Eq solution curves, after the parametric curves'. */
+/** Sequences, after the Diff Eqs'. */
+const seqColour = (page: GraphsPage, n: number) =>
+  curveColour(page.functions.length + (page.relations?.length ?? 0) + (page.parametrics?.length ?? 0) + (page.des?.length ?? 0) + n);
+
 const deColour = (page: GraphsPage, n: number) =>
   curveColour(page.functions.length + (page.relations?.length ?? 0) + (page.parametrics?.length ?? 0) + n);
 
@@ -64,6 +69,7 @@ export function GraphsApp({
   onEditFn,
   onEditRel,
   onEditPar,
+  onEditSeq,
   onDESettings,
   onSlider,
   onSliderTyped,
@@ -92,6 +98,8 @@ export function GraphsApp({
   onEditFn: (n: number) => void;
   onEditRel: (n: number) => void;
   onEditPar: (n: number) => void;
+  /** A double-click on a sequence's label opens it in the entry line. */
+  onEditSeq?: (n: number) => void;
   /** The Diff Eq entry line's … button: the Differential Equation settings. */
   onDESettings: () => void;
   /** A slider moved; final when the drag or step has finished. */
@@ -188,6 +196,46 @@ export function GraphsApp({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- parKey stands for parametrics
   }, [giac, ready, parKey]);
+
+  // Sequences: each one's terms over its n range, and the Custom plots drawn from them.
+  const [seqPts, setSeqPts] = useState<{ n: number; custom?: boolean; pts: [number, number][] }[]>([]);
+  const sequences = page.sequences ?? [];
+  const customs = page.customPlots ?? [];
+  const seqKey =
+    sliderKey +
+    sequences.map((s) => `${s.n}:${s.rhs}:${s.initValues.join(",")}:${s.nmin}:${s.nmax}:${s.nstep}:${s.hidden ? 1 : 0}`).join("|") +
+    customs.map((c) => `${c.n}:${c.x}:${c.y}:${c.hidden ? 1 : 0}`).join("|");
+  useEffect(() => {
+    if (!giac || !ready || (!sequences.length && !customs.length)) return setSeqPts([]);
+    let cancelled = false;
+    void (async () => {
+      await giac(SEQ_TERMS);
+      const terms = new Map<number, number[]>();
+      for (const s of sequences) terms.set(s.n, parseTerms(await giac(seqTermsCommand(seqName(page.id, s.n), s.depth, s.initValues, s.nmin, s.nmax))));
+      const out: { n: number; custom?: boolean; pts: [number, number][] }[] = [];
+      for (const s of sequences) {
+        if (s.hidden) continue;
+        const pts: [number, number][] = [];
+        (terms.get(s.n) ?? []).forEach((v, i) => {
+          if (i % s.nstep === 0) pts.push([s.nmin + i, v]);
+        });
+        out.push({ n: s.n, pts });
+      }
+      for (const c of customs) {
+        const [sx, sy] = [sequences.find((s) => s.n === c.x), sequences.find((s) => s.n === c.y)];
+        if (c.hidden || !sx || !sy) continue;
+        const [tx, ty] = [terms.get(c.x) ?? [], terms.get(c.y) ?? []];
+        const pts: [number, number][] = [];
+        for (let k = Math.max(sx.nmin, sy.nmin); k <= Math.min(sx.nmax, sy.nmax); k++) pts.push([tx[k - sx.nmin]!, ty[k - sy.nmin]!]);
+        out.push({ n: c.n, custom: true, pts });
+      }
+      if (!cancelled) setSeqPts(out);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- seqKey stands for the sequences
+  }, [giac, ready, seqKey]);
 
   // Scatter plots: each pair of lists' points, fetched afresh when the plots
   // change (a list edited on a Lists page is new when this page next opens).
@@ -454,14 +502,33 @@ export function GraphsApp({
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     const halos = highlights.flatMap((h) => (h.target.kind === "fn" ? [{ n: h.target.n, colour: flagHex(h.tone) }] : []));
     draw(g, size.w, size.h, size.sw, page, samples, toolY, grids, pars, field, solutions, halos);
-    // Scatter plots: a small square per point, in the plot's colour.
+    // Sequences: a dot per term; a Custom plot's dots joined, as the handheld draws them.
     const ww = page.window;
+    const X = (x: number) => ((x - ww.xmin) / (ww.xmax - ww.xmin)) * size.w;
+    const Y = (y: number) => ((ww.ymax - y) / (ww.ymax - ww.ymin)) * size.h;
+    for (const s of seqPts) {
+      g.fillStyle = g.strokeStyle = s.custom ? curveColour(s.n + 4) : seqColour(page, s.n);
+      const r = Math.max(2, size.w * 0.005);
+      if (s.custom) {
+        g.lineWidth = Math.max(1, size.w * 0.003);
+        g.beginPath();
+        s.pts.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y)).forEach(([x, y], k) => (k ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
+        g.stroke();
+      }
+      for (const [x, y] of s.pts) {
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        g.beginPath();
+        g.arc(X(x), Y(y), r, 0, 2 * Math.PI);
+        g.fill();
+      }
+    }
+    // Scatter plots: a small square per point, in the plot's colour.
     for (const sc of scatterPts) {
       g.fillStyle = curveColour(sc.n);
       for (const [x, y] of sc.pts)
         g.fillRect(((x - ww.xmin) / (ww.xmax - ww.xmin)) * size.w - 2.5, ((ww.ymax - y) / (ww.ymax - ww.ymin)) * size.h - 2.5, 5, 5);
     }
-  }, [size, page, samples, toolY, grids, pars, field, solutions, scatterPts, highlights]);
+  }, [size, page, samples, toolY, grids, pars, field, solutions, scatterPts, seqPts, highlights]);
 
   /** Where a highlighted function's number goes: on its curve, from a third of the way across, in the middle of the window's height (clear of the top bar and the entry line). */
   const onCurve = (n: number) => {
@@ -581,14 +648,43 @@ export function GraphsApp({
                 className={cn("absolute flex cursor-pointer flex-col whitespace-nowrap", passThrough)}
                 style={{ left: at.left, top: at.top, color: parColour(page, c.n), fontSize: fs }}
               >
-                <span className="inline-flex items-center">
-                  <b className="font-casmath">x{c.n}</b>
-                  <MathView row={[...chars("(t)="), ...c.xRow]} />
-                </span>
-                <span className="inline-flex items-center">
-                  <b className="font-casmath">y{c.n}</b>
-                  <MathView row={[...chars("(t)="), ...c.yRow]} />
-                </span>
+                {c.polar ? (
+                  <span className="inline-flex items-center">
+                    <b className="font-casmath">r{c.n}</b>
+                    <MathView row={[...chars("(θ)="), ...c.xRow]} />
+                  </span>
+                ) : (
+                  <>
+                    <span className="inline-flex items-center">
+                      <b className="font-casmath">x{c.n}</b>
+                      <MathView row={[...chars("(t)="), ...c.xRow]} />
+                    </span>
+                    <span className="inline-flex items-center">
+                      <b className="font-casmath">y{c.n}</b>
+                      <MathView row={[...chars("(t)="), ...c.yRow]} />
+                    </span>
+                  </>
+                )}
+              </div>
+            );
+          })}
+        {seqPts
+          .filter((s) => !s.custom)
+          .map((s, k) => {
+            const seq = sequences.find((q) => q.n === s.n);
+            if (!seq) return null;
+            const at = parLabelAt(s, w, size.w, size.h, fs, k + relations.length + parametrics.length);
+            return (
+              <div
+                key={`seq${s.n}`}
+                title="Double-click to edit"
+                onPointerDown={(e) => e.stopPropagation()}
+                onDoubleClick={() => onEditSeq?.(s.n)}
+                className={cn("absolute inline-flex cursor-pointer items-center whitespace-nowrap", passThrough)}
+                style={{ left: at.left, top: at.top, color: seqColour(page, s.n), fontSize: fs }}
+              >
+                <b className="font-casmath">u{s.n}</b>
+                <MathView row={[...chars("(n)="), ...seq.row]} />
               </div>
             );
           })}
@@ -676,6 +772,8 @@ export function GraphsApp({
             <span aria-hidden className="mr-[2cqw] h-[4cqw] w-[4cqw] shrink-0 border-[0.25cqw] border-casRule" />
             {page.entryKind === "par" && page.parDraft ? (
               <ParametricEntry page={page} onCursor={onCursor} onSelect={onSelect} />
+            ) : page.entryKind === "seq" && page.parDraft ? (
+              <SequenceEntry page={page} onCursor={onCursor} onSelect={onSelect} />
             ) : page.entryKind === "de" && page.parDraft ? (
               <DEEntry page={page} onCursor={onCursor} onSelect={onSelect} onSettings={onDESettings} />
             ) : (
@@ -960,6 +1058,7 @@ type EntryHandlers = { onCursor: (c: Cursor) => void; onSelect: (from: Cursor, t
 function ParametricEntry({ page, onCursor, onSelect }: { page: GraphsPage } & EntryHandlers) {
   const d = page.parDraft!;
   const n = page.editing!;
+  if (d.polar) return <PolarEntry page={page} onCursor={onCursor} onSelect={onSelect} />;
   const field = (i: number) =>
     i === d.field ? (
       <MathView
@@ -989,6 +1088,62 @@ function ParametricEntry({ page, onCursor, onSelect }: { page: GraphsPage } & En
         {field(3)}
         <MathView row={chars("tstep=")} className="ml-[1.4em]" />
         {field(4)}
+      </span>
+    </span>
+  );
+}
+
+/** The sequence entry line: u(n)=, Initial Terms:, then nmin ≤ n ≤ nmax and nstep. */
+function SequenceEntry({ page, onCursor, onSelect }: { page: GraphsPage } & EntryHandlers) {
+  const d = page.parDraft!;
+  const field = (i: number) =>
+    i === d.field ? (
+      <MathView row={page.edit.row} cursor={page.edit.cursor} selection={selection(page.edit)} onPick={onCursor} onSelect={onSelect} className={d.fresh && page.edit.row.length ? "bg-casSelectSoft" : undefined} />
+    ) : (
+      <MathView row={d.rows[i]!} />
+    );
+  return (
+    <span className="flex flex-col gap-[0.8cqw]">
+      <span className="inline-flex items-center">
+        <MathView row={chars(`u${page.editing}(n)=`)} />
+        {field(0)}
+      </span>
+      <span className="inline-flex items-center text-[0.85em]">
+        <span className="mr-[0.4em] font-casui">Initial Terms:</span>
+        {field(1)}
+      </span>
+      <span className="inline-flex items-center text-[0.85em]">
+        {field(2)}
+        <MathView row={chars("≤n≤")} className="mx-[0.2em]" />
+        {field(3)}
+        <MathView row={chars("nstep=")} className="ml-[1.4em]" />
+        {field(4)}
+      </span>
+    </span>
+  );
+}
+
+/** The polar entry line: r(θ)=, then the θ range and step. */
+function PolarEntry({ page, onCursor, onSelect }: { page: GraphsPage } & EntryHandlers) {
+  const d = page.parDraft!;
+  const field = (i: number) =>
+    i === d.field ? (
+      <MathView row={page.edit.row} cursor={page.edit.cursor} selection={selection(page.edit)} onPick={onCursor} onSelect={onSelect} className={d.fresh && page.edit.row.length ? "bg-casSelectSoft" : undefined} />
+    ) : (
+      <MathView row={d.rows[i]!} />
+    );
+  return (
+    <span className="flex flex-col gap-[0.8cqw]">
+      <span className="inline-flex items-center">
+        <MathView row={chars(`r${page.editing}(θ)=`)} />
+        {field(0)}
+      </span>
+      <span className="inline-flex items-center text-[0.85em]">
+        {field(1)}
+        <MathView row={chars("≤θ≤")} className="mx-[0.2em]" />
+        {field(2)}
+        <MathView row={chars("θstep=")} className="ml-[1.4em]" />
+        {field(3)}
       </span>
     </span>
   );

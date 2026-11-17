@@ -75,6 +75,8 @@ export type GraphParametric = {
   tmax: number;
   tstep: number;
   hidden?: boolean;
+  /** A polar curve r(θ): `x` holds r and `y` is unused; it's drawn as r·cos θ, r·sin θ, with t standing for θ. */
+  polar?: boolean;
 };
 
 /**
@@ -83,6 +85,16 @@ export type GraphParametric = {
  * slope field, and the solution through (x0, y0) when that's given.
  */
 export type GraphDE = { n: number; y: number; rhs: string; row: Row; x0?: number; y0?: number; hidden?: boolean };
+
+/**
+ * A sequence (Graph Entry ▸ Sequence): u1(n) from n and its earlier terms,
+ * its initial terms (as many as it looks back, comma-separated), and the n
+ * range and step its points are drawn for.
+ */
+export type GraphSequence = { n: number; rhs: string; row: Row; init: string; initValues: number[]; depth: number; nmin: number; nmax: number; nstep: number; hidden?: boolean };
+
+/** A Custom sequence plot: one sequence's terms (x) against another's (y). */
+export type CustomPlot = { n: number; x: number; y: number; hidden?: boolean };
 
 /** The Differential Equation dialog's settings, one set per page; defaults as on the handheld. */
 export type DESettings = {
@@ -134,15 +146,17 @@ export type GraphsPage = {
   parametrics?: GraphParametric[];
   des?: GraphDE[];
   deSettings?: DESettings;
+  sequences?: GraphSequence[];
+  customPlots?: CustomPlot[];
   sliders?: Slider[];
   scatters?: ScatterPlot[];
   /** The parametric entry line's five fields (x, y, tmin, tmax, tstep), or a Diff Eq's three (f, x0, y0), while it's open; `field` is the one being edited. */
-  parDraft?: { field: number; rows: Row[]; fresh?: boolean };
+  parDraft?: { field: number; rows: Row[]; fresh?: boolean; polar?: boolean };
   window: GraphWindow;
   /** The entry line: which f (or rel) it's editing, or null when hidden. */
   editing: number | null;
   /** "rel", "par" or "de" while the entry line edits a relation, a parametric or a Diff Eq, else a function. */
-  entryKind?: "rel" | "par" | "de";
+  entryKind?: "rel" | "par" | "de" | "seq";
   edit: EditState;
   tool: Tool | null;
   marks: Mark[];

@@ -42,12 +42,15 @@ import {
   openDE,
   openEntry,
   openParametric,
+  openPolar,
+  openSequence,
   openRelation,
   startTool,
   type GraphEffect,
 } from "./graphs/graph-keys";
 import { GraphsApp } from "./graphs/graphs-app";
-import { deDefinition, pageDefinitions } from "./graphs/definitions";
+import { deDefinition, pageDefinitions, polarXY } from "./graphs/definitions";
+import { seqDefinition } from "./graphs/sequence";
 import { autoScale, fnName, parNames, relName, zoomed, type Samples } from "./graphs/model";
 import { Keypad } from "./keypad/keypad";
 import { keyFromEvent, type Key } from "./keys";
@@ -909,7 +912,9 @@ export function CasApp() {
         });
       } else if ("parametric" in effect) {
         // x1(t), y1(t) become xp1_(t), yp1_(t); the t range is worked out to numbers.
-        const { n, texts } = effect.parametric;
+        const { n, texts, polar } = effect.parametric;
+        // A polar curve r(θ) is drawn as x = r·cos θ, y = r·sin θ (polarXY), its θ range in the place of t's.
+        const xy = polar ? polarXY(texts[0]!) : null;
         const rowOf = (t: string): Row => {
           try {
             return astToRow(parse(t));
@@ -923,19 +928,20 @@ export function CasApp() {
             ...g,
             editing: n,
             entryKind: "par",
-            parDraft: { field: 0, rows: texts.map(rowOf) },
+            parDraft: { field: 0, rows: texts.map(rowOf), polar },
             edit: { row: rowOf(texts[0]!), cursor: { path: [], index: rowOf(texts[0]!).length } },
           }));
         };
         let defs: string[];
         let range: number[];
         try {
+          const [xText, yText] = xy ?? [texts[0]!, texts[1]!];
           defs = [
-            `${parNames(p.id, n)[0]}(t):=${translate(parse(texts[0]!), settings).giac}`,
-            `${parNames(p.id, n)[1]}(t):=${translate(parse(texts[1]!), settings).giac}`,
+            `${parNames(p.id, n)[0]}(t):=${translate(parse(xText), settings).giac}`,
+            `${parNames(p.id, n)[1]}(t):=${translate(parse(yText), settings).giac}`,
           ];
           range = [];
-          for (const t of texts.slice(2))
+          for (const t of texts.slice(polar ? 1 : 2))
             range.push(Number((await e.giac(`evalf(${translate(parse(t), settings).giac})`)).trim()));
         } catch {
           fail("Error: Syntax");
@@ -943,7 +949,7 @@ export function CasApp() {
         }
         const [tmin, tmax, tstep] = range as [number, number, number];
         if (![tmin, tmax, tstep].every(Number.isFinite) || tmax <= tmin || tstep <= 0) {
-          fail("Error: Invalid t range");
+          fail(polar ? "Error: Invalid θ range" : "Error: Invalid t range");
           return;
         }
         for (const d of defs) {
@@ -953,21 +959,60 @@ export function CasApp() {
           }
           e.remember(d);
         }
-        say(`Plotted x${n}(t)=${texts[0]}, y${n}(t)=${texts[1]}`);
-        offerSliders(texts.slice(0, 2), ["t"], p);
+        say(polar ? `Plotted r${n}(θ)=${texts[0]}` : `Plotted x${n}(t)=${texts[0]}, y${n}(t)=${texts[1]}`);
+        offerSliders(polar ? texts.slice(0, 1) : texts.slice(0, 2), polar ? ["θ"] : ["t"], p);
         setGraphs((g) => {
           const rest = (g.parametrics ?? []).filter((c) => c.n !== n);
           const curve = {
             n,
             x: texts[0]!,
-            y: texts[1]!,
+            y: polar ? "" : texts[1]!,
             xRow: rowOf(texts[0]!),
-            yRow: rowOf(texts[1]!),
+            yRow: polar ? [] : rowOf(texts[1]!),
             tmin,
             tmax,
             tstep,
+            ...(polar ? { polar } : {}),
           };
           return { ...g, parametrics: [...rest, curve].sort((a, b) => a.n - b.n) };
+        });
+      } else if ("sequence" in effect) {
+        // u1(n) = f(n, u1(n−1), …), its initial terms, and the n range: an engine function and the page's entry.
+        const { n, texts } = effect.sequence;
+        const rowOf = (t: string): Row => {
+          try {
+            return astToRow(parse(t));
+          } catch {
+            return chars(t);
+          }
+        };
+        const fail = (msg: string) => {
+          setError(msg);
+          setGraphs((g) => ({ ...g, editing: n, entryKind: "seq", parDraft: { field: 0, rows: texts.map(rowOf) }, edit: { row: rowOf(texts[0]!), cursor: { path: [], index: rowOf(texts[0]!).length } } }));
+        };
+        const value = async (t: string) => Number((await e.giac(`evalf(${translate(parse(t), settings).giac})`)).trim());
+        let def: { def: string; depth: number };
+        const init: number[] = [];
+        const range: number[] = [];
+        try {
+          def = seqDefinition(p.id, n, texts[0]!, settings);
+          for (const t of (texts[1] ?? "").split(",").filter((x) => x.trim())) init.push(await value(t));
+          for (const t of texts.slice(2, 5)) range.push(await value(t?.trim() ? t : "1"));
+        } catch (err) {
+          fail(err instanceof Error && err.message.startsWith("Error") ? err.message : "Error: Syntax");
+          return;
+        }
+        const [nmin, nmax, nstep] = range as [number, number, number];
+        if (![nmin, nmax, nstep].every(Number.isInteger) || nmax < nmin || nstep < 1) return fail("Error: Invalid n range");
+        if (init.length < def.depth) return fail(`Error: Needs ${def.depth} initial term${def.depth === 1 ? "" : "s"}`);
+        if (init.some((v) => !Number.isFinite(v))) return fail("Error: Initial terms must be numbers");
+        if (/error/i.test(await e.giac(def.def))) return fail("Error: Invalid expression");
+        e.remember(def.def);
+        say(`Plotted u${n}(n)=${texts[0]}`);
+        setGraphs((g) => {
+          const rest = (g.sequences ?? []).filter((s) => s.n !== n);
+          const s = { n, rhs: texts[0]!, row: rowOf(texts[0]!), init: texts[1] ?? "", initValues: init, depth: def.depth, nmin, nmax, nstep };
+          return { ...g, sequences: [...rest, s].sort((a, b) => a.n - b.n) };
         });
       } else if ("de" in effect) {
         // d1: y1′ = f(x, y1), with (x0, y10) optional: the field always, the solution through it when given.
@@ -1610,6 +1655,26 @@ export function CasApp() {
         setWizard(sliderSettings(null, `v${n}`));
       }
       else if (id === "entryParametric") setGraphs((g) => openParametric(g, settings.angle === "deg"));
+      else if (id === "entryPolar") setGraphs((g) => openPolar(g, settings.angle === "deg"));
+      else if (id === "entrySequence") setGraphs((g) => openSequence(g));
+      else if (id === "entryCustom") {
+        const g = page?.kind === "graphs" ? page : null;
+        const names = (g?.sequences ?? []).map((s) => `u${s.n}`);
+        if (names.length < 2) setError("Error: A custom plot needs two sequences");
+        else
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Custom Plot",
+              arrows: false,
+              fields: [
+                { label: "X:", value: names[0], options: names },
+                { label: "Y:", value: names[1], options: names },
+              ],
+              build: "seqcustom:{0}:{1}",
+            }),
+          );
+      }
       else if (id === "entryDiffEq") setGraphs((g) => openDE(g));
       else if (id === "deSettings" && page?.kind === "graphs") {
         const s = page.deSettings ?? DE_DEFAULTS;
@@ -2093,6 +2158,14 @@ export function CasApp() {
       if (built.startsWith("problemrename:")) {
         const n = problemOf(latestDoc.current.pages[latestDoc.current.active]);
         setDoc((d) => renameProblem(d, n, built.slice(14)));
+        return;
+      }
+      if (built.startsWith("seqcustom:")) {
+        const [x, y] = built.slice(10).split(":").map((v) => Number(v.trim().slice(1)));
+        setGraphs((g) => {
+          const n = Math.max(0, ...(g.customPlots ?? []).map((c) => c.n)) + 1;
+          return { ...g, customPlots: [...(g.customPlots ?? []), { n, x: x!, y: y! }] };
+        });
         return;
       }
       if (built.startsWith("request:")) {
@@ -3479,7 +3552,8 @@ export function CasApp() {
                   }}
                   onEditFn={(n) => setGraphs((g) => openEntry(g, n))}
                   onEditRel={(n) => setGraphs((g) => openRelation(g, n))}
-                  onEditPar={(n) => setGraphs((g) => openParametric(g, settings.angle === "deg", n))}
+                  onEditPar={(n) => setGraphs((g) => (g.parametrics?.find((c) => c.n === n)?.polar ? openPolar(g, settings.angle === "deg", n) : openParametric(g, settings.angle === "deg", n)))}
+                  onEditSeq={(n) => setGraphs((g) => openSequence(g, n))}
                   onDESettings={() => graphAction("deSettings")}
                   onSlider={(name, value, final) => {
                     setSlider(name, (sl) => ({ ...sl, value }));

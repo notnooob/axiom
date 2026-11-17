@@ -14,8 +14,9 @@ import type { AnalyzeKind } from "./model";
 export type GraphEffect =
   | { define: { n: number; text: string } }
   | { relation: { n: number; text: string } }
-  | { parametric: { n: number; texts: string[] } }
+  | { parametric: { n: number; texts: string[]; polar?: boolean } }
   | { de: { n: number; texts: string[] } }
+  | { sequence: { n: number; texts: string[] } }
   /** other: the second function for an intersection (the assistant names it); otherwise the first other one shown. */
   | { analyze: { type: AnalyzeKind; fn: number; other?: number; a: number; b: number } }
   | null;
@@ -65,6 +66,29 @@ export function openParametric(p: GraphsPage, degrees = false, n = nextPar(p)): 
   return { ...p, editing: n, entryKind: "par", parDraft: { field: 0, rows }, edit: E.setRow(rows[0]!), tool: null };
 }
 
+/**
+ * Open the polar entry line on r(n): r(θ), then θmin, θmax and θstep,
+ * defaulting to 0 ≤ θ ≤ 6.28 in steps of 0.13 (0 to 360 in steps of 7.5 in
+ * degrees), as on the handheld. Polar curves are numbered with the
+ * parametric ones.
+ */
+export function openPolar(p: GraphsPage, degrees = false, n = nextPar(p)): GraphsPage {
+  const c = (p.parametrics ?? []).find((x) => x.n === n && x.polar);
+  const num = (v: number) => chars(String(Number(v.toPrecision(6))));
+  const rows = c ? [c.xRow, num(c.tmin), num(c.tmax), num(c.tstep)] : [[], chars("0"), chars(degrees ? "360" : "6.28"), chars(degrees ? "7.5" : "0.13")];
+  return { ...p, editing: n, entryKind: "par", parDraft: { field: 0, rows, polar: true }, edit: E.setRow(rows[0]!), tool: null };
+}
+
+const nextSeq = (p: GraphsPage) => Math.max(0, ...(p.sequences ?? []).map((s) => s.n)) + 1;
+
+/** Open the sequence entry line on u(n): the term, the initial terms, then nmin ≤ n ≤ nmax and nstep (1 to 99 in steps of 1, as on the handheld). */
+export function openSequence(p: GraphsPage, n = nextSeq(p)): GraphsPage {
+  const s = (p.sequences ?? []).find((x) => x.n === n);
+  const num = (v: number) => chars(String(v));
+  const rows = s ? [s.row, chars(s.init), num(s.nmin), num(s.nmax), num(s.nstep)] : [[], [], chars("1"), chars("99"), chars("1")];
+  return { ...p, editing: n, entryKind: "seq", parDraft: { field: 0, rows }, edit: E.setRow(rows[0]!), tool: null };
+}
+
 const nextDE = (p: GraphsPage) => Math.max(0, ...(p.des ?? []).map((d) => d.n)) + 1;
 
 /** A Diff Eq's y: its own, or the lowest the page's parametric curves and other Diff Eqs leave free (y-names are shared). */
@@ -91,7 +115,7 @@ function parField(p: GraphsPage, field: number): GraphsPage {
   const rows = d.rows.map((r, i) => (i === d.field ? p.edit.row : r));
   const f = (field + rows.length) % rows.length;
   // The field's contents are selected on arrival, so typing replaces them.
-  return { ...p, parDraft: { field: f, rows, fresh: true }, edit: E.setRow(rows[f]!) };
+  return { ...p, parDraft: { field: f, rows, fresh: true, polar: d.polar }, edit: E.setRow(rows[f]!) };
 }
 
 /** Open the entry line on rel(n), loaded with its current relation. */
@@ -166,7 +190,7 @@ export function graphKey(
     }
   }
 
-  if (p.editing !== null && (p.entryKind === "par" || p.entryKind === "de") && p.parDraft) {
+  if (p.editing !== null && (p.entryKind === "par" || p.entryKind === "de" || p.entryKind === "seq") && p.parDraft) {
     const field = p.parDraft.field;
     // ↑ from a Diff Eq's first field and ↓ from its last go to the one before or after, as ↑ and ↓ step through functions.
     if (p.entryKind === "de" && ((key.k === "up" && field === 0) || (key.k === "down" && field === p.parDraft.rows.length - 1))) {
@@ -189,8 +213,12 @@ export function graphKey(
           if (!texts[0]) return done({ editing: null, parDraft: undefined });
           return done({ editing: null, parDraft: undefined }, { de: { n: p.editing, texts } });
         }
+        if (p.entryKind === "seq") {
+          if (!texts[0]) return done({ editing: null, parDraft: undefined });
+          return done({ editing: null, parDraft: undefined }, { sequence: { n: p.editing, texts } });
+        }
         if (!texts[0] || !texts[1]) return done({ editing: null, parDraft: undefined });
-        return done({ editing: null, parDraft: undefined }, { parametric: { n: p.editing, texts } });
+        return done({ editing: null, parDraft: undefined }, { parametric: { n: p.editing, texts, polar: p.parDraft.polar } });
       }
       case "esc":
         return done({ editing: null, parDraft: undefined });
