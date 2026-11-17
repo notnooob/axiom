@@ -44,6 +44,7 @@ import {
   openParametric,
   openPolar,
   openSequence,
+  openSurface,
   startZoomBox,
   zoomBoxAt,
   openRelation,
@@ -53,6 +54,7 @@ import {
 import { GraphsApp } from "./graphs/graphs-app";
 import { deDefinition, pageDefinitions, polarXY } from "./graphs/definitions";
 import { recognise } from "./graphs/mathdraw";
+import { Graph3D, surfaceName } from "./graphs/graph3d";
 import { classify as classifyConic, feature as conicFeature, type ConicFeature } from "./graphs/conics";
 import { parseTerms, SEQ_TERMS, seqDefinition, seqName, seqTermsCommand } from "./graphs/sequence";
 import { autoScale, fnName, parNames, relName, STANDARD, zoomed, type Mark, type Samples } from "./graphs/model";
@@ -980,6 +982,28 @@ export function CasApp() {
           };
           return { ...g, parametrics: [...rest, curve].sort((a, b) => a.n - b.n) };
         });
+      } else if ("surface" in effect) {
+        // z1(x, y): a function of x and y for the 3D view.
+        const { n, text } = effect.surface;
+        let def: string;
+        try {
+          def = `${surfaceName(p.id, n)}(x,y):=${translate(parse(text), settings).giac}`;
+        } catch {
+          setError("Error: Syntax");
+          setGraphs((g) => openSurface(g, n));
+          return;
+        }
+        if (/error/i.test(await e.giac(def))) return setError("Error: Invalid expression");
+        e.remember(def);
+        say(`Plotted z${n}(x,y)=${text}`);
+        const row = (() => {
+          try {
+            return astToRow(parse(text));
+          } catch {
+            return chars(text);
+          }
+        })();
+        setGraphs((g) => ({ ...g, surfaces: [...(g.surfaces ?? []).filter((s) => s.n !== n), { n, text, row }].sort((a, b) => a.n - b.n) }));
       } else if ("sequence" in effect) {
         // u1(n) = f(n, u1(n−1), …), its initial terms, and the n range: an engine function and the page's entry.
         const { n, texts } = effect.sequence;
@@ -1669,7 +1693,7 @@ export function CasApp() {
     const centre = (v: number) => String(Number(v.toPrecision(4)));
     switch (id) {
       case "pointer":
-        setGraphs((q) => ({ ...q, tool: null, zoomBox: undefined, mathDraw: undefined, selected: undefined }));
+        setGraphs((q) => ({ ...q, tool: null, zoomBox: undefined, mathDraw: undefined, selected: undefined, pathPlot: undefined }));
         return true;
       case "selectRegion":
         setGraphs((q) => ({ ...startZoomBox(q), zoomBox: { ...startZoomBox(q).zoomBox!, select: true } }));
@@ -1725,6 +1749,71 @@ export function CasApp() {
         setWizard(openWizard({ kind: "wizard", title: "Redefine", arrows: false, fields: [{ label: "Graph:", value: all[0]!.name, options: all.map((x) => x.name) }], build: "redefine:{0}" }));
         return true;
       }
+      case "viewGraphing":
+        setGraphs((q) => ({ ...q, view: undefined, axes: true }));
+        return true;
+      case "viewPlane":
+        // Plane Geometry: no axes; the analytic window shows as Settings says.
+        setGraphs((q) => ({ ...q, view: "plane", axes: false, grid: "none", hideAnalytic: q.gsettings?.analyticInPlane === false }));
+        return true;
+      case "view3d":
+        setGraphs((q) => ({ ...q, view: "3d", tool: null, editing: null }));
+        return true;
+      case "viewAnalytic":
+        setGraphs((q) => ({ ...q, hideAnalytic: !q.hideAnalytic }));
+        return true;
+      case "viewEndValues":
+        setGraphs((q) => ({ ...q, hideEndValues: !q.hideEndValues }));
+        return true;
+      case "viewGuides":
+        setGraphs((q) => ({ ...q, hideGuides: !q.hideGuides }));
+        return true;
+      case "pathFn":
+      case "pathPar":
+      case "pathPolar": {
+        const target =
+          id === "pathFn"
+            ? g.functions.find((f) => !f.hidden)
+            : (g.parametrics ?? []).find((c) => !c.hidden && Boolean(c.polar) === (id === "pathPolar"));
+        if (!target) return setError(`Error: No ${id === "pathFn" ? "function" : id === "pathPar" ? "parametric curve" : "polar curve"} to follow`), true;
+        setGraphs((q) => ({ ...q, tool: null, pathPlot: { kind: id === "pathFn" ? "fn" : "par", n: target.n, started: Date.now() } }));
+        return true;
+      }
+      case "pathSetup":
+        setWizard(openWizard({ kind: "wizard", title: "Path Setup", arrows: false, fields: [{ label: "Duration (s):", value: String(g.pathSeconds ?? 4) }], build: "pathsetup:{0}" }));
+        return true;
+      case "geoTrace":
+        setGraphs((q) => ({ ...q, geoTrace: !q.geoTrace }));
+        say(g.geoTrace ? "Geometry Trace off" : "Geometry Trace on: move a slider and the graphs leave their earlier places drawn");
+        return true;
+      case "geoTraceErase":
+        setGraphs((q) => ({ ...q, traceErased: (q.traceErased ?? 0) + 1 }));
+        return true;
+      case "graphSettings": {
+        const s = g.gsettings ?? {};
+        const yn = (v: boolean | undefined, d: boolean) => ((v ?? d) ? "Yes" : "No");
+        setWizard(
+          openWizard({
+            kind: "wizard",
+            title: "Graphs & Geometry Settings",
+            arrows: false,
+            fields: [
+              { label: "Display Digits:", value: s.digits ?? "Float3", options: Array.from({ length: 12 }, (_, i) => `Float${i + 1}`) },
+              { label: "Graphing Angle:", value: s.graphAngle ?? "Auto", options: ["Auto", "Radian", "Degree"] },
+              { label: "Geometry Angle:", value: s.geoAngle ?? "Degree", options: ["Auto", "Radian", "Degree"] },
+              { label: "Automatically hide plot labels", value: yn(s.hideLabels, false), check: true },
+              { label: "Show axis end values", value: yn(g.hideEndValues === undefined ? undefined : !g.hideEndValues, true), check: true },
+              { label: "Show tool tips", value: yn(s.tooltips, true), check: true },
+              { label: "Automatically find points of interest", value: yn(s.poi, false), check: true },
+              { label: "Force geometric triangle angles to integers", value: yn(s.intAngles, false), check: true },
+              { label: "Automatically label points", value: yn(s.labelPoints, false), check: true },
+              { label: "Show Analytic Window in Plane Geometry View", value: yn(s.analyticInPlane, true), check: true },
+            ],
+            build: "gsettings:{0}:{1}:{2}:{3}:{4}:{5}:{6}:{7}:{8}:{9}",
+          }),
+        );
+        return true;
+      }
       case "mathDraw":
         setGraphs((q) => ({ ...q, tool: null, editing: null, zoomBox: undefined, mathDraw: !q.mathDraw }));
         say("MathDraw: draw a line or a circle on the graph. Esc stops.");
@@ -1740,6 +1829,20 @@ export function CasApp() {
     const arg = rest.join(":").trim();
     const num = async (t: string) => (e ? Number((await e.giac(`evalf(${translate(parse(t || "0"), settings).giac})`)).trim()) : NaN);
     switch (kind) {
+      case "pathsetup": {
+        const s = await num(arg);
+        if (!(s > 0)) return setError("Error: The duration is a positive number of seconds");
+        return setGraphs((g) => ({ ...g, pathSeconds: s }));
+      }
+      case "gsettings": {
+        const [digits, graphAngle, geoAngle, hideLabels, endValues, tooltips, poi, intAngles, labelPoints, analyticInPlane] = rest.map((s) => s.trim());
+        const yes = (v: string | undefined) => v === "Yes";
+        return setGraphs((g) => ({
+          ...g,
+          hideEndValues: !yes(endValues),
+          gsettings: { digits, graphAngle, geoAngle, hideLabels: yes(hideLabels), tooltips: yes(tooltips), poi: yes(poi), intAngles: yes(intAngles), labelPoints: yes(labelPoints), analyticInPlane: yes(analyticInPlane) },
+        }));
+      }
       case "gridtype":
         return setGraphs((g) => ({ ...g, grid: arg === "Dot Grid" ? "dot" : arg === "Lined Grid" ? "line" : "none" }));
       case "hideshow": {
@@ -2421,7 +2524,7 @@ export function CasApp() {
         setDoc((d) => renameProblem(d, n, built.slice(14)));
         return;
       }
-      if (/^(gridtype|hideshow|attrs|condition|gtext|coords|gcalc|redefine):/.test(built)) {
+      if (/^(gridtype|hideshow|attrs|condition|gtext|coords|gcalc|redefine|pathsetup|gsettings):/.test(built)) {
         void graphsWizard(built);
         return;
       }
@@ -2870,7 +2973,7 @@ export function CasApp() {
         setMenu({
           items:
             page?.kind === "graphs"
-              ? graphsMenu({ axes: page.axes, entryLine: page.editing !== null, grid: page.grid, table: page.table })
+              ? graphsMenu({ axes: page.axes, entryLine: page.editing !== null, grid: page.grid, table: page.table, hideAnalytic: page.hideAnalytic, hideEndValues: page.hideEndValues, hideGuides: page.hideGuides })
               : calculatorMenu,
           state: openMenu(),
         });
@@ -3797,7 +3900,20 @@ export function CasApp() {
                   onSelect={(a, b) => setCalc((p) => ({ ...p, sel: null, edit: selectBetween(p.edit, a, b) }))}
                 />
               )}
-              {view === "doc" && page?.kind === "graphs" && (
+              {view === "doc" && page?.kind === "graphs" && page.view === "3d" && (
+                <Graph3D
+                  page={page}
+                  giac={engine.current?.giac ?? null}
+                  ready={status === "ready" || status === "busy"}
+                  onTurn={(dy, dp) => setGraphs((g) => {
+                    const v = { yaw: -0.7, pitch: 0.55, ...g.view3d };
+                    return { ...g, view3d: { yaw: v.yaw + dy, pitch: Math.max(-1.5, Math.min(1.5, v.pitch + dp)) } };
+                  })}
+                  onCursor={(cursor) => setGraphs((g) => ({ ...g, edit: { row: g.edit.row, cursor } }))}
+                  onSelect={(a, b) => setGraphs((g) => ({ ...g, edit: selectBetween(g.edit, a, b) }))}
+                />
+              )}
+              {view === "doc" && page?.kind === "graphs" && page.view !== "3d" && (
                 <GraphsApp
                   page={page}
                   highlights={pageHighlights}

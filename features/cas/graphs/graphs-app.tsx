@@ -28,7 +28,7 @@ import {
 } from "./analyze";
 import { formatFloat } from "../engine/format";
 import { SliderView } from "./sliders";
-import { autoScale, deName, fmt3, fnName, parNames, relName, type GraphWindow, type Samples } from "./model";
+import { autoScale, deName, fmt3, fnName, pageDigits, parNames, relName, type GraphWindow, type Samples } from "./model";
 import { graphSaid } from "../a11y";
 import { parseTerms, SEQ_TERMS, seqName, seqTermsCommand } from "./sequence";
 import type { Highlight } from "../ai/highlights";
@@ -142,6 +142,11 @@ export function GraphsApp({
   const [toolY, setToolY] = useState<number>(NaN);
   /** Trace All: each visible function's value at the trace's x. */
   const [allYs, setAllYs] = useState<{ n: number; y: number }[]>([]);
+  /** Geometry Trace: the graphs' earlier places, drawn faintly. */
+  const ghosts = useRef<Samples[][]>([]);
+  const lastSamples = useRef<Samples[]>([]);
+  /** Path Plot: how far along (0 to 1) the running point is. */
+  const [pathT, setPathT] = useState(0);
   /** MathDraw: the stroke being drawn, in graph units. */
   const [stroke, setStroke] = useState<[number, number][] | null>(null);
   const [slope, setSlope] = useState<number>(NaN);
@@ -540,6 +545,29 @@ export function GraphsApp({
   const px = (x: number) => ((x - w.xmin) / (w.xmax - w.xmin)) * size.w;
   const py = (y: number) => ((w.ymax - y) / (w.ymax - w.ymin)) * size.h;
 
+  // Geometry Trace keeps each earlier set of curves while it's on; Erase (or turning it off) clears them.
+  useEffect(() => {
+    if (page.geoTrace && lastSamples.current.length && lastSamples.current !== samples) ghosts.current = [...ghosts.current, lastSamples.current].slice(-80);
+    lastSamples.current = samples;
+  }, [samples, page.geoTrace]);
+  useEffect(() => {
+    ghosts.current = [];
+  }, [page.traceErased, page.geoTrace]);
+
+  // Path Plot: the point runs from one end to the other over the set time.
+  useEffect(() => {
+    const run = page.pathPlot;
+    if (!run) return setPathT(0);
+    let frame = 0;
+    const tick = () => {
+      const t = Math.min(1, (Date.now() - run.started) / ((page.pathSeconds ?? 4) * 1000));
+      setPathT(t);
+      if (t < 1) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [page.pathPlot, page.pathSeconds]);
+
   useEffect(() => {
     const c = canvas.current;
     if (!c || !size.w) return;
@@ -551,6 +579,65 @@ export function GraphsApp({
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     const halos = highlights.flatMap((h) => (h.target.kind === "fn" ? [{ n: h.target.n, colour: flagHex(h.tone) }] : []));
     draw(g, size.w, size.h, size.sw, page, samples, toolY, grids, pars, field, solutions, halos);
+    const toX = (x: number) => ((x - page.window.xmin) / (page.window.xmax - page.window.xmin)) * size.w;
+    const toY = (y: number) => ((page.window.ymax - y) / (page.window.ymax - page.window.ymin)) * size.h;
+    // Geometry Trace: earlier places of each graph, faint.
+    if (!page.hideAnalytic && ghosts.current.length) {
+      g.save();
+      g.globalAlpha = 0.25;
+      g.lineWidth = Math.max(1, size.w * 0.003);
+      for (const set of ghosts.current)
+        for (const s of set) {
+          g.strokeStyle = curveColour(s.n);
+          g.beginPath();
+          let pen = false;
+          s.xs.forEach((x, i) => {
+            const y = s.ys[i]!;
+            if (!Number.isFinite(y)) return void (pen = false);
+            if (pen) g.lineTo(toX(x), toY(y));
+            else g.moveTo(toX(x), toY(y));
+            pen = true;
+          });
+          g.stroke();
+        }
+      g.restore();
+    }
+    // Path Plot: the graph drawn bold as far as the running point, and the point itself.
+    if (page.pathPlot && !page.hideAnalytic) {
+      const run = page.pathPlot;
+      const pts: [number, number][] =
+        run.kind === "fn"
+          ? (() => {
+              const s = samples.find((q) => q.n === run.n);
+              return s ? s.xs.map((x, i) => [x, s.ys[i]!] as [number, number]) : [];
+            })()
+          : (pars.find((q) => q.n === run.n)?.pts ?? []);
+      const upto = Math.max(1, Math.round(pts.length * pathT));
+      g.save();
+      g.strokeStyle = palette.casInk;
+      g.lineWidth = Math.max(2, size.w * 0.006);
+      g.beginPath();
+      let pen = false;
+      let last: [number, number] | null = null;
+      for (const [x, y] of pts.slice(0, upto)) {
+        if (!Number.isFinite(y) || !Number.isFinite(x)) {
+          pen = false;
+          continue;
+        }
+        if (pen) g.lineTo(toX(x), toY(y));
+        else g.moveTo(toX(x), toY(y));
+        pen = true;
+        last = [x, y];
+      }
+      g.stroke();
+      if (last) {
+        g.fillStyle = palette.casF2;
+        g.beginPath();
+        g.arc(toX(last[0]), toY(last[1]), Math.max(4, size.w * 0.009), 0, 2 * Math.PI);
+        g.fill();
+      }
+      g.restore();
+    }
     // Sequences: a dot per term; a Custom plot's dots joined, as the handheld draws them.
     const ww = page.window;
     const X = (x: number) => ((x - ww.xmin) / (ww.xmax - ww.xmin)) * size.w;
@@ -577,7 +664,7 @@ export function GraphsApp({
       for (const [x, y] of sc.pts)
         g.fillRect(((x - ww.xmin) / (ww.xmax - ww.xmin)) * size.w - 2.5, ((ww.ymax - y) / (ww.ymax - ww.ymin)) * size.h - 2.5, 5, 5);
     }
-  }, [size, page, samples, toolY, grids, pars, field, solutions, scatterPts, seqPts, highlights]);
+  }, [size, page, samples, toolY, grids, pars, field, solutions, scatterPts, seqPts, highlights, pathT]);
 
   /** Where a highlighted function's number goes: on its curve, from a third of the way across, in the middle of the window's height (clear of the top bar and the entry line). */
   const onCurve = (n: number) => {
@@ -617,6 +704,9 @@ export function GraphsApp({
   };
 
   const fs = Math.max(10, size.sw * 0.04);
+  // Settings and View: plot labels and their tool tips can be hidden, as can the whole analytic window.
+  const showLabels = !page.hideAnalytic && !page.gsettings?.hideLabels;
+  const tips = page.gsettings?.tooltips !== false && !page.hideGuides;
   // While a tool runs, a click on a label goes to the graph under it (a bound
   // set where a label sits); the labels edit on double-click otherwise.
   const passThrough = tool ? "pointer-events-none" : undefined;
@@ -639,7 +729,8 @@ export function GraphsApp({
         ).map(({ f, left, top }) => (
           <div
             key={f.n}
-            title="Double-click to edit"
+            title={tips ? "Double-click to edit" : undefined}
+                hidden={!showLabels}
             onPointerDown={(e) => e.stopPropagation()}
             onDoubleClick={() => onEditFn(f.n)}
             className={cn("absolute cursor-pointer", passThrough)}
@@ -664,7 +755,8 @@ export function GraphsApp({
             return (
               <div
                 key={`rel${r.n}`}
-                title="Double-click to edit"
+                title={tips ? "Double-click to edit" : undefined}
+                hidden={!showLabels}
                 onPointerDown={(e) => e.stopPropagation()}
                 onDoubleClick={() => onEditRel(r.n)}
                 className={cn("absolute cursor-pointer whitespace-nowrap", passThrough)}
@@ -691,7 +783,8 @@ export function GraphsApp({
             return (
               <div
                 key={`par${c.n}`}
-                title="Double-click to edit"
+                title={tips ? "Double-click to edit" : undefined}
+                hidden={!showLabels}
                 onPointerDown={(e) => e.stopPropagation()}
                 onDoubleClick={() => onEditPar(c.n)}
                 className={cn("absolute flex cursor-pointer flex-col whitespace-nowrap", passThrough)}
@@ -726,7 +819,8 @@ export function GraphsApp({
             return (
               <div
                 key={`seq${s.n}`}
-                title="Double-click to edit"
+                title={tips ? "Double-click to edit" : undefined}
+                hidden={!showLabels}
                 onPointerDown={(e) => e.stopPropagation()}
                 onDoubleClick={() => onEditSeq?.(s.n)}
                 className={cn("absolute inline-flex cursor-pointer items-center whitespace-nowrap", passThrough)}
@@ -800,7 +894,7 @@ export function GraphsApp({
               style={{ left: px(m.x), top: py(m.y), fontSize: fs * 0.95 }}
             >
               <span className="font-casmath text-[1.3em] leading-none">(</span>
-              {fmt3(m.x)},{fmt3(m.y)}
+              {fmt3(m.x, pageDigits(page))},{fmt3(m.y, pageDigits(page))}
               <span className="font-casmath text-[1.3em] leading-none">)</span>
             </div>
           ) : (
@@ -813,7 +907,7 @@ export function GraphsApp({
                 fontSize: fs * 0.95,
               }}
             >
-              {fmt3(m.value)}
+              {fmt3(m.value, pageDigits(page))}
             </div>
           ),
         )}
@@ -923,11 +1017,11 @@ function ToolOverlay({
           <span className="flex items-center gap-[0.35em] font-casui">
             <b className="font-casmath">{curve.kind === "rel" ? `rel${curve.n}:` : `x${curve.n},y${curve.n}:`}</b>
             <span className="font-casmath text-[1.25em] leading-none">(</span>
-            {curvePt ? `${fmt3(curvePt[0])} , ${fmt3(curvePt[1])}` : "undef"}
+            {curvePt ? `${fmt3(curvePt[0], pageDigits(page))} , ${fmt3(curvePt[1], pageDigits(page))}` : "undef"}
             <span className="font-casmath text-[1.25em] leading-none">)</span>
             {curve.kind === "par" && (
               <>
-                ,<i className="font-casmath">t</i>= {fmt3(curve.at)}
+                ,<i className="font-casmath">t</i>= {fmt3(curve.at, pageDigits(page))}
               </>
             )}
           </span>
@@ -944,7 +1038,7 @@ function ToolOverlay({
         <div className="absolute bottom-[1.2cqw] right-[1.6cqw] flex flex-col items-end whitespace-nowrap" style={{ fontSize: fs }}>
           {allYs.map((p) => (
             <span key={p.n} className="font-casui" style={{ color: curveColour(p.n) }}>
-              <b className="font-casmath">f{p.n}:</b> ({fmt3(tool.x)} , {Number.isFinite(p.y) ? fmt3(p.y) : "undef"})
+              <b className="font-casmath">f{p.n}:</b> ({fmt3(tool.x, pageDigits(page))} , {Number.isFinite(p.y) ? fmt3(p.y, pageDigits(page)) : "undef"})
             </span>
           ))}
         </div>
@@ -980,13 +1074,13 @@ function ToolOverlay({
       >
         {tool.kind === "dydx" ? (
           <span className="font-casmath">
-            <b>dy/dx</b>={fmt3(slope)}
+            <b>dy/dx</b>={fmt3(slope, pageDigits(page))}
           </span>
         ) : (
           <span className="flex items-center gap-[0.35em] font-casui">
             <b className="font-casmath">f{tool.fn}:</b>
             <span className="font-casmath text-[1.25em] leading-none">(</span>
-            {fmt3(tool.x)} , {Number.isFinite(y) ? fmt3(y) : "undef"}
+            {fmt3(tool.x, pageDigits(page))} , {Number.isFinite(y) ? fmt3(y, pageDigits(page)) : "undef"}
             <span className="font-casmath text-[1.25em] leading-none">)</span>
           </span>
         )}
@@ -1183,7 +1277,7 @@ function ConicMarks({ page, px, py, fs }: { page: GraphsPage; px: (x: number) =>
         <div className="pointer-events-none absolute left-[1.2cqw] top-[10cqw] flex flex-col font-casui text-casInk" style={{ fontSize: fs * 0.95 }}>
           {values.map((m, i) => (
             <span key={i}>
-              {m.title}: {fmt3(m.value)}
+              {m.title}: {fmt3(m.value, pageDigits(page))}
             </span>
           ))}
         </div>
@@ -1542,6 +1636,8 @@ function draw(
   const py = (y: number) => ((w.ymax - y) / (w.ymax - w.ymin)) * H;
   g.fillStyle = palette.casScreen;
   g.fillRect(0, 0, W, H);
+  // Hide Analytic Window: no axes, grid or graphs; marks and texts stay.
+  if (page.hideAnalytic) return;
   const fs = Math.max(8, SW * 0.025);
 
   // Grid.
@@ -1658,16 +1754,18 @@ function draw(
     g.lineTo(ay + ah * 0.8, ah * 1.6);
     g.closePath();
     g.fill();
-    // End values: x below the axis at each end, y to the left of the axis.
+    // End values: x below the axis at each end, y to the left of the axis (unless hidden).
     g.font = `${fs}px Arial, Helvetica, sans-serif`;
-    g.textBaseline = "top";
-    g.textAlign = "left";
-    g.fillText(trim(w.xmin), 2, ax + tick + 1);
-    g.textAlign = "right";
-    g.fillText(trim(w.xmax), W - 2, ax + tick + 1);
-    g.fillText(trim(w.ymax), ay - tick - 2, 2);
-    g.textBaseline = "bottom";
-    g.fillText(trim(w.ymin), ay - tick - 2, H - 2);
+    if (!page.hideEndValues) {
+      g.textBaseline = "top";
+      g.textAlign = "left";
+      g.fillText(trim(w.xmin), 2, ax + tick + 1);
+      g.textAlign = "right";
+      g.fillText(trim(w.xmax), W - 2, ax + tick + 1);
+      g.fillText(trim(w.ymax), ay - tick - 2, 2);
+      g.textBaseline = "bottom";
+      g.fillText(trim(w.ymin), ay - tick - 2, H - 2);
+    }
     // The first tick on each positive half is numbered, as on the handheld.
     g.textBaseline = "top";
     g.textAlign = "center";

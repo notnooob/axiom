@@ -11,7 +11,7 @@ import { app, off, rule, sub, wiz, type Menu } from "./types";
  */
 
 /** The page state the menu's labels depend on. */
-export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean };
+export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean; hideAnalytic?: boolean; hideEndValues?: boolean; hideGuides?: boolean };
 
 /** An equation template: the relation entry opened with this form in it. */
 const tpl = (label: string, form: string) => app(label, `eqtpl:${form}`);
@@ -34,10 +34,10 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       rule(app("MathDraw", "mathDraw")),
     ]),
     sub("View", [
-      off("Graphing"),
-      off("Plane Geometry"),
-      off("3D Graphing"),
-      rule(off("Hide Analytic Window")),
+      app("Graphing", "viewGraphing"),
+      app("Plane Geometry", "viewPlane"),
+      app("3D Graphing", "view3d"),
+      rule(app(s.hideAnalytic ? "Show Analytic Window" : "Hide Analytic Window", "viewAnalytic")),
       app(s.axes ? "Hide Axes" : "Show Axes", "viewHideAxes"),
       sub("Grid", [
         grid("No Grid", "viewNoGrid", "none"),
@@ -45,8 +45,8 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         grid("Lined Grid", "viewLinedGrid", "line"),
       ]),
       { ...app(s.entryLine ? "Hide Entry Line" : "Show Entry Line", "viewEntryLine"), hint: "Ctrl+G" },
-      off("Hide Axes End Values"),
-      rule(off("Hide Object Selection Guides")),
+      app(s.hideEndValues ? "Show Axes End Values" : "Hide Axes End Values", "viewEndValues"),
+      rule(app(s.hideGuides ? "Show Object Selection Guides" : "Hide Object Selection Guides", "viewGuides")),
     ]),
     rule(
       sub("Graph Entry/Edit", [
@@ -91,9 +91,9 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       app("Graph Trace", "graphTrace"),
       app("Trace All", "traceAll"),
       app("Trace Step...", "traceStep"),
-      sub("Path Plot", [off("Function"), off("Parametric"), off("Polar"), off("Path Setup...")]),
-      off("Geometry Trace"),
-      off("Erase Geometry Trace"),
+      sub("Path Plot", [app("Function", "pathFn"), app("Parametric", "pathPar"), app("Polar", "pathPolar"), app("Path Setup...", "pathSetup")]),
+      app("Geometry Trace", "geoTrace"),
+      app("Erase Geometry Trace", "geoTraceErase"),
     ]),
     sub("Analyze Graph", [
       app("Zero", "analyzeZero"),
@@ -157,6 +157,6 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         sub("Transformation", ["Symmetry", "Reflection", "Translation", "Rotation", "Dilation"].map(off)),
       ]),
     ),
-    rule(off("Settings...")),
+    rule(app("Settings...", "graphSettings")),
   ];
 }

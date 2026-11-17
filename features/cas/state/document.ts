@@ -172,10 +172,28 @@ export type GraphsPage = {
   selected?: { marks: number[]; texts: number[] };
   /** MathDraw: a stroke drawn on the graph becomes the line or circle it looks like. */
   mathDraw?: boolean;
+  /** View: Graphing (unset), Plane Geometry (no axes) or 3D Graphing. */
+  view?: "plane" | "3d";
+  /** 3D Graphing's surfaces z1(x, y) …, and how the view is turned. */
+  surfaces?: { n: number; text: string; row: Row; hidden?: boolean }[];
+  view3d?: { yaw: number; pitch: number };
+  /** View ▸ Hide Analytic Window, Hide Axes End Values and Hide Object Selection Guides. */
+  hideAnalytic?: boolean;
+  hideEndValues?: boolean;
+  hideGuides?: boolean;
+  /** Graphs & Geometry Settings, as the dialog's fields left them. */
+  gsettings?: { digits?: string; graphAngle?: string; geoAngle?: string; hideLabels?: boolean; tooltips?: boolean; poi?: boolean; intAngles?: boolean; labelPoints?: boolean; analyticInPlane?: boolean };
+  /** Path Plot: a point running along a graph, drawing it as it goes. */
+  pathPlot?: { kind: "fn" | "par"; n: number; started: number };
+  /** Path Setup: how long a Path Plot takes, in seconds. */
+  pathSeconds?: number;
+  /** Geometry Trace: a moved graph leaves its earlier positions drawn faintly; the number goes up on each Erase. */
+  geoTrace?: boolean;
+  traceErased?: number;
   /** The entry line: which f (or rel) it's editing, or null when hidden. */
   editing: number | null;
   /** "rel", "par" or "de" while the entry line edits a relation, a parametric or a Diff Eq, else a function. */
-  entryKind?: "rel" | "par" | "de" | "seq";
+  entryKind?: "rel" | "par" | "de" | "seq" | "z";
   edit: EditState;
   tool: Tool | null;
   marks: Mark[];

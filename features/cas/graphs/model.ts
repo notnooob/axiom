@@ -84,13 +84,16 @@ export function zoomed(id: string, w: GraphWindow, samples: Samples[], aspect: n
 }
 
 /** Coordinates on graph labels: three significant figures, like the handheld's graph labels. */
-export function fmt3(v: number): string {
+export function fmt3(v: number, digits = 3): string {
   if (!Number.isFinite(v)) return "undef";
   if (Math.abs(v) < 1e-10) return "0";
-  const s = Number(v.toPrecision(3));
+  const s = Number(v.toPrecision(digits));
   if (Math.abs(s) >= 1e6 || Math.abs(s) < 1e-3) return s.toExponential(2).replace("e", "E").replace("+", "");
   return String(s);
 }
+
+/** A page's Display Digits (Graphs ▸ Settings): Float3 unless chosen. */
+export const pageDigits = (p: { gsettings?: { digits?: string } }) => Number(p.gsettings?.digits?.replace("Float", "")) || 3;
 
 /** Window Settings' "Auto" tick spacing: a power of ten giving 10 to 99 ticks, so 1 for −10…10. */
 export function autoScale(lo: number, hi: number): number {

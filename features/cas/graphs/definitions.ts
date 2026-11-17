@@ -7,6 +7,7 @@ import { print } from "../math/print";
 import type { GraphsPage } from "../state/document";
 import { deName, fnName, parNames, relName } from "./model";
 import { seqDefinition } from "./sequence";
+import { surfaceName } from "./graph3d";
 
 /**
  * The engine definitions that give one Graphs page its own copies of its
@@ -39,6 +40,13 @@ export function pageDefinitions(page: GraphsPage, settings: Settings): string[] 
       const [xn, yn] = parNames(page.id, c.n);
       const [x, y] = c.polar ? polarXY(c.x) : [c.x, c.y];
       out.push(`${xn}(t):=${t(x)}`, `${yn}(t):=${t(y)}`);
+    } catch {
+      // As above.
+    }
+  }
+  for (const s of page.surfaces ?? []) {
+    try {
+      out.push(`${surfaceName(page.id, s.n)}(x,y):=${t(s.text)}`);
     } catch {
       // As above.
     }

@@ -17,6 +17,7 @@ export type GraphEffect =
   | { parametric: { n: number; texts: string[]; polar?: boolean } }
   | { de: { n: number; texts: string[] } }
   | { sequence: { n: number; texts: string[] } }
+  | { surface: { n: number; text: string } }
   /** other: the second function for an intersection (the assistant names it); otherwise the first other one shown. */
   | { analyze: { type: AnalyzeKind; fn: number; other?: number; a: number; b: number } }
   | null;
@@ -79,6 +80,12 @@ export function openPolar(p: GraphsPage, degrees = false, n = nextPar(p)): Graph
   return { ...p, editing: n, entryKind: "par", parDraft: { field: 0, rows, polar: true }, edit: E.setRow(rows[0]!), tool: null };
 }
 
+/** Open the z entry line on z(n): the next new surface, or one to edit. */
+export function openSurface(p: GraphsPage, n = Math.max(0, ...(p.surfaces ?? []).map((s) => s.n)) + 1): GraphsPage {
+  const s = (p.surfaces ?? []).find((x) => x.n === n);
+  return { ...p, editing: n, entryKind: "z", parDraft: undefined, edit: E.setRow(s?.row ?? []), tool: null };
+}
+
 const nextSeq = (p: GraphsPage) => Math.max(0, ...(p.sequences ?? []).map((s) => s.n)) + 1;
 
 /** Open the sequence entry line on u(n): the term, the initial terms, then nmin ≤ n ≤ nmax and nstep (1 to 99 in steps of 1, as on the handheld). */
@@ -137,6 +144,7 @@ export function graphKey(
 
   if (p.zoomBox) return { page: zoomBoxKey(p, key), effect: null };
   if (p.mathDraw && key.k === "esc") return done({ mathDraw: undefined });
+  if (p.pathPlot && key.k === "esc") return done({ pathPlot: undefined });
   // What Select ▸ Region picked: del deletes it, esc lets it go.
   if (p.selected && (key.k === "delete" || key.k === "backspace")) {
     const s = p.selected;
@@ -260,6 +268,7 @@ export function graphKey(
       case "enter": {
         const text = p.edit.row.length ? E.rowText(p.edit) : "";
         if (!text) return done({ editing: null });
+        if (p.entryKind === "z") return done({ editing: null }, { surface: { n: p.editing, text } });
         if (p.entryKind === "rel") return done({ editing: null }, { relation: { n: p.editing, text } });
         return done({ editing: null }, { define: { n: p.editing, text } });
       }
@@ -267,6 +276,7 @@ export function graphKey(
         return done({ editing: null });
       case "up":
       case "down": {
+        if (p.entryKind === "z") return done({});
         // Up and down step through the defined functions (or relations) in the entry line.
         const rel = p.entryKind === "rel";
         const ns = (rel ? (p.relations ?? []) : p.functions).map((f) => f.n).sort((a, b) => a - b);
@@ -296,6 +306,26 @@ export function graphKey(
         return edit(E.moveEnd);
       case "tab":
         return edit(E.nextSlot);
+      default:
+        return done({});
+    }
+  }
+
+  // 3D Graphing: the arrows turn the view; Enter, Tab or typing opens the z entry line.
+  if (p.view === "3d") {
+    const v = { yaw: -0.7, pitch: 0.55, ...p.view3d };
+    switch (key.k) {
+      case "left":
+      case "right":
+        return done({ view3d: { ...v, yaw: v.yaw + (key.k === "left" ? -0.12 : 0.12) } });
+      case "up":
+      case "down":
+        return done({ view3d: { ...v, pitch: Math.max(-1.5, Math.min(1.5, v.pitch + (key.k === "up" ? 0.12 : -0.12))) } });
+      case "tab":
+      case "enter":
+        return { page: openSurface(p), effect: null };
+      case "char":
+        return graphKey(openSurface(p), key, taken);
       default:
         return done({});
     }
