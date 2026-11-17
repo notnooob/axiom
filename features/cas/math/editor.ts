@@ -76,6 +76,10 @@ export function templateNode(id: TemplateId): Node {
       return { t: "system", rows: [[], []] };
     case "matrix":
       return { t: "matrix", cells: [[[], []], [[], []]] };
+    case "rowmatrix":
+      return { t: "matrix", cells: [[[], []]] };
+    case "colmatrix":
+      return { t: "matrix", cells: [[[]], [[]]] };
   }
 }
 

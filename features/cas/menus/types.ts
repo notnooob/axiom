@@ -26,7 +26,9 @@ export type TemplateId =
   | "product"
   | "piecewise2"
   | "system2"
-  | "matrix";
+  | "matrix"
+  | "rowmatrix"
+  | "colmatrix";
 
 /** A field in a wizard dialog: a label, its starting value, and grey text shown while it's empty. */
 export type WizardField = {
@@ -111,6 +113,21 @@ export const wiz = (
   fields: WizardField[],
   build: string,
 ): MenuItem => ({ label, action: { kind: "wizard", title, fields, build } });
+/**
+ * Create a Matrix: rows and columns, then an empty matrix of that size with
+ * the cursor in its first box. Menu > Matrix & Vector > Create > Matrix… and
+ * the palette's m by n template both open it, as on the handheld.
+ */
+export const MATRIX_WIZARD: Extract<MenuAction, { kind: "wizard" }> = {
+  kind: "wizard",
+  title: "Create a Matrix",
+  arrows: false,
+  fields: [
+    { label: "Number of rows:", value: "2" },
+    { label: "Number of columns:", value: "2" },
+  ],
+  build: "matrix:{0}:{1}",
+};
 export const sub = (label: string, items: MenuItem[]): MenuItem => ({ label, items });
 /** Present on the handheld, not built here yet: shown greyed. */
 export const off = (label: string): MenuItem => ({ label });

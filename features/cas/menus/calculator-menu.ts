@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { app, ins, off, rule, sub, tpl, wiz, type Menu, type MenuItem } from "./types";
+import { app, ins, MATRIX_WIZARD, off, rule, sub, tpl, wiz, type Menu, type MenuItem } from "./types";
 
 /**
  * The Calculator app's menu. Item positions are the contract (see
@@ -392,7 +392,7 @@ export const calculatorMenu: Menu = [
   ]),
   sub("Matrix & Vector", [
     sub("Create", [
-      tpl("Matrix...", "matrix"),
+      { label: "Matrix...", action: MATRIX_WIZARD },
       ins("Zero Matrix", "newMat("),
       ins("Identity", "identity("),
       ins("Diagonal", "diag("),

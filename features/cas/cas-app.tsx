@@ -62,7 +62,7 @@ import {
   type CatalogResult,
   type CatalogState,
 } from "./catalog/catalog";
-import { PALETTE, paletteKeyPress, TemplatePalette } from "./menus/palette";
+import { PALETTE, paletteKeyPress, pickCell, TemplatePalette } from "./menus/palette";
 import { FinanceSolver, financeKeyPress, newFinance, type FinanceState } from "./finance/finance-solver";
 import { openWizard, WizardDialog, wizardKeyPress, type WizardState } from "./menus/wizard";
 import { download, screenPng } from "./screen/capture";
@@ -2097,6 +2097,7 @@ export function CasApp() {
         const r = paletteKeyPress(palette, key);
         setPalette(r.index);
         if (r.insert) pageKey({ k: "template", id: r.insert });
+        if (r.wizard) setWizard(openWizard(r.wizard));
         return;
       }
       if (menu) {
@@ -2394,7 +2395,7 @@ export function CasApp() {
   }, [finance, say]);
   useEffect(() => {
     const c = palette !== null ? PALETTE[palette] : undefined;
-    if (c) say(`${c.label}${c.id ? "" : ", not available"}`);
+    if (c) say(`${c.label}${c.id || c.wizard ? "" : ", not available"}`);
   }, [palette, say]);
   const seenPage = useRef(false);
   useEffect(() => {
@@ -2933,9 +2934,10 @@ export function CasApp() {
                     <TemplatePalette
                       index={palette}
                       onPick={(i) => {
-                        const id = PALETTE[i]?.id;
-                        setPalette(id ? null : i);
-                        if (id) pageKey({ k: "template", id });
+                        const r = pickCell(i);
+                        setPalette(r.index);
+                        if (r.insert) pageKey({ k: "template", id: r.insert });
+                        if (r.wizard) setWizard(openWizard(r.wizard));
                       }}
                     />
                   )}
