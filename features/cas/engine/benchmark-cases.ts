@@ -215,6 +215,16 @@ export const CASES: Case[] = [
   S("Exponential Regression", "stat.b", /^2\.0*|^2$/, { before: ["ExpReg {0,1,2,3},{1,2,4,8},1"] }),
   S("z Interval", "zInterval 1,{1,2,3,4,5},0.95", undefined),
   S("z Test", "zTest 0,1,{1,2,3},1,0", undefined),
+  // The textbook formulas, checked by hand: χ² = 10 on 2 df has P = e^−5.
+  S("2-Sample z Test", "stat.z", /^-3\.3410/, { before: ["zTest_2Samp 2,3,10,30,12,40"] }),
+  S("2-Sample t Interval (pooled)", "stat.sp", /^2\.6206/, { before: ["tInterval_2Samp 10,2,30,12,3,40,0.95,1"] }),
+  S("2-Prop z Test", "stat.z", /^-1\.1685/, { before: ["zTest_2Prop 30,100,45,120"] }),
+  S("χ² GOF", "stat.pval", /^0\.006737/, { before: ["χ²GOF {10,20,30},{20,20,20},2"] }),
+  S("χ² 2-way", "stat.χ²", /^0\.79365/, { before: ["χ²2way [[10,20][30,40]]"] }),
+  S("Linear Reg t Test", "stat.t", /^33\.321/, { before: ["LinRegtTest {1,2,3,4,5},{2.1,3.9,6.2,7.8,10.1}"] }),
+  S("One-way ANOVA", "stat.F", /^20\.846/, { before: ["ANOVA {1,2,3},{4,5,6},{7,8,10}"] }),
+  S("Multiple Linear Regression", "stat.b1", /^2\.0333/, { before: ["MultReg {3,5,7,9,12},{1,2,3,4,5},{2,1,4,3,6}"] }),
+  S("Correlation Matrix", "corrMat({1,2,3},{3,2,1})", /^\[\[1\.?,-1\.?\]\[-1\.?,1\.?\]\]$/),
 
   // Finance
   F("tvmFV", "tvmFV(10,5,-1000,0,1,1)", /^1628\.89/),

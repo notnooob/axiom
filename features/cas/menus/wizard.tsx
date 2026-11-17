@@ -24,7 +24,8 @@ export const openWizard = (wizard: Wizard): WizardState => ({
 /** The command text a filled-in wizard builds, empty trailing arguments dropped. */
 export function buildWizard(w: WizardState): string {
   let out = w.wizard.build.replace(/\{(\d)\}/g, (_, i: string) => w.values[Number(i)]?.trim() ?? "");
-  out = out.replace(/,+\)/g, ")");
+  // Blank arguments at the end of a call or a command (before ":" or the end) are dropped.
+  out = out.replace(/,+\)/g, ")").replace(/,+(?=\s*(:|$))/g, "");
   return out;
 }
 

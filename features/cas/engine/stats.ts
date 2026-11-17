@@ -8,7 +8,7 @@
  * power and logarithmic fits are least squares on the transformed data,
  * with r for that transformed fit.
  */
-export type StatRow = [label: string, value: number | string | number[]];
+export type StatRow = [label: string, value: number | string | number[] | number[][]];
 export type StatResult = { rows: StatRow[]; regEqn?: string };
 
 /**

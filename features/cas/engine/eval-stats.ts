@@ -27,6 +27,7 @@ import {
   type StatResult,
   type StatRow,
 } from "./stats";
+import { corrMat, statProcedure, TEST_COMMANDS, type Arg } from "./stats-tests";
 import { translate } from "./translate";
 
 /**
@@ -46,6 +47,22 @@ export async function statistics(input: Extract<Ast, { k: "call" }>, giac: Giac,
     const nums = inner.split(",").map((t) => Number(t.trim()));
     if (nums.some((v) => !Number.isFinite(v))) throw new EngineError("Error: Wrong kind of input");
     return list ? nums : nums[0];
+  };
+  /** A number, list or matrix, as the procedures in stats-tests.ts take them. */
+  const arg = async (a: Ast | undefined): Promise<Arg> => {
+    if (!a) return undefined;
+    const raw = (await giac(`evalf(${translate(a, settings).giac})`)).trim();
+    let v: unknown;
+    try {
+      v = JSON.parse(raw.replace(/list\[/g, "[").replace(/\bundef\b/g, "null"));
+    } catch {
+      throw new EngineError("Error: Wrong kind of input");
+    }
+    const ok = (x: unknown) => typeof x === "number" && Number.isFinite(x);
+    if (ok(v)) return v as number;
+    if (Array.isArray(v) && v.every(ok)) return v as number[];
+    if (Array.isArray(v) && v.length && v.every((r) => Array.isArray(r) && r.every(ok))) return v as number[][];
+    throw new EngineError("Error: Wrong kind of input");
   };
   const asList = (v: number[] | number | undefined) => {
     if (!Array.isArray(v)) throw new EngineError("Error: Wrong kind of input");
@@ -154,6 +171,10 @@ export async function statistics(input: Extract<Ast, { k: "call" }>, giac: Giac,
       if (typeof x !== "number" || typeof n !== "number" || typeof c !== "number") throw new EngineError("Error: Wrong kind of input");
       const z = Number((await giac(`evalf(normal_icdf(0,1,${(1 + c) / 2}))`)).trim());
       result = propInterval(x, n, c, z);
+    } else if (TEST_COMMANDS.has(input.f)) {
+      const args: Arg[] = [];
+      for (const a of input.args) args.push(await arg(a));
+      result = statProcedure(input.f, args);
     } else if (input.f === "OneVar") result = oneVar(asList(await values(a0)), (await values(a1)) ?? 1);
     else {
       // TwoVar and the regressions: X, Y[, [Freq][, Category, Include]].
@@ -190,9 +211,12 @@ function decimalText(v: number): string {
 }
 const listAst = (v: number[], digits: number): Ast => ({ k: "list", items: v.map((x) => numCell(x, digits)) });
 
+const isMatrix = (v: StatRow[1]): v is number[][] => Array.isArray(v) && Array.isArray(v[0]);
+
 /** The results as the two-column matrix stat.results is: [["Title",…]["x̄",22.6364]…]. */
 function statTable(rows: StatRow[], digits: number, list: (v: number[]) => Ast): Ast {
-  const cell = (v: StatRow[1]): Ast => (typeof v === "string" ? { k: "str", v } : Array.isArray(v) ? list(v) : numCell(v, digits));
+  const cell = (v: StatRow[1]): Ast =>
+    typeof v === "string" ? { k: "str", v } : isMatrix(v) ? { k: "mat", rows: v.map((r) => r.map((x) => numCell(x, digits))) } : Array.isArray(v) ? list(v as number[]) : numCell(v, digits);
   return { k: "mat", rows: rows.map(([label, v]) => [{ k: "str", v: label }, cell(v)]) };
 }
 
@@ -249,7 +273,8 @@ function statMembers(store: StatStore): Map<string, StatRow[1]> {
 /** A value as an expression, at full precision, still a decimal (stat.n is 11., not 11). */
 function valueAst(v: StatRow[1]): Ast {
   if (typeof v === "string") return { k: "str", v };
-  if (Array.isArray(v)) return { k: "list", items: v.map((x) => valueAst(x)) };
+  if (isMatrix(v)) return { k: "mat", rows: v.map((r) => r.map((x) => valueAst(x))) };
+  if (Array.isArray(v)) return { k: "list", items: (v as number[]).map((x) => valueAst(x)) };
   if (!Number.isFinite(v)) return sym("undef");
   const n: Ast = { k: "num", v: decimalText(v) };
   return v < 0 ? { k: "neg", a: n } : n;
@@ -304,4 +329,22 @@ export async function statResults(input: Ast, giac: Giac, settings: Settings): P
     output = cell;
   }
   return { ok: true, input, output, outputText: print(output) };
+}
+
+/** corrMat(List1, List2[, …]): the matrix of correlations between each pair of lists. */
+export async function correlationMatrix(input: Extract<Ast, { k: "call" }>, giac: Giac, settings: Settings): Promise<EvalResult> {
+  try {
+    const lists: number[][] = [];
+    for (const a of input.args) {
+      const raw = (await giac(`evalf(${translate(a, settings).giac})`)).trim();
+      const nums = raw.replace(/^(list)?\[|\]$/g, "").split(",").map((t) => Number(t.trim()));
+      if (!/^(list)?\[/.test(raw) || nums.some((v) => !Number.isFinite(v))) throw new EngineError("Error: Wrong kind of input");
+      lists.push(nums);
+    }
+    const output: Ast = { k: "mat", rows: corrMat(lists).map((r) => r.map((v) => numCell(v, settings.digits))) };
+    return { ok: true, input, output, outputText: print(output) };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "";
+    return { ok: false, input, error: message.startsWith("Error") ? message : "Error: Invalid input" };
+  }
 }

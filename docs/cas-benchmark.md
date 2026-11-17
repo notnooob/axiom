@@ -1,8 +1,8 @@
 # Calculator benchmark
 
-188 of 188 commands give the handheld's answer (100%).
+197 of 197 commands give the handheld's answer (100%).
 
-The Calculator menu has 346 items, as the handheld's: 226 are built and 120 are greyed (not built yet).
+The Calculator menu has 346 items, as the handheld's: 246 are built and 100 are greyed (not built yet).
 
 ## Menu coverage
 
@@ -13,7 +13,7 @@ The Calculator menu has 346 items, as the handheld's: 226 are built and 120 are 
 | Algebra | 32 | — |
 | Calculus | 21 | — |
 | Probability | 29 | — |
-| Statistics | 60 | Sinusoidal Regression..., Logistic Regression (d=0)..., Logistic Regression (d≠0)..., Multiple Linear Regression..., Correlation Matrix, 2-Sample z Interval..., 2-Sample t Interval..., 2-Prop z Interval..., Linear Reg t Intervals..., Multiple Reg Intervals..., 2-Sample z Test..., 2-Sample t Test..., 2-Prop z Test..., χ² GOF..., χ² 2-way Test..., 2-Sample F Test..., Linear Reg t Test..., Multiple Reg Tests..., ANOVA..., ANOVA 2-Way... |
+| Statistics | 80 | — |
 | Matrix & Vector | 39 | LU Decomposition, QR Decomposition, Convert to Cylindrical, Convert to Spherical |
 | Finance | 15 | Month Day Format, Day Month Format |
 | Functions & Programs | 0 | New..., Open..., Import..., View..., Func...EndFunc, Prgm...EndPrgm, Local, If, If...Then...EndIf, If...Then...Else...EndIf, ElseIf...Then, For...EndFor, While...EndWhile, Loop...EndLoop, Try...Else...EndTry, ClrErr, PassErr, errCode, warnCodes, Wait, Return, Cycle, Exit, Lbl, GoTo Lbl, Stop, Disp, DispAt, Request, RequestStr, Text, getKey, Get, GetStr, Send, RefreshProbeVars, Float, Float1, Float2, Float3, Float4, Float5, Float6, Float7, Float8, Float9, Float10, Float11, Float12, Fix0, Fix1, Fix2, Fix3, Fix4, Fix5, Fix6, Fix7, Fix8, Fix9, Fix10, Fix11, Fix12, Radian, Degree, Gradian, Normal, Scientific, Engineering, Real, Rectangular, Polar, Auto, Approximate, Exact, Rectangular, Cylindrical, Spherical, Decimal, Hex, Binary, SI, Eng/US, Get Mode, Get Language Info, Get Platform Info, Add New Line |
@@ -217,7 +217,7 @@ Each command is typed as a student would and run through the same `evaluate()` t
 | FCdf | `FCdf(0,1.5,2,10)` | `0.730671` | ✓ |
 | invF | `invF(0.95,2,10)` | `4.10282` | ✓ |
 
-### Statistics (13/13)
+### Statistics (22/22)
 
 | Command | Typed | Answer | |
 |---|---|---|---|
@@ -234,6 +234,15 @@ Each command is typed as a student would and run through the same `evaluate()` t
 | Exponential Regression | `stat.b` | `2.` | ✓ |
 | z Interval | `zInterval 1,{1,2,3,4,5},0.95` | `[["Title","z Interval"]["CLower",2.10071]["CUpper",3.89929]["x̄",3.]["ME",0.899293]["sx := sₙ₋₁x",1.59164]["n",4.75]["σ",1.]]` | ✓ |
 | z Test | `zTest 0,1,{1,2,3},1,0` | `[["Title","z Test"]["Alternate Hyp","μ ≠ μ0"]["z",3.4641]["PVal",5.32006E-4]["x̄",2.]["sx := sₙ₋₁x",1.]["n",3.]]` | ✓ |
+| 2-Sample z Test | `stat.z` | `-3.34108` | ✓ |
+| 2-Sample t Interval (pooled) | `stat.sp` | `2.62062` | ✓ |
+| 2-Prop z Test | `stat.z` | `-1.16855` | ✓ |
+| χ² GOF | `stat.pval` | `0.00673795` | ✓ |
+| χ² 2-way | `stat.χ²` | `0.793651` | ✓ |
+| Linear Reg t Test | `stat.t` | `33.3213` | ✓ |
+| One-way ANOVA | `stat.F` | `20.8462` | ✓ |
+| Multiple Linear Regression | `stat.b1` | `2.03333` | ✓ |
+| Correlation Matrix | `corrMat({1,2,3},{3,2,1})` | `[[1.,-1.][-1.,1.]]` | ✓ |
 
 ### Finance (14/14)
 

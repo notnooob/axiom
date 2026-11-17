@@ -1926,7 +1926,8 @@ export function CasApp() {
           } catch (err) {
             return setError(`Error: ${(err as Error).message}`);
           }
-          const show = (v: number | string | number[]) => (Array.isArray(v) ? `{${v.map((x) => +x.toPrecision(8)).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v);
+          const show = (v: StatResult["rows"][number][1]): string =>
+            Array.isArray(v) ? `{${v.map((x) => (Array.isArray(x) ? show(x) : +x.toPrecision(8))).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v;
           setWarning(res.rows.map(([label, v]) => `${label}: ${show(v)}`));
           return;
         }

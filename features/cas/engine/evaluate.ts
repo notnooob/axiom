@@ -5,11 +5,12 @@ import { print } from "../math/print";
 import { decimalArithmetic } from "./decimal";
 import { EngineError, format, formatFloat, numericValue, shownDecimal, unrounded } from "./format";
 import { STAT_COMMANDS } from "./stats";
+import { TEST_COMMANDS } from "./stats-tests";
 import { BUILTINS } from "../math/builtins";
 import { rootIn, rootsIn } from "../graphs/analyze";
 import { defineParts, handheldForms, heavy, lineAt, RENAME_IN, toGiac, translate, UnsupportedError } from "./translate";
 import { inputWarning, warning, type Warning } from "./warnings";
-import { statistics, statResults, statVariables } from "./eval-stats";
+import { correlationMatrix, statistics, statResults, statVariables } from "./eval-stats";
 import { copyVar, financeCalls, numericFinance, OMITTED } from "./eval-finance";
 
 /**
@@ -273,7 +274,8 @@ async function evaluateText(
   if (input.k === "call" && input.f === "CopyVar") return copyVar(input, giac, opts.settings);
   const parts = await formOnParts(input, giac, opts);
   if (parts) return parts;
-  if (input.k === "call" && STAT_COMMANDS.has(input.f)) return statistics(withAnswer(input, opts.ans) as typeof input, giac, opts.settings);
+  if (input.k === "call" && (STAT_COMMANDS.has(input.f) || TEST_COMMANDS.has(input.f))) return statistics(withAnswer(input, opts.ans) as typeof input, giac, opts.settings);
+  if (input.k === "call" && input.f === "corrMat") return correlationMatrix(withAnswer(input, opts.ans) as typeof input, giac, opts.settings);
   const results = await statResults(input, giac, opts.settings);
   if (results) return results;
   if (opts.settings.complex === "polar") {
