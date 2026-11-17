@@ -6,6 +6,8 @@
  * in cm and angles in degrees, as the handheld's Geometry page shows them.
  */
 
+import { classify as classifyConic } from "../graphs/conics";
+
 export type GeoObj =
   | { id: string; kind: "point"; x: number; y: number }
   | { id: string; kind: "midpoint"; of: [string, string] }
@@ -17,13 +19,31 @@ export type GeoObj =
   | { id: string; kind: "circle"; centre: string; through?: string; r?: number }
   | { id: string; kind: "polygon"; pts: string[] }
   /** store: the variable its value is kept in, for the problem's other pages. */
-  | { id: string; kind: "measure"; what: "length" | "area" | "perimeter" | "angle" | "slope"; of: string[]; store?: string }
+  | { id: string; kind: "measure"; what: "length" | "area" | "perimeter" | "angle" | "slope" | "dangle"; of: string[]; store?: string }
   /**
    * An image of another object. by: symmetry [centre], reflection [line],
    * translation [from, to], rotation and dilation [centre] with amount (degrees
    * anticlockwise, or the scale factor), or [centre, a measurement] to use its value.
    */
-  | { id: string; kind: "transform"; op: TransformOp; of: string; by: string[]; amount?: number };
+  | { id: string; kind: "transform"; op: TransformOp; of: string; by: string[]; amount?: number }
+  /** A point that stays on a line, circle, polygon or curve: t along it (a fraction, or an angle on a circle). */
+  | { id: string; kind: "pointon"; on: string; t: number }
+  /** The tangent to a circle at the point of it nearest `at`. */
+  | { id: string; kind: "tangent"; to: string; at: string }
+  | { id: string; kind: "vector"; a: string; b: string }
+  /** The arc from a through b to c. */
+  | { id: string; kind: "arc"; a: string; b: string; c: string }
+  /** A rectangle on side ab, as wide as c is from that side. */
+  | { id: string; kind: "rectangle"; a: string; b: string; c: string }
+  | { id: string; kind: "regpoly"; centre: string; vertex: string; n: number }
+  /** An ellipse or hyperbola from its foci and a point on it, a parabola from its focus and directrix, or the conic through five points. */
+  | { id: string; kind: "conic"; type: "ellipse" | "hyperbola" | "parabola" | "five"; of: string[] }
+  /** The path a point takes as a Point On (driver) runs along its object. */
+  | { id: string; kind: "locus"; of: string; driver: string }
+  /** A circle about centre with the radius of a segment (r: [segment]) or two points' distance (r: [p, q]). */
+  | { id: string; kind: "compass"; centre: string; r: string[] }
+  /** A point a measurement's value along a line, ray or circle from a point. */
+  | { id: string; kind: "transfer"; measure: string; onto: string; from: string };
 
 export type TransformOp = "symmetry" | "reflection" | "translation" | "rotation" | "dilation";
 
@@ -31,7 +51,9 @@ export type Pt = { x: number; y: number };
 /** What an object works out to: a point, a line (bounded as segment or ray, or not), a circle, a polygon, or a measured value. */
 export type Shape =
   | { t: "pt"; p: Pt }
-  | { t: "line"; p: Pt; q: Pt; bound: "segment" | "ray" | "line" }
+  | { t: "line"; p: Pt; q: Pt; bound: "segment" | "ray" | "line"; arrow?: boolean }
+  /** A curve as joined points: an arc, an ellipse, a hyperbola's branches, a parabola, a locus. */
+  | { t: "curve"; pieces: Pt[][]; closed?: boolean }
   | { t: "circle"; c: Pt; r: number }
   | { t: "poly"; pts: Pt[] }
   /** arc: an angle's, at its vertex, from one side (radians) turning sweep to the other. */
@@ -170,6 +192,8 @@ export function resolve(objs: GeoObj[]): Map<string, Shape> {
         if (f && src) s = image(src, f.map, f.scale);
         break;
       }
+      default:
+        s = resolveMore(o, out, objs);
     }
     if (s) out.set(o.id, s);
   }
@@ -223,6 +247,7 @@ function image(s: Shape, f: (p: Pt) => Pt, scale: number): Shape | undefined {
   }
   if (s.t === "circle") return s.r * scale > EPS ? { t: "circle", c: f(s.c), r: s.r * scale } : undefined;
   if (s.t === "poly") return { t: "poly", pts: s.pts.map(f) };
+  if (s.t === "curve") return { ...s, pieces: s.pieces.map((piece) => piece.map(f)) };
   return undefined;
 }
 
@@ -259,6 +284,7 @@ function measure(o: Extract<GeoObj, { kind: "measure" }>, out: Map<string, Shape
         return Math.abs(dx) < EPS ? { t: "value", value: Infinity, text: "undef", at: s.p } : value((s.q.y - s.p.y) / dx, "", { x: (s.p.x + s.q.x) / 2, y: (s.p.y + s.q.y) / 2 });
       }
       return undefined;
+    case "dangle":
     case "angle":
       if (s?.t === "pt" && u?.t === "pt" && v?.t === "pt") {
         const a = Math.atan2(s.p.y - u.p.y, s.p.x - u.p.x);
@@ -268,7 +294,9 @@ function measure(o: Extract<GeoObj, { kind: "measure" }>, out: Map<string, Shape
         if (sweep > Math.PI) sweep -= 2 * Math.PI;
         if (sweep <= -Math.PI) sweep += 2 * Math.PI;
         const mid = a + sweep / 2;
-        return { ...value((Math.abs(sweep) * 180) / Math.PI, "°", { x: u.p.x + 1.6 * Math.cos(mid), y: u.p.y + 1.6 * Math.sin(mid) }), arc: { c: u.p, from: a, sweep } };
+        // A directed angle keeps its sign: anticlockwise from the first side is positive.
+        const deg = ((o.what === "dangle" ? sweep : Math.abs(sweep)) * 180) / Math.PI;
+        return { ...value(deg, "°", { x: u.p.x + 1.6 * Math.cos(mid), y: u.p.y + 1.6 * Math.sin(mid) }), arc: { c: u.p, from: a, sweep } };
       }
       return undefined;
   }
@@ -285,7 +313,7 @@ export function nextLabel(objs: GeoObj[]): string {
 
 /** A new object's id: its kind's letter and the next number (s1, l1, c1…). Points are named instead. */
 export function nextId(objs: GeoObj[], kind: GeoObj["kind"]): string {
-  const prefix = { segment: "s", line: "l", ray: "r", perpendicular: "l", parallel: "l", bisector: "l", anglebisector: "r", circle: "c", polygon: "p", measure: "m" }[kind as string] ?? "o";
+  const prefix = { segment: "s", line: "l", ray: "r", perpendicular: "l", parallel: "l", bisector: "l", anglebisector: "r", circle: "c", polygon: "p", measure: "m", tangent: "l", vector: "v", arc: "a", rectangle: "p", regpoly: "p", conic: "k", locus: "lo", compass: "c" }[kind as string] ?? "o";
   const used = new Set(objs.map((o) => o.id));
   let n = 1;
   while (used.has(`${prefix}${n}`)) n++;
@@ -322,6 +350,25 @@ export function remove(objs: GeoObj[], ids: string[]): GeoObj[] {
         return o.pts;
       case "transform":
         return [o.of, ...o.by];
+      case "pointon":
+        return [o.on];
+      case "tangent":
+        return [o.to, o.at];
+      case "vector":
+        return [o.a, o.b];
+      case "arc":
+      case "rectangle":
+        return [o.a, o.b, o.c];
+      case "regpoly":
+        return [o.centre, o.vertex];
+      case "conic":
+        return o.of;
+      case "locus":
+        return [o.of, o.driver];
+      case "compass":
+        return [o.centre, ...o.r];
+      case "transfer":
+        return [o.measure, o.onto, o.from];
     }
   };
   return objs.filter((o) => {
@@ -569,9 +616,23 @@ export type GeoTool =
   | "area"
   | "angle"
   | "slope"
+  | "pointon"
+  | "tangent"
+  | "vector"
+  | "arc"
+  | "rectangle"
+  | "regpoly"
+  | "ellipse"
+  | "parabola"
+  | "hyperbola"
+  | "conic5"
+  | "dangle"
+  | "locus"
+  | "compass"
+  | "transfer"
   | TransformOp;
 
-type Want = "point" | "line" | "curve" | "region" | "measurable";
+type Want = "point" | "line" | "curve" | "region" | "measurable" | "value" | "segment";
 
 export const TOOL_NAMES: Record<GeoTool, string> = {
   point: "Point",
@@ -591,6 +652,20 @@ export const TOOL_NAMES: Record<GeoTool, string> = {
   area: "Area",
   angle: "Angle",
   slope: "Slope",
+  pointon: "Point On",
+  tangent: "Tangent",
+  vector: "Vector",
+  arc: "Circle Arc",
+  rectangle: "Rectangle",
+  regpoly: "Regular Polygon",
+  ellipse: "Ellipse",
+  parabola: "Parabola",
+  hyperbola: "Hyperbola",
+  conic5: "Conic by Five Points",
+  dangle: "Directed Angle",
+  locus: "Locus",
+  compass: "Compass",
+  transfer: "Measurement Transfer",
   symmetry: "Symmetry",
   reflection: "Reflection",
   translation: "Translation",
@@ -601,9 +676,11 @@ export const TOOL_NAMES: Record<GeoTool, string> = {
 const kinds = (s: Shape | undefined): Want[] =>
   !s ? []
   : s.t === "pt" ? ["point", "measurable"]
-  : s.t === "line" ? ["line", "curve", ...(s.bound === "segment" ? (["measurable"] as const) : [])]
+  : s.t === "line" ? ["line", "curve", ...(s.bound === "segment" ? (["measurable", "segment"] as const) : [])]
   : s.t === "circle" ? ["curve", "region", "measurable"]
   : s.t === "poly" ? ["region", "measurable"]
+  : s.t === "curve" ? ["curve"]
+  : s.t === "value" ? ["value"]
   : [];
 
 /** What the tool takes next, given what's been picked. */
@@ -624,6 +701,18 @@ export function wants(tool: GeoTool, picked: string[], shapes: Map<string, Shape
       return ["region"];
     case "slope":
       return ["line"];
+    case "pointon":
+      return ["line", "curve", "region"];
+    case "tangent":
+      return n === 0 ? ["curve"] : ["point"];
+    case "parabola":
+      return n === 0 ? ["point"] : ["line"];
+    case "locus":
+      return ["point"];
+    case "compass":
+      return n === 0 ? ["segment", "point"] : ["point"];
+    case "transfer":
+      return n === 0 ? ["value"] : n === 1 ? ["line", "curve"] : ["point"];
     case "symmetry":
     case "reflection":
     case "translation":
@@ -636,10 +725,26 @@ export function wants(tool: GeoTool, picked: string[], shapes: Map<string, Shape
   }
 }
 
-const COUNT: Partial<Record<GeoTool, number>> = { point: 1, circle: 2, triangle: 3, angle: 3, anglebisector: 3, area: 1, slope: 1, translation: 3 };
+const COUNT: Partial<Record<GeoTool, number>> = {
+  point: 1,
+  circle: 2,
+  triangle: 3,
+  angle: 3,
+  dangle: 3,
+  anglebisector: 3,
+  area: 1,
+  slope: 1,
+  translation: 3,
+  arc: 3,
+  rectangle: 3,
+  ellipse: 3,
+  hyperbola: 3,
+  conic5: 5,
+  transfer: 3,
+};
 
 /** Tools that end by asking for a number: the angle, or the scale factor. */
-export const ASKS: Partial<Record<GeoTool, string>> = { rotation: "Angle (°):", dilation: "Scale Factor:" };
+export const ASKS: Partial<Record<GeoTool, string>> = { rotation: "Angle (°):", dilation: "Scale Factor:", regpoly: "Number of Sides:" };
 
 /** The tool's prompt, as the handheld shows it at the top of the page. */
 export function prompt(tool: GeoTool, picked: string[], shapes: Map<string, Shape>): string {
@@ -651,7 +756,18 @@ export function prompt(tool: GeoTool, picked: string[], shapes: Map<string, Shap
     if (tool === "translation") return picked.length === 1 ? "Select the start of the vector" : "Select the end of the vector";
     return "Select the centre";
   }
-  if (tool === "angle" || tool === "anglebisector") return ["Select a point on one side", "Select the vertex", "Select a point on the other side"][picked.length]!;
+  if (tool === "pointon") return "Select a line, circle, polygon or curve to put the point on";
+  if (tool === "tangent") return picked.length ? "Select the point of tangency" : "Select a circle";
+  if (tool === "regpoly") return picked.length ? "Select a vertex" : "Select the centre";
+  if (tool === "rectangle") return ["Select a corner", "Select the next corner", "Select a point on the opposite side"][picked.length]!;
+  if (tool === "arc") return ["Select the start", "Select a point on the arc", "Select the end"][picked.length]!;
+  if (tool === "ellipse" || tool === "hyperbola") return ["Select a focus", "Select the other focus", "Select a point on the curve"][picked.length]!;
+  if (tool === "parabola") return picked.length ? "Select the directrix" : "Select the focus";
+  if (tool === "conic5") return `Select point ${picked.length + 1} of 5`;
+  if (tool === "locus") return picked.length ? "Select the Point On that drives it" : "Select the point whose path to draw";
+  if (tool === "compass") return picked.length === 0 ? "Select a segment, or two points, for the radius" : "Select the centre";
+  if (tool === "transfer") return ["Select a measurement", "Select a line, ray or circle", "Select the starting point"][picked.length]!;
+  if (tool === "angle" || tool === "dangle" || tool === "anglebisector") return ["Select a point on one side", "Select the vertex", "Select a point on the other side"][picked.length]!;
   const w = wants(tool, picked, shapes);
   const what = w.includes("measurable") ? "what to measure (or a point)" : w.includes("region") ? "a polygon or circle" : w.includes("curve") ? "a line or circle" : w.join(" or a ");
   return `Select ${what === "point" ? "a point" : what.startsWith("what") ? what : `a ${what}`}`;
@@ -671,6 +787,12 @@ export function click(
 ): { objs: GeoObj[]; picked: string[]; built?: string; error?: string; ask?: string[] } | null {
   const shapes = resolve(objs);
   const w = wants(tool, picked, shapes);
+  if (tool === "pointon") {
+    const on = hit ? shapes.get(hit) : undefined;
+    if (!hit || !on || on.t === "pt" || on.t === "value") return null;
+    const id = nextLabel(objs);
+    return { objs: [...objs, { id, kind: "pointon", on: hit, t: paramAt(on, at) }], picked: [], built: id };
+  }
   if (tool === "polygon" && hit === picked[0] && picked.length >= 3) return finish(objs, tool, picked);
   if (tool === "point" && hit && shapes.get(hit)?.t === "pt") return null;
   let id = hit && kinds(shapes.get(hit)).some((k) => w.includes(k)) ? hit : null;
@@ -682,20 +804,27 @@ export function click(
   if (picked.includes(id) && tool !== "polygon") return null;
   const next = [...picked, id];
   const firstIsPoint = shapes.get(next[0]!)?.t === "pt" || !shapes.has(next[0]!);
-  const count = tool === "polygon" ? Infinity : tool === "length" ? (firstIsPoint ? 2 : 1) : (COUNT[tool] ?? 2);
+  const count = tool === "polygon" ? Infinity : tool === "length" ? (firstIsPoint ? 2 : 1) : tool === "compass" ? (firstIsPoint ? 3 : 2) : (COUNT[tool] ?? 2);
   if (tool === "point") return { objs, picked: [], built: id };
   if (next.length < count) return { objs, picked: next };
   // Rotation and Dilation have their object and centre: the number is asked for next (see transformWith).
   return ASKS[tool] ? { objs, picked: [], ask: next } : finish(objs, tool, next);
 }
 
-/** Finish a Rotation or Dilation once its number is typed. */
+/** Finish a Rotation or Dilation once its number is typed (or a Regular Polygon once its sides are). */
 export function transformWith(objs: GeoObj[], tool: GeoTool, picked: string[], amount: number) {
+  if (tool === "regpoly") {
+    if (!Number.isInteger(amount) || amount < 3 || amount > 100) return { error: "A regular polygon has 3 to 100 sides" };
+    const id = nextId(objs, "regpoly");
+    return { objs: [...objs, { id, kind: "regpoly" as const, centre: picked[0]!, vertex: picked[1]!, n: amount }], built: id };
+  }
   const r = addSpec(objs, { type: tool, of: [picked[0]!], through: picked[1], ...(tool === "rotation" ? { angle: amount } : { factor: amount }) });
   return "error" in r ? { error: r.error } : { objs: r.objs, built: r.id };
 }
 
 function finish(objs: GeoObj[], tool: GeoTool, picked: string[]) {
+  const more = finishMore(objs, tool, picked);
+  if (more) return more;
   const shapes = resolve(objs);
   const spec: GeoSpec =
     tool === "circle" ? { type: "circle", points: [picked[0]!], through: picked[1] }
@@ -710,4 +839,287 @@ function finish(objs: GeoObj[], tool: GeoTool, picked: string[]) {
     : { type: tool, points: picked };
   const r = addSpec(objs, spec);
   return "error" in r ? { objs, picked: [], error: r.error } : { objs: r.objs, picked: [], built: r.id };
+}
+
+// ---- More constructions: Point On, Tangent, Vector, Circle Arc, Rectangle,
+// Regular Polygon, the conics, Locus, Compass and Measurement Transfer.
+
+const SAMPLES = 96;
+
+/** Where on a shape a point is, as the t a Point On keeps: a fraction along a line or polygon or curve, an angle on a circle. */
+export function paramAt(s: Shape, at: Pt): number {
+  if (s.t === "line") {
+    const d = { x: s.q.x - s.p.x, y: s.q.y - s.p.y };
+    let t = ((at.x - s.p.x) * d.x + (at.y - s.p.y) * d.y) / (d.x * d.x + d.y * d.y);
+    if (s.bound !== "line") t = Math.max(0, t);
+    if (s.bound === "segment") t = Math.min(1, t);
+    return t;
+  }
+  if (s.t === "circle") return Math.atan2(at.y - s.c.y, at.x - s.c.x);
+  const path = s.t === "poly" ? [...s.pts, s.pts[0]!] : s.t === "curve" ? (s.pieces[0] ?? []) : [];
+  let best = 0;
+  let bestD = Infinity;
+  const total = pathLength(path);
+  let run = 0;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const [a, b] = [path[i]!, path[i + 1]!];
+    const len = dist(a, b);
+    const k = len > EPS ? Math.max(0, Math.min(1, ((at.x - a.x) * (b.x - a.x) + (at.y - a.y) * (b.y - a.y)) / (len * len))) : 0;
+    const d = dist(at, { x: a.x + k * (b.x - a.x), y: a.y + k * (b.y - a.y) });
+    if (d < bestD) [bestD, best] = [d, total > EPS ? (run + k * len) / total : 0];
+    run += len;
+  }
+  return best;
+}
+
+const pathLength = (path: Pt[]) => path.reduce((t, p, i) => (i ? t + dist(path[i - 1]!, p) : 0), 0);
+
+/** The point t along a shape (see paramAt). */
+function pointAt(s: Shape, t: number): Pt | undefined {
+  if (s.t === "line") return { x: s.p.x + t * (s.q.x - s.p.x), y: s.p.y + t * (s.q.y - s.p.y) };
+  if (s.t === "circle") return { x: s.c.x + s.r * Math.cos(t), y: s.c.y + s.r * Math.sin(t) };
+  const path = s.t === "poly" ? [...s.pts, s.pts[0]!] : s.t === "curve" ? (s.pieces[0] ?? []) : [];
+  if (path.length < 2) return path[0];
+  let left = pathLength(path) * Math.max(0, Math.min(1, t));
+  for (let i = 0; i + 1 < path.length; i++) {
+    const [a, b] = [path[i]!, path[i + 1]!];
+    const len = dist(a, b);
+    if (left <= len || i + 2 === path.length) {
+      const k = len > EPS ? Math.min(1, left / len) : 0;
+      return { x: a.x + k * (b.x - a.x), y: a.y + k * (b.y - a.y) };
+    }
+    left -= len;
+  }
+  return path[path.length - 1];
+}
+
+/** The circle through three points, or undefined when they're in a line. */
+function circumcircle(a: Pt, b: Pt, c: Pt): { c: Pt; r: number } | undefined {
+  const d = 2 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
+  if (Math.abs(d) < EPS) return undefined;
+  const sq = (p: Pt) => p.x * p.x + p.y * p.y;
+  const x = (sq(a) * (b.y - c.y) + sq(b) * (c.y - a.y) + sq(c) * (a.y - b.y)) / d;
+  const y = (sq(a) * (c.x - b.x) + sq(b) * (a.x - c.x) + sq(c) * (b.x - a.x)) / d;
+  return { c: { x, y }, r: dist({ x, y }, a) };
+}
+
+/** An ellipse or hyperbola (centre, semi-axes, turn) or a parabola (vertex, focal length, turn) as joined points. */
+function conicPieces(k: { kind: "ellipse" | "hyperbola"; centre: Pt; a: number; b: number; angle: number } | { kind: "parabola"; vertex: Pt; p: number; angle: number }): Pt[][] {
+  const [c, s] = [Math.cos(k.angle), Math.sin(k.angle)];
+  const o = k.kind === "parabola" ? k.vertex : k.centre;
+  const at = (u: number, v: number): Pt => ({ x: o.x + u * c - v * s, y: o.y + u * s + v * c });
+  const range = (n: number, lo: number, hi: number) => Array.from({ length: n + 1 }, (_, i) => lo + ((hi - lo) * i) / n);
+  if (k.kind === "ellipse") return [range(SAMPLES, 0, 2 * Math.PI).map((t) => at(k.a * Math.cos(t), k.b * Math.sin(t)))];
+  if (k.kind === "hyperbola") {
+    const ts = range(SAMPLES, -3, 3);
+    return [ts.map((t) => at(k.a * Math.cosh(t), k.b * Math.sinh(t))), ts.map((t) => at(-k.a * Math.cosh(t), k.b * Math.sinh(t)))];
+  }
+  // y² = 4pu along the axis: far enough to leave any reasonable view.
+  const p = (k as { p: number }).p;
+  const reach = Math.max(40, Math.abs(p) * 40);
+  return [range(SAMPLES, -reach, reach).map((v) => at((v * v) / (4 * p), v))];
+}
+
+/** The conic through five points: the null space of their [x², xy, y², x, y, 1] rows, as joined points. */
+function conicThrough(pts: Pt[]): Pt[][] | undefined {
+  const rows = pts.map((p) => [p.x * p.x, p.x * p.y, p.y * p.y, p.x, p.y, 1]);
+  // Gaussian elimination to find one solution with the last free unknown set to 1.
+  const m = rows.map((r) => r.slice());
+  const pivots: number[] = [];
+  let r = 0;
+  for (let col = 0; col < 6 && r < 5; col++) {
+    let best = r;
+    for (let i = r + 1; i < 5; i++) if (Math.abs(m[i]![col]!) > Math.abs(m[best]![col]!)) best = i;
+    if (Math.abs(m[best]![col]!) < 1e-12) continue;
+    [m[r], m[best]] = [m[best]!, m[r]!];
+    for (let i = 0; i < 5; i++) {
+      if (i === r) continue;
+      const f = m[i]![col]! / m[r]![col]!;
+      for (let j = col; j < 6; j++) m[i]![j]! -= f * m[r]![j]!;
+    }
+    pivots.push(col);
+    r++;
+  }
+  const free = [0, 1, 2, 3, 4, 5].find((c) => !pivots.includes(c));
+  if (free === undefined) return undefined;
+  const v = [0, 0, 0, 0, 0, 0];
+  v[free] = 1;
+  pivots.forEach((col, i) => (v[col] = -m[i]![free]! / m[i]![col]!));
+  const k = classifyConic(v);
+  if (!k) return undefined;
+  if (k.kind === "circle") return [Array.from({ length: SAMPLES + 1 }, (_, i) => ({ x: k.centre[0] + k.r * Math.cos((2 * Math.PI * i) / SAMPLES), y: k.centre[1] + k.r * Math.sin((2 * Math.PI * i) / SAMPLES) }))];
+  if (k.kind === "parabola") return conicPieces({ kind: "parabola", vertex: { x: k.vertex[0], y: k.vertex[1] }, p: k.p, angle: k.angle });
+  return conicPieces({ kind: k.kind, centre: { x: k.centre[0], y: k.centre[1] }, a: k.a, b: k.b, angle: k.angle });
+}
+
+/** The new kinds' shapes (resolve's cases for them). */
+function resolveMore(o: GeoObj, out: Map<string, Shape>, objs: GeoObj[]): Shape | undefined {
+  const pt = (id: string) => {
+    const s = out.get(id);
+    return s?.t === "pt" ? s.p : undefined;
+  };
+  switch (o.kind) {
+    case "pointon": {
+      const on = out.get(o.on);
+      const p = on ? pointAt(on, o.t) : undefined;
+      return p && { t: "pt", p };
+    }
+    case "tangent": {
+      const c = out.get(o.to);
+      const at = pt(o.at);
+      if (c?.t !== "circle" || !at) return undefined;
+      const th = Math.atan2(at.y - c.c.y, at.x - c.c.x);
+      const touch = { x: c.c.x + c.r * Math.cos(th), y: c.c.y + c.r * Math.sin(th) };
+      return { t: "line", p: touch, q: { x: touch.x - Math.sin(th), y: touch.y + Math.cos(th) }, bound: "line" };
+    }
+    case "vector": {
+      const [p, q] = [pt(o.a), pt(o.b)];
+      return p && q && dist(p, q) > EPS ? { t: "line", p, q, bound: "segment", arrow: true } : undefined;
+    }
+    case "arc": {
+      const [a, b, c] = [pt(o.a), pt(o.b), pt(o.c)];
+      const circ = a && b && c ? circumcircle(a, b, c) : undefined;
+      if (!circ || !a || !b || !c) return undefined;
+      const ang = (p: Pt) => Math.atan2(p.y - circ.c.y, p.x - circ.c.x);
+      const norm = (v: number) => ((v % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      // Anticlockwise from a to c, unless b lies the other way round.
+      let sweep = norm(ang(c) - ang(a));
+      if (norm(ang(b) - ang(a)) > sweep) sweep -= 2 * Math.PI;
+      const from = ang(a);
+      return { t: "curve", pieces: [Array.from({ length: SAMPLES + 1 }, (_, i) => ({ x: circ.c.x + circ.r * Math.cos(from + (sweep * i) / SAMPLES), y: circ.c.y + circ.r * Math.sin(from + (sweep * i) / SAMPLES) }))] };
+    }
+    case "rectangle": {
+      const [a, b, c] = [pt(o.a), pt(o.b), pt(o.c)];
+      if (!a || !b || !c || dist(a, b) < EPS) return undefined;
+      const len = dist(a, b);
+      const n = { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+      const h = (c.x - a.x) * n.x + (c.y - a.y) * n.y;
+      if (Math.abs(h) < EPS) return undefined;
+      return { t: "poly", pts: [a, b, { x: b.x + h * n.x, y: b.y + h * n.y }, { x: a.x + h * n.x, y: a.y + h * n.y }] };
+    }
+    case "regpoly": {
+      const [c, v] = [pt(o.centre), pt(o.vertex)];
+      if (!c || !v || dist(c, v) < EPS) return undefined;
+      const step = (2 * Math.PI) / o.n;
+      return {
+        t: "poly",
+        pts: Array.from({ length: o.n }, (_, i) => ({
+          x: c.x + (v.x - c.x) * Math.cos(i * step) - (v.y - c.y) * Math.sin(i * step),
+          y: c.y + (v.x - c.x) * Math.sin(i * step) + (v.y - c.y) * Math.cos(i * step),
+        })),
+      };
+    }
+    case "conic": {
+      if (o.type === "five") {
+        const ps = o.of.map(pt);
+        if (ps.some((p) => !p)) return undefined;
+        const pieces = conicThrough(ps as Pt[]);
+        return pieces && { t: "curve", pieces };
+      }
+      if (o.type === "parabola") {
+        const f = pt(o.of[0]!);
+        const l = out.get(o.of[1]!);
+        if (!f || l?.t !== "line") return undefined;
+        const d = { x: l.q.x - l.p.x, y: l.q.y - l.p.y };
+        const k = ((f.x - l.p.x) * d.x + (f.y - l.p.y) * d.y) / (d.x * d.x + d.y * d.y);
+        const foot = { x: l.p.x + k * d.x, y: l.p.y + k * d.y };
+        const gap = dist(f, foot);
+        if (gap < EPS) return undefined;
+        const vertex = { x: (f.x + foot.x) / 2, y: (f.y + foot.y) / 2 };
+        return { t: "curve", pieces: conicPieces({ kind: "parabola", vertex, p: gap / 2, angle: Math.atan2(f.y - foot.y, f.x - foot.x) }) };
+      }
+      const [f1, f2, p] = o.of.map(pt);
+      if (!f1 || !f2 || !p) return undefined;
+      const c = dist(f1, f2) / 2;
+      const centre = { x: (f1.x + f2.x) / 2, y: (f1.y + f2.y) / 2 };
+      const angle = Math.atan2(f2.y - f1.y, f2.x - f1.x);
+      if (o.type === "ellipse") {
+        const a = (dist(p, f1) + dist(p, f2)) / 2;
+        if (a <= c + EPS) return undefined;
+        return { t: "curve", closed: true, pieces: conicPieces({ kind: "ellipse", centre, a, b: Math.sqrt(a * a - c * c), angle }) };
+      }
+      const a = Math.abs(dist(p, f1) - dist(p, f2)) / 2;
+      if (a < EPS || a >= c - EPS) return undefined;
+      return { t: "curve", pieces: conicPieces({ kind: "hyperbola", centre, a, b: Math.sqrt(c * c - a * a), angle }) };
+    }
+    case "locus": {
+      const at = objs.findIndex((x) => x.id === o.driver);
+      const driver = objs[at];
+      if (driver?.kind !== "pointon") return undefined;
+      const on = out.get(driver.on);
+      if (!on) return undefined;
+      // Run the driver along its object (a line: a stretch either side of its two points) and follow the point.
+      const [lo, hi] = on.t === "circle" ? [0, 2 * Math.PI] : on.t === "line" ? (on.bound === "segment" ? [0, 1] : on.bound === "ray" ? [0, 20] : [-20, 20]) : [0, 1];
+      const upto = objs.slice(0, objs.findIndex((x) => x.id === o.id));
+      const piece: Pt[] = [];
+      for (let i = 0; i <= SAMPLES; i++) {
+        const t = lo + ((hi - lo) * i) / SAMPLES;
+        const moved = upto.map((x) => (x.id === driver.id ? { ...driver, t } : x));
+        const s = resolve(moved).get(o.of);
+        if (s?.t === "pt") piece.push(s.p);
+      }
+      return piece.length > 1 ? { t: "curve", pieces: [piece] } : undefined;
+    }
+    case "compass": {
+      const c = pt(o.centre);
+      const seg = o.r.length === 1 ? out.get(o.r[0]!) : undefined;
+      const r = seg?.t === "line" ? dist(seg.p, seg.q) : o.r.length === 2 && pt(o.r[0]!) && pt(o.r[1]!) ? dist(pt(o.r[0]!)!, pt(o.r[1]!)!) : undefined;
+      return c && r !== undefined && r > EPS ? { t: "circle", c, r } : undefined;
+    }
+    case "transfer": {
+      const m = out.get(o.measure);
+      const onto = out.get(o.onto);
+      const from = pt(o.from);
+      if (m?.t !== "value" || !Number.isFinite(m.value) || !onto || !from) return undefined;
+      if (onto.t === "line") {
+        const d = dist(onto.p, onto.q);
+        return { t: "pt", p: { x: from.x + (m.value * (onto.q.x - onto.p.x)) / d, y: from.y + (m.value * (onto.q.y - onto.p.y)) / d } };
+      }
+      if (onto.t === "circle") {
+        const th = Math.atan2(from.y - onto.c.y, from.x - onto.c.x) + m.value / onto.r;
+        return { t: "pt", p: { x: onto.c.x + onto.r * Math.cos(th), y: onto.c.y + onto.r * Math.sin(th) } };
+      }
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** Finishing the new tools once they have what they need (null for the others). */
+function finishMore(objs: GeoObj[], tool: GeoTool, picked: string[]): { objs: GeoObj[]; picked: string[]; built?: string; error?: string } | null {
+  const add = (o: GeoObj) => {
+    const shapes = resolve([...objs, o]);
+    if (!shapes.has(o.id)) return { objs, picked: [], error: `those don't make a ${TOOL_NAMES[tool].toLowerCase()}` };
+    return { objs: [...objs, o], picked: [], built: o.id };
+  };
+  const [a, b, c] = picked as [string, string, string];
+  switch (tool) {
+    case "tangent":
+      return add({ id: nextId(objs, "tangent"), kind: "tangent", to: a, at: b });
+    case "vector":
+      return add({ id: nextId(objs, "vector"), kind: "vector", a, b });
+    case "arc":
+      return add({ id: nextId(objs, "arc"), kind: "arc", a, b, c });
+    case "rectangle":
+      return add({ id: nextId(objs, "rectangle"), kind: "rectangle", a, b, c });
+    case "ellipse":
+    case "hyperbola":
+      return add({ id: nextId(objs, "conic"), kind: "conic", type: tool, of: picked.slice(0, 3) });
+    case "parabola":
+      return add({ id: nextId(objs, "conic"), kind: "conic", type: "parabola", of: [a, b] });
+    case "conic5":
+      return add({ id: nextId(objs, "conic"), kind: "conic", type: "five", of: picked.slice(0, 5) });
+    case "dangle":
+      return add({ id: nextId(objs, "measure"), kind: "measure", what: "dangle", of: picked.slice(0, 3) });
+    case "locus":
+      if (objs.find((o) => o.id === b)?.kind !== "pointon") return { objs, picked: [], error: "the second point has to be a Point On, which moves along something" };
+      return add({ id: nextId(objs, "locus"), kind: "locus", of: a, driver: b });
+    case "compass":
+      return add({ id: nextId(objs, "compass"), kind: "compass", centre: picked[picked.length - 1]!, r: picked.slice(0, -1) });
+    case "transfer":
+      return add({ id: nextLabel(objs), kind: "transfer", measure: a, onto: b, from: c });
+    default:
+      return null;
+  }
 }

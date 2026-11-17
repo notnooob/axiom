@@ -187,6 +187,8 @@ export type GraphsPage = {
   pathPlot?: { kind: "fn" | "par"; n: number; started: number };
   /** Path Setup: how long a Path Plot takes, in seconds. */
   pathSeconds?: number;
+  /** Geometry ▸ tools on the graph: a construction drawn over it, in its coordinates. */
+  geo?: { objects: GeoObj[]; tool?: { name: GeoTool; picked: string[] } | null; sel?: string | null };
   /** Geometry Trace: a moved graph leaves its earlier positions drawn faintly; the number goes up on each Erase. */
   geoTrace?: boolean;
   traceErased?: number;

@@ -101,7 +101,7 @@ import { DataStatsApp } from "./data/data-app";
 import { dataMenu } from "./data/data-menu";
 import { GeometryApp, geometryKey, zoomed as zoomedGeo } from "./geometry/geometry-app";
 import { geometryMenu } from "./geometry/geometry-menu";
-import { ASKS, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
+import { ASKS, nextLabel as nextGeoLabel, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
 import { ONE_VAR } from "./data/plot";
 import type { GraphWindow } from "./graphs/model";
 import { PythonCanvas, PythonEditor, PythonShell, type DrawOp } from "./python/python-app";
@@ -535,12 +535,21 @@ export function CasApp() {
   const setPython = useCallback((fn: (p: PythonPage) => PythonPage) => update("python", fn), [update]);
   const setData = useCallback((fn: (p: DataStatsPage) => DataStatsPage) => update("datastats", fn), [update]);
   const setGeo = useCallback((fn: (p: GeometryPage) => GeometryPage) => update("geometry", fn), [update]);
+  /** A Graphs page's construction (Geometry ▸ tools on the graph), changed as a Geometry page would be. */
+  const setGraphGeo = useCallback(
+    (fn: (p: GeometryPage) => GeometryPage) =>
+      update("graphs", (g) => {
+        const r = fn(geoOfGraph(g));
+        return { ...g, geo: { objects: r.objects, tool: r.tool ?? null, sel: r.sel ?? null } };
+      }),
+    [update],
+  );
   /** Rotation and Dilation, once their object and centre are picked: the angle or scale factor. */
   const askGeoAmount = useCallback((tool: GeoTool, picked: string[]) => {
     const label = ASKS[tool];
     if (label)
       setWizard(
-        openWizard({ kind: "wizard", title: GEO_TOOLS[tool], arrows: false, fields: [{ label, value: tool === "rotation" ? "90" : "2" }], build: `geoamount:${tool}:${picked[0]}:${picked[1]}:{0}` }),
+        openWizard({ kind: "wizard", title: GEO_TOOLS[tool], arrows: false, fields: [{ label, value: tool === "rotation" ? "90" : tool === "regpoly" ? "6" : "2" }], build: `geoamount:${tool}:${picked[0]}:${picked[1]}:{0}` }),
       );
   }, []);
   /** The window a Data & Statistics page is drawn in (its own, or the one fitting the data): what zoom works from. */
@@ -1281,6 +1290,10 @@ export function CasApp() {
         const { page: next, effect } = calcKey(page, key, max);
         setCalc(() => next);
         if (effect) void runEvaluate(next, effect.evaluate === "approx");
+      } else if (page?.kind === "graphs" && (page.geo?.tool || page.geo?.sel) && geometryKey(geoOfGraph(page), key)) {
+        // A Geometry tool (or a picked object) on the graph takes esc, del and the arrows first.
+        const next = geometryKey(geoOfGraph(page), key)!;
+        setGraphGeo(() => next);
       } else if (page?.kind === "graphs") {
         const { page: next, effect } = graphKey(page, key, takenFns);
         setGraphs(() => next);
@@ -2280,6 +2293,12 @@ export function CasApp() {
           setLists(() => next);
           void recalcLists(next);
         }
+      } else if (action.id === "geoCoords") {
+        setWizard(openWizard({ kind: "wizard", title: "Point by Coordinates", arrows: false, fields: [{ label: "x:", value: "0" }, { label: "y:", value: "0" }], build: "geocoords:{0}:{1}" }));
+      } else if (action.id.startsWith("geoTool:") && page?.kind === "graphs") {
+        const id = action.id;
+        setGraphs((g) => ({ ...g, tool: null, editing: null, mathDraw: undefined, zoomBox: undefined }));
+        setGraphGeo((p) => ({ ...p, tool: { name: id.slice(8) as GeoTool, picked: [] }, sel: null }));
       } else if (action.id.startsWith("geo") && page?.kind === "geometry") {
         const id = action.id;
         if (id.startsWith("geoTool:")) setGeo((p) => ({ ...p, tool: { name: id.slice(8) as GeoTool, picked: [] }, sel: null }));
@@ -2565,14 +2584,21 @@ export function CasApp() {
         const m = /^\s*(-?[\d.]+)\s*(?:\/\s*([\d.]+))?\s*$/.exec(text.replace("−", "-"));
         const n = m ? Number(m[1]) / (m[2] ? Number(m[2]) : 1) : NaN;
         if (!Number.isFinite(n)) return setError("Error: Type a number");
-        setGeo((p) => {
+        (page?.kind === "graphs" ? setGraphGeo : setGeo)((p) => {
           const r = transformWith(p.objects, tool as GeoTool, [obj!, centre!], n);
           if ("error" in r) {
             setTimeout(() => setError(`Error: ${r.error}`));
             return p;
           }
-          return { ...p, objects: r.objs };
+          return { ...p, objects: r.objs! };
         });
+        return;
+      }
+      if (built.startsWith("geocoords:")) {
+        const [xs = "", ys = ""] = built.slice(10).split(":");
+        const [x, y] = [Number(xs.trim().replace("−", "-")), Number(ys.trim().replace("−", "-"))];
+        if (![x, y].every(Number.isFinite)) return setError("Error: Type two numbers");
+        (page?.kind === "graphs" ? setGraphGeo : setGeo)((p) => ({ ...p, objects: [...p.objects, { id: nextGeoLabel(p.objects), kind: "point", x, y }] }));
         return;
       }
       if (built.startsWith("saveas:")) {
@@ -3988,6 +4014,23 @@ export function CasApp() {
                   onSelect={(a, b) => setGraphs((g) => ({ ...g, edit: selectBetween(g.edit, a, b) }))}
                 />
               )}
+              {view === "doc" && page?.kind === "graphs" && page.view !== "3d" && !page.table && (page.geo?.objects.length || page.geo?.tool) ? (
+                <GeometryApp
+                  key={`graphgeo${page.id}`}
+                  page={geoOfGraph(page)}
+                  overlay={{
+                    view: { x: (page.window.xmin + page.window.xmax) / 2, y: (page.window.ymin + page.window.ymax) / 2, w: page.window.xmax - page.window.xmin },
+                    onView: (v) =>
+                      setGraphs((g) => {
+                        const dy = v.y - (g.window.ymin + g.window.ymax) / 2;
+                        return { ...g, window: { ...g.window, xmin: v.x - v.w / 2, xmax: v.x + v.w / 2, ymin: g.window.ymin + dy, ymax: g.window.ymax + dy } };
+                      }),
+                  }}
+                  onChange={setGraphGeo}
+                  onError={setError}
+                  onAsk={askGeoAmount}
+                />
+              ) : null}
               </LayoutFrame>
               )}
               {status === "loading" && (
@@ -4085,7 +4128,7 @@ function pageTakesEsc(page: Page | undefined, py: { status: PyStatus; canvas: Dr
     case "calculator":
       return page.sel !== null;
     case "graphs":
-      return page.tool !== null || page.editing !== null;
+      return page.tool !== null || page.editing !== null || Boolean(page.geo?.tool || page.geo?.sel || page.zoomBox || page.mathDraw || page.pathPlot || page.selected);
     case "geometry":
       return Boolean(page.tool || page.sel);
     case "lists":
@@ -4096,6 +4139,9 @@ function pageTakesEsc(page: Page | undefined, py: { status: PyStatus; canvas: Dr
       return false;
   }
 }
+
+/** A Graphs page's construction as the Geometry view and keys take it: no grid or axes of its own. */
+const geoOfGraph = (g: GraphsPage): GeometryPage => ({ kind: "geometry", id: g.id, objects: g.geo?.objects ?? [], tool: g.geo?.tool ?? null, sel: g.geo?.sel ?? null });
 
 const PAGE_APPS: Record<Page["kind"], string> = {
   calculator: "Calculator",

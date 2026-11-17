@@ -13,6 +13,9 @@ import { app, off, rule, sub, wiz, type Menu } from "./types";
 /** The page state the menu's labels depend on. */
 export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean; hideAnalytic?: boolean; hideEndValues?: boolean; hideGuides?: boolean };
 
+/** A Geometry tool on the graph. */
+const geo = (label: string, tool: string) => app(label, `geoTool:${tool}`);
+
 /** An equation template: the relation entry opened with this form in it. */
 const tpl = (label: string, form: string) => app(label, `eqtpl:${form}`);
 
@@ -127,34 +130,42 @@ export function graphsMenu(s: GraphsMenuState): Menu {
     ]),
     rule(
       sub("Geometry", [
+        // The Geometry app's tools, drawn over the graph in its coordinates.
         sub("Points & Lines", [
-          off("Point"),
-          off("Point On"),
-          off("Point by Coordinates"),
-          off("Intersection Point(s)"),
-          rule(off("Line")),
-          off("Segment"),
-          off("Ray"),
-          off("Tangent"),
-          off("Vector"),
-          off("Circle arc"),
+          geo("Point", "point"),
+          geo("Point On", "pointon"),
+          app("Point by Coordinates", "geoCoords"),
+          geo("Intersection Point(s)", "intersection"),
+          rule(geo("Line", "line")),
+          geo("Segment", "segment"),
+          geo("Ray", "ray"),
+          geo("Tangent", "tangent"),
+          geo("Vector", "vector"),
+          geo("Circle arc", "arc"),
         ]),
-        sub(
-          "Shapes",
-          ["Circle", "Triangle", "Rectangle", "Polygon", "Regular Polygon", "Ellipse", "Parabola", "Hyperbola", "Conic by Five Points"].map(off),
-        ),
-        rule(sub("Measurement", ["Length", "Area", "Slope", "Angle", "Directed Angle"].map(off))),
+        sub("Shapes", [
+          geo("Circle", "circle"),
+          geo("Triangle", "triangle"),
+          geo("Rectangle", "rectangle"),
+          geo("Polygon", "polygon"),
+          geo("Regular Polygon", "regpoly"),
+          geo("Ellipse", "ellipse"),
+          geo("Parabola", "parabola"),
+          geo("Hyperbola", "hyperbola"),
+          geo("Conic by Five Points", "conic5"),
+        ]),
+        rule(sub("Measurement", [geo("Length", "length"), geo("Area", "area"), geo("Slope", "slope"), geo("Angle", "angle"), geo("Directed Angle", "dangle")])),
         sub("Construction", [
-          off("Perpendicular"),
-          off("Parallel"),
-          off("Perpendicular Bisector"),
-          off("Angle Bisector"),
-          off("Midpoint"),
-          rule(off("Locus")),
-          off("Compass"),
-          off("Measurement transfer"),
+          geo("Perpendicular", "perpendicular"),
+          geo("Parallel", "parallel"),
+          geo("Perpendicular Bisector", "bisector"),
+          geo("Angle Bisector", "anglebisector"),
+          geo("Midpoint", "midpoint"),
+          rule(geo("Locus", "locus")),
+          geo("Compass", "compass"),
+          geo("Measurement transfer", "transfer"),
         ]),
-        sub("Transformation", ["Symmetry", "Reflection", "Translation", "Rotation", "Dilation"].map(off)),
+        sub("Transformation", [geo("Symmetry", "symmetry"), geo("Reflection", "reflection"), geo("Translation", "translation"), geo("Rotation", "rotation"), geo("Dilation", "dilation")]),
       ]),
     ),
     rule(app("Settings...", "graphSettings")),

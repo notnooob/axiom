@@ -60,7 +60,10 @@ export function GeometryApp({
   onError,
   onAsk,
   highlights = [],
+  overlay,
 }: {
+  /** Drawn over a Graphs page (its Geometry tools): see-through, no grid or axes of its own, the view the graph's. */
+  overlay?: { view: { x: number; y: number; w: number }; onView: (v: { x: number; y: number; w: number }) => void };
   page: GeometryPage;
   onChange: (fn: (p: GeometryPage) => GeometryPage) => void;
   onError: (message: string) => void;
@@ -95,7 +98,7 @@ export function GeometryApp({
   }, [onChange]);
 
   const shapes = useMemo(() => resolve(page.objects), [page.objects]);
-  const view = page.view ?? VIEW;
+  const view = overlay?.view ?? page.view ?? VIEW;
   const k = size.w / view.w;
   const X = (x: number) => size.w / 2 + (x - view.x) * k;
   const Y = (y: number) => size.h / 2 - (y - view.y) * k;
@@ -140,6 +143,18 @@ export function GeometryApp({
           if (a.y > at.y !== b.y > at.y && at.x < ((b.x - a.x) * (at.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
         }
         return inside ? NEAR - 1 : Infinity;
+      }
+      if (s.t === "curve") {
+        let best = Infinity;
+        for (const piece of s.pieces)
+          for (let i = 0; i + 1 < piece.length; i++) {
+            const [a, b] = [piece[i]!, piece[i + 1]!];
+            const dx = b.x - a.x;
+            const dy = b.y - a.y;
+            const t = Math.max(0, Math.min(1, ((at.x - a.x) * dx + (at.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+            best = Math.min(best, Math.hypot(a.x + t * dx - at.x, a.y + t * dy - at.y) * k);
+          }
+        return best;
       }
       // A measurement's text, so it can be selected, stored or deleted.
       const l = labelAt(s);
@@ -194,6 +209,11 @@ export function GeometryApp({
         const l = labelAt(s);
         return [{ h, at: { x: l.x, y: l.y - fs * 0.8 }, el: <circle cx={l.x} cy={l.y - fs * 0.8} r={fs * 1.3} {...halo} strokeWidth={4} /> }];
       }
+      case "curve": {
+        const first = s.pieces[0]?.[0];
+        if (!first) return [];
+        return [{ h, at: { x: X(first.x), y: Y(first.y) }, el: <g>{s.pieces.map((piece, i) => <polyline key={i} points={piece.map((p) => `${X(p.x)},${Y(p.y)}`).join(" ")} {...halo} />)}</g> }];
+      }
     }
   });
 
@@ -221,12 +241,13 @@ export function GeometryApp({
   };
 
   return (
-    <div className="absolute inset-0 bg-casScreen font-casui" ref={box}>
+    <div className={overlay ? "absolute inset-0 font-casui" : "absolute inset-0 bg-casScreen font-casui"} ref={box}>
       {size.w > 0 && (
         <svg
           width={size.w}
           height={size.h}
-          className="absolute inset-0 touch-none select-none"
+          // Over a graph with no tool chosen, only the construction's own objects take the pointer; the graph gets the rest.
+          className={overlay && !tool ? "pointer-events-none absolute inset-0 select-none [&>*]:pointer-events-auto" : "absolute inset-0 touch-none select-none"}
           style={{ cursor: tool ? "crosshair" : drag.current && "pan" in drag.current ? "grabbing" : "default" }}
           role="img"
           aria-label={`Geometry: ${page.objects.length} objects${tool ? `; ${TOOL_NAMES[tool.name]} tool` : ""}`}
@@ -257,7 +278,8 @@ export function GeometryApp({
             if (!d) return;
             if ("pan" in d) {
               const v = { x: d.from.x - (e.clientX - d.pan.x) / k, y: d.from.y + (e.clientY - d.pan.y) / k, w: d.from.w };
-              onChange((p) => ({ ...p, view: v }));
+              if (overlay) overlay.onView(v);
+              else onChange((p) => ({ ...p, view: v }));
               return;
             }
             const at = snap(toWorld(e));
@@ -308,10 +330,27 @@ export function GeometryApp({
               />
             ) : s.t === "circle" ? (
               <circle key={id} cx={X(s.c.x)} cy={Y(s.c.y)} r={s.r * k} fill="none" stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={marked.has(id) ? 2.5 : 1.3} />
+            ) : s.t === "curve" ? (
+              <g key={id} fill="none" stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={marked.has(id) ? 2.5 : 1.3} strokeLinejoin="round">
+                {s.pieces.map((piece, i) => (
+                  <polyline key={i} points={piece.map((p) => `${X(p.x)},${Y(p.y)}`).join(" ")} />
+                ))}
+              </g>
             ) : null,
           )}
           {[...shapes].map(([id, s]) =>
-            s.t === "line" ? <line key={id} {...lineEnds(s)} stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={marked.has(id) ? 2.5 : 1.3} strokeLinecap="round" /> : null,
+            s.t === "line" ? (
+              <g key={id}>
+                <line {...lineEnds(s)} stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={marked.has(id) ? 2.5 : 1.3} strokeLinecap="round" />
+                {s.arrow && (() => {
+                  // A vector's arrowhead at its end.
+                  const [x2, y2] = [X(s.q.x), Y(s.q.y)];
+                  const a = Math.atan2(y2 - Y(s.p.y), x2 - X(s.p.x));
+                  const h = fs * 0.7;
+                  return <path d={`M${x2} ${y2}L${x2 - h * Math.cos(a - 0.4)} ${y2 - h * Math.sin(a - 0.4)}L${x2 - h * Math.cos(a + 0.4)} ${y2 - h * Math.sin(a + 0.4)}Z`} fill={marked.has(id) ? PICK : palette.casInk} />;
+                })()}
+              </g>
+            ) : null,
           )}
           {[...shapes].map(([id, s]) => {
             if (s.t !== "value") return null;
@@ -349,7 +388,7 @@ export function GeometryApp({
           <b className="font-semibold text-casInk">{TOOL_NAMES[tool.name]}</b> · {prompt(tool.name, tool.picked, shapes)}
         </div>
       )}
-      {!page.objects.length && !tool && (
+      {!overlay && !page.objects.length && !tool && (
         <p className="pointer-events-none absolute inset-x-0 bottom-[3cqw] text-center text-[3.3cqw] text-casLabel">Press menu for Points &amp; Lines, Shapes and Construction</p>
       )}
     </div>
