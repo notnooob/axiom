@@ -11,7 +11,7 @@ Everything in this repository is licensed under the GNU General Public License, 
 
 ## Giac
 
-Giac, by Bernard Parisse and Renée De Graeve, Institut Fourier, Université Grenoble Alpes. GNU General Public License, version 3 or later. The build the calculator loads (`giacwasm.js`, giac 1.9.0-996) is not stored in this repository: `scripts/fetch-giac.mjs` downloads it from the Giac authors' site and checks its SHA-256 before `npm run dev` and `npm run build`. Its corresponding source is attached to VCE Hub's `giac-1.9.0` release, and `public/cas/giac/SOURCE.md` records where it came from. Giac's source lists the libraries it includes and their licences.
+Giac, by Bernard Parisse and Renée De Graeve, Institut Fourier, Université Grenoble Alpes. GNU General Public License, version 3 or later. The build the calculator loads (`giacwasm.js`, giac 1.9.0-996) is not stored in this repository: `scripts/fetch-giac.mjs` downloads it from our unmodified mirror on this repository's GitHub releases, or else from the Giac authors' site, and checks its SHA-256 before `npm run dev` and `npm run build`. Its corresponding source is attached to VCE Hub's `giac-1.9.0` release, and `public/cas/giac/SOURCE.md` records where it came from. Giac's source lists the libraries it includes and their licences.
 
 ## Used by the calculator, under their own licences
 
