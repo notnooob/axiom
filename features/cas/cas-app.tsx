@@ -2325,6 +2325,11 @@ export function CasApp() {
         } else if (id === "dsConnect") setData((p) => ({ ...p, connect: !p.connect }));
         else if (id === "dsWhiskers") setData((p) => ({ ...p, extendWhiskers: !p.extendWhiskers }));
         else if (id === "dsNormal") setData((p) => ({ ...p, normalPdf: !p.normalPdf }));
+        else if (id.startsWith("dsScale:")) {
+          // Count is the default, so it's stored as unset; the window refits to the new heights.
+          const scale = id.slice(8) as NonNullable<DataStatsPage["histScale"]>;
+          setData((p) => ({ ...p, histScale: scale === "count" ? undefined : scale, window: undefined }));
+        }
         else if (id.startsWith("dsAxis:")) {
           const axis = id.slice(7);
           const names = listNames();

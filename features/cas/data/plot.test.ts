@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { autoBins, boxPlot, dotStacks, equationFn, fiveNumber, histogram, invNorm, ticks } from "./plot";
+import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, fiveNumber, histogram, histogramBars, invNorm, normalCurve, ticks, yAxisTitle } from "./plot";
 
 describe("data & statistics numbers", () => {
   it("five-number summary as the handheld works it out", () => {
@@ -26,5 +26,35 @@ describe("data & statistics numbers", () => {
     expect(equationFn("2*x+1")(3)).toBe(7);
     expect(equationFn("1.5+2*ln(x)")(Math.E)).toBeCloseTo(3.5);
     expect(equationFn("alert(1)")(1)).toBeNaN();
+  });
+});
+
+describe("histogram scale", () => {
+  const xs = [1, 2, 2, 3, 3, 3, 4, 4, 4, 4];
+  const bins = { width: 1, start: 0.5 };
+  it("counts, percents and densities", () => {
+    expect(histogramBars(xs, bins).map((b) => b.h)).toEqual([1, 2, 3, 4]);
+    expect(histogramBars(xs, bins, "percent").map((b) => b.h)).toEqual([10, 20, 30, 40]);
+    const wide = { width: 2, start: 0.5 };
+    const d = histogramBars(xs, wide, "density");
+    expect(d.reduce((a, b) => a + b.h * wide.width, 0)).toBeCloseTo(1);
+  });
+  it("names the y-axis as the handheld does", () => {
+    expect(yAxisTitle({ plot: "histogram" })).toBe("Frequency");
+    expect(yAxisTitle({ plot: "histogram", histScale: "percent" })).toBe("Percent");
+    expect(yAxisTitle({ plot: "histogram", histScale: "density" })).toBe("Density");
+    expect(yAxisTitle({ plot: "normprob" })).toBe("z-Quantile");
+    expect(yAxisTitle({ plot: "dot" })).toBeUndefined();
+    expect(yAxisTitle({ plot: "box" })).toBeUndefined();
+  });
+  it("fits the window to the scaled bars and scales the normal curve with them", () => {
+    const page = { kind: "datastats", id: 1, plot: "histogram", bins } as const;
+    expect(fitWindow(page, xs, []).ymax).toBeCloseTo(4 * 1.15);
+    expect(fitWindow({ ...page, histScale: "percent" }, xs, []).ymax).toBeCloseTo(40 * 1.15);
+    const win = fitWindow(page, xs, []);
+    expect(win.xmin).toBeLessThanOrEqual(0.5);
+    expect(win.xmax).toBeGreaterThanOrEqual(4.5);
+    expect(normalCurve(0, 0, 1, 10, 2, "count")).toBeCloseTo(normalCurve(0, 0, 1, 10, 2, "density") * 20);
+    expect(normalCurve(0, 0, 1, 10, 2, "percent")).toBeCloseTo(normalCurve(0, 0, 1, 10, 2, "density") * 200);
   });
 });

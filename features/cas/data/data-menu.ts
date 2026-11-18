@@ -21,11 +21,20 @@ export function dataMenu(p: DataStatsPage): Menu {
     ]),
     sub("Plot Properties", [
       app(tick(p.connect, "Connect Data Points"), "dsConnect"),
+      // As the handheld's: Histogram Scale first, then Bin Settings with its two kinds of bins.
       sub("Histogram Properties", [
-        wiz("Bin Settings...", "Bin Settings", [
-          { label: "Width:", value: String(p.bins?.width ?? "") , hint: "auto" },
-          { label: "Alignment:", value: String(p.bins?.start ?? ""), hint: "auto" },
-        ], "ds:bins:{0}:{1}"),
+        sub("Histogram Scale", [
+          app(tick(!p.histScale || p.histScale === "count", "Count"), "dsScale:count"),
+          app(tick(p.histScale === "percent", "Percent"), "dsScale:percent"),
+          app(tick(p.histScale === "density", "Density"), "dsScale:density"),
+        ]),
+        sub("Bin Settings", [
+          wiz("Equal Bin Width...", "Equal Bin Width Settings", [
+            { label: "Width:", value: String(p.bins?.width ?? "") , hint: "auto" },
+            { label: "Alignment:", value: String(p.bins?.start ?? ""), hint: "auto" },
+          ], "ds:bins:{0}:{1}"),
+          off("Variable Bin Width..."),
+        ]),
       ]),
       app(tick(p.extendWhiskers, "Extend Box Plot Whiskers"), "dsWhiskers"),
       off("Show All Labels"),

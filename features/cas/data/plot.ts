@@ -5,7 +5,7 @@
  * and the window that fits the data. Pure, so they're tested on their own.
  */
 import type { GraphWindow } from "../graphs/model";
-import type { DataPlot, DataStatsPage } from "../state/document";
+import type { DataPlot, DataStatsPage, HistScale } from "../state/document";
 
 /** Quartiles as the handheld works them out: medians of the lower and upper halves (the median left out when n is odd). */
 export function fiveNumber(values: number[]) {
@@ -41,6 +41,32 @@ export function histogram(values: number[], bins: { width: number; start: number
     counts.set(i, (counts.get(i) ?? 0) + 1);
   }
   return [...counts].map(([i, n]) => ({ from: bins.start + i * bins.width, to: bins.start + (i + 1) * bins.width, n })).sort((a, b) => a.from - b.from);
+}
+
+/**
+ * The bars' heights for Histogram Scale: Count (how many values), Percent
+ * (of all the values) or Density (so the bars' areas add up to 1).
+ */
+export function histogramBars(values: number[], bins: { width: number; start: number }, scale: HistScale = "count") {
+  const k = scale === "percent" ? 100 / values.length : scale === "density" ? 1 / (values.length * bins.width) : 1;
+  return histogram(values, bins).map((b) => ({ ...b, h: b.n * k }));
+}
+
+/** The normal curve's height at x, on the same scale as the histogram's bars. */
+export function normalCurve(x: number, mean: number, sd: number, n: number, width: number, scale: HistScale = "count") {
+  const pdf = Math.exp(-0.5 * ((x - mean) / sd) ** 2) / (sd * Math.sqrt(2 * Math.PI));
+  return pdf * (scale === "density" ? 1 : scale === "percent" ? 100 * width : n * width);
+}
+
+/**
+ * What the y-axis says for a one-list plot, as on the handheld: a histogram's
+ * scale ("Frequency" for Count) and a normal probability plot's z-Quantile.
+ * Dot and box plots have none: their y-axis still offers to add a variable.
+ */
+export function yAxisTitle(page: Pick<DataStatsPage, "plot" | "histScale">): string | undefined {
+  if (page.plot === "histogram") return page.histScale === "percent" ? "Percent" : page.histScale === "density" ? "Density" : "Frequency";
+  if (page.plot === "normprob") return "z-Quantile";
+  return undefined;
 }
 
 /** Dot plot: each value's height in its stack (equal values stack up). */
@@ -86,11 +112,13 @@ export const ONE_VAR: DataPlot[] = ["dot", "box", "histogram", "normprob"];
 
 /** The window that fits the data for the page's plot (Zoom – Data). */
 export function fitWindow(page: DataStatsPage, xs: number[], ys: number[]): GraphWindow {
-  const [xmin, xmax] = pad(Math.min(...xs), Math.max(...xs));
+  // A histogram's window takes in its bars' edges, not just the values, so the end bars show whole.
+  const bars = page.plot === "histogram" ? histogram(xs, page.bins ?? autoBins(xs)) : [];
+  const [xmin, xmax] = bars.length ? pad(bars[0]!.from, bars.at(-1)!.to, 0.04) : pad(Math.min(...xs), Math.max(...xs));
   let y: [number, number];
   if (page.plot === "dot") y = [0, Math.max(...dotStacks(xs).map(([, h]) => h)) + 1];
   else if (page.plot === "box") y = [0, 1];
-  else if (page.plot === "histogram") y = [0, Math.max(...histogram(xs, page.bins ?? autoBins(xs)).map((b) => b.n)) * 1.15];
+  else if (page.plot === "histogram") y = [0, Math.max(...histogramBars(xs, page.bins ?? autoBins(xs), page.histScale).map((b) => b.h)) * 1.15];
   else if (page.plot === "normprob") y = pad(...([Math.min(...normalScores(xs).map((s) => s[1])), Math.max(...normalScores(xs).map((s) => s[1]))] as [number, number]));
   else y = pad(Math.min(...ys), Math.max(...ys));
   return { xmin, xmax, ymin: y[0], ymax: y[1], xscl: 1, yscl: 1 };

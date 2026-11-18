@@ -7,7 +7,7 @@ import { RENAME_IN } from "../engine/translate";
 import { parseNumbers } from "../graphs/analyze";
 import type { GraphWindow } from "../graphs/model";
 import type { DataStatsPage } from "../state/document";
-import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, histogram, normalScores, ONE_VAR, ticks } from "./plot";
+import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, histogramBars, normalCurve, normalScores, ONE_VAR, ticks, yAxisTitle } from "./plot";
 
 const PLOT = "#2c64c8";
 const STRIP = "#b8509c";
@@ -159,7 +159,9 @@ export function DataStatsApp({
     const X = (x: number) => ((x - w.xmin) / (w.xmax - w.xmin)) * size.w;
     const Y = (y: number) => ((w.ymax - y) / (w.ymax - w.ymin)) * plotH;
 
-    // Grid behind everything: a line at every x tick, and every y tick where y means something (not dot/box/normprob stacks).
+    // Grid behind everything: a line at every x tick, and every y tick where y means something
+    // (a histogram's scale, a normal probability plot's z; not dot or box plots).
+    const yMeans = !one || page.plot === "histogram" || page.plot === "normprob";
     g.strokeStyle = palette.casRule;
     g.lineWidth = 0.5;
     g.beginPath();
@@ -167,7 +169,7 @@ export function DataStatsApp({
       g.moveTo(X(t), 0);
       g.lineTo(X(t), plotH);
     }
-    if (!one || page.plot === "histogram")
+    if (yMeans)
       for (const t of ticks(w.ymin, w.ymax)) {
         g.moveTo(0, Y(t));
         g.lineTo(size.w, Y(t));
@@ -199,6 +201,18 @@ export function DataStatsApp({
     if (!one) {
       g.textAlign = "left";
       for (const t of ticks(w.ymin, w.ymax)) if (t !== 0) g.fillText(shown(t), X(Math.max(w.xmin, Math.min(w.xmax, 0))) + fs * 0.3, Y(t) + fs * 0.35);
+    } else if (yMeans) {
+      // A histogram's frequencies (or a normal probability plot's z) up the left edge, as the handheld numbers them.
+      g.textAlign = "left";
+      for (const t of ticks(w.ymin, w.ymax)) {
+        const y = Y(t);
+        if (y < fs * 0.8 || y > plotH - fs * 0.3) continue;
+        g.beginPath();
+        g.moveTo(0, y);
+        g.lineTo(fs * 0.4, y);
+        g.stroke();
+        g.fillText(shown(t), fs * 0.55, y + fs * 0.35);
+      }
     }
 
     const dot = (x: number, y: number, r = Math.max(2.5, size.w * 0.008)) => {
@@ -235,14 +249,14 @@ export function DataStatsApp({
       }
     } else if (page.plot === "histogram") {
       const bins = page.bins ?? autoBins(xs);
-      for (const bin of histogram(xs, bins)) {
+      for (const bin of histogramBars(xs, bins, page.histScale)) {
         g.fillStyle = "#9dbfea";
-        g.fillRect(X(bin.from), Y(bin.n), X(bin.to) - X(bin.from), Y(0) - Y(bin.n));
+        g.fillRect(X(bin.from), Y(bin.h), X(bin.to) - X(bin.from), Y(0) - Y(bin.h));
         g.strokeStyle = PLOT;
-        g.strokeRect(X(bin.from), Y(bin.n), X(bin.to) - X(bin.from), Y(0) - Y(bin.n));
+        g.strokeRect(X(bin.from), Y(bin.h), X(bin.to) - X(bin.from), Y(0) - Y(bin.h));
       }
       if (page.normalPdf && xs.length > 1) {
-        // The normal curve with the data's mean and sd, scaled to the bars' counts.
+        // The normal curve with the data's mean and sd, on the bars' scale.
         const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
         const sd = Math.sqrt(xs.reduce((a, b) => a + (b - mean) ** 2, 0) / (xs.length - 1));
         g.strokeStyle = "#1e8c2f";
@@ -250,7 +264,7 @@ export function DataStatsApp({
         g.beginPath();
         for (let i = 0; i <= 160; i++) {
           const x = w.xmin + ((w.xmax - w.xmin) * i) / 160;
-          const y = (xs.length * bins.width * Math.exp(-0.5 * ((x - mean) / sd) ** 2)) / (sd * Math.sqrt(2 * Math.PI));
+          const y = normalCurve(x, mean, sd, xs.length, bins.width, page.histScale);
           if (i) g.lineTo(X(x), Y(y));
           else g.moveTo(X(x), Y(y));
         }
@@ -323,15 +337,18 @@ export function DataStatsApp({
     });
   }, [size, w, page, xs, ys, pts, one, reg, extra]);
 
+  // A one-list plot's y-axis names what it measures (Frequency, z-Quantile …) when there's a list on x.
+  const yTitle = one && page.x ? yAxisTitle(page) : undefined;
   const axisLabel = (axis: "x" | "y") => {
     const name = axis === "x" ? page.x : page.y;
+    const title = axis === "y" ? yTitle : undefined;
     return (
       <button
         type="button"
         tabIndex={-1}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => onAxis(axis)}
-        aria-label={name ? `${axis} variable ${name}; change` : `Add ${axis} variable`}
+        aria-label={title ? `y-axis: ${title}; add a y variable` : name ? `${axis} variable ${name}; change` : `Add ${axis} variable`}
         className={
           axis === "x"
             ? "flex h-[7cqw] w-full items-center justify-center bg-[#dcdcdc] text-[3.6cqw] text-casLabel"
@@ -339,7 +356,13 @@ export function DataStatsApp({
         }
       >
         <span className={axis === "y" ? "-rotate-90 whitespace-nowrap" : ""}>
-          {name && (axis === "x" || !one) ? <b className="font-casmath text-[1.1em] text-casInk">{name}</b> : "Click to add variable"}
+          {name && (axis === "x" || !one) ? (
+            <b className="font-casmath text-[1.1em] text-casInk">{name}</b>
+          ) : title ? (
+            <span className="text-casInk">{title}</span>
+          ) : (
+            "Click to add variable"
+          )}
         </span>
       </button>
     );
@@ -354,7 +377,7 @@ export function DataStatsApp({
           <canvas
             ref={canvas}
             className="absolute inset-0 h-full w-full"
-            aria-label={`Data and statistics: ${page.plot} plot${page.x ? ` of ${page.x}` : ""}${page.y && !one ? ` against ${page.y}` : ""}`}
+            aria-label={`Data and statistics: ${page.plot} plot${page.x ? ` of ${page.x}` : ""}${page.y && !one ? ` against ${page.y}` : ""}${yTitle ? `, ${yTitle} on the y-axis` : ""}`}
             onPointerDown={(e) => {
               if (!page.movable || !w) return;
               const p = toWorld(e);

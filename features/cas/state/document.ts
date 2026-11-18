@@ -229,6 +229,8 @@ export type ListsPage = {
  * fits the data.
  */
 export type DataPlot = "dot" | "box" | "histogram" | "normprob" | "scatter" | "xyline";
+/** Histogram Scale: what a bar's height counts (Frequency, Percent or Density on the y-axis). */
+export type HistScale = "count" | "percent" | "density";
 export type DataStatsPage = {
   kind: "datastats";
   id: number;
@@ -240,6 +242,8 @@ export type DataStatsPage = {
   connect?: boolean;
   extendWhiskers?: boolean;
   bins?: { width: number; start: number };
+  /** Unset is Count, the handheld's default. */
+  histScale?: HistScale;
   /** A regression command (LinRegMx, QuadReg …) shown with its equation. */
   regression?: string;
   movable?: { m: number; b: number; lock?: boolean };
