@@ -106,7 +106,8 @@ import { ONE_VAR } from "./data/plot";
 import type { GraphWindow } from "./graphs/model";
 import { PythonCanvas, PythonEditor, PythonShell, type DrawOp } from "./python/python-app";
 import { python, type PyStatus } from "./python/runner";
-import { oneVar, regression, twoVar, type StatResult } from "./engine/stats";
+import type { StatResult } from "./engine/stats";
+import { loadStats } from "./engine/eval-stats";
 import { freeVariables, SLIDER_DIGITS, sliderStep, snap } from "./graphs/sliders";
 import { Screen } from "./screen/screen";
 import { EnginePill, ErrorDialog, Legal, MessageDialog, Notice, ScreenBar, SliderPrompt, type Choice, type SliderAsk } from "./screen/dialogs";
@@ -2779,6 +2780,24 @@ export function CasApp() {
         } else if (what === "settings") setData((p) => ({ ...p, digits: args[0], diagnostics: args[1] === "Yes" }));
         return;
       }
+      if (built.startsWith("lists:run:") && page?.kind === "lists") {
+        // A Calculator statistics dialog run from the page: its columns (a[] for an unnamed one) as lists,
+        // then a procedure's stat.results, or a distribution's value, shown in a box.
+        const cmd = sheet.columnRefs(built.slice("lists:run:".length), page.cols);
+        void (async () => {
+          const procedure = !/^\s*[\wχ²]+\(/.test(cmd);
+          const r = await notesEvaluate(cmd, false);
+          if (!r.ok) return setError(r.text.startsWith("Error") ? r.text : `Error: ${r.text}`);
+          if (!procedure) return setWarning([`${cmd} = ${r.text}`]);
+          const e = engine.current;
+          const store = e ? await loadStats(e.giac).catch(() => null) : null;
+          if (!store) return setWarning([r.text]);
+          const show = (v: StatResult["rows"][number][1]): string =>
+            Array.isArray(v) ? `{${v.map((x) => (Array.isArray(x) ? show(x) : +x.toPrecision(8))).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v;
+          setWarning(store.rows.map(([label, v]) => `${label}: ${show(v)}`));
+        })();
+        return;
+      }
       if (built.startsWith("lists:") && page?.kind === "lists") {
         const parts = built.split(":");
         if (parts[1] === "seq") {
@@ -2789,24 +2808,6 @@ export function CasApp() {
           const next = sheet.setColumnFormula(page, `=seq(${formula},n,${lo},${lo + count - 1})`);
           setLists(() => next);
           void recalcLists(next);
-          return;
-        }
-        if (parts[1] === "stat") {
-          const [, , cmd, xName, yName] = parts;
-          const col = (n: string | undefined) =>
-            page.cols.find((c) => c.name === n?.trim().toLowerCase()) ?? page.cols[(n?.trim().toUpperCase().charCodeAt(0) ?? 0) - 65];
-          const xs = sheet.columnNumbers(col(xName));
-          const ys = sheet.columnNumbers(col(yName));
-          if (!xs.length || (yName !== undefined && !ys.length)) return setError("Error: The list has no numbers");
-          let res: StatResult;
-          try {
-            res = cmd === "OneVar" ? oneVar(xs) : cmd === "TwoVar" ? twoVar(xs, ys) : regression(cmd!, xs, ys);
-          } catch (err) {
-            return setError(`Error: ${(err as Error).message}`);
-          }
-          const show = (v: StatResult["rows"][number][1]): string =>
-            Array.isArray(v) ? `{${v.map((x) => (Array.isArray(x) ? show(x) : +x.toPrecision(8))).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v;
-          setWarning(res.rows.map(([label, v]) => `${label}: ${show(v)}`));
           return;
         }
       }
@@ -2916,7 +2917,7 @@ export function CasApp() {
       setCalc((p) => ({ ...p, edit: wizardInsert(p.edit, built), sel: null }));
       setGraphs((g) => (g.editing !== null ? { ...g, edit: wizardInsert(g.edit, built) } : g));
     },
-    [setCalc, setGraphs, assign, rows, browse, page, refreshFiles, remember, setLists, recalcLists, programWizard],
+    [setCalc, setGraphs, assign, rows, browse, page, refreshFiles, remember, setLists, recalcLists, programWizard, notesEvaluate],
   );
 
   // The catalog's answer to a key or a click: keep it open, or close it and insert.
@@ -3065,7 +3066,8 @@ export function CasApp() {
       }
       if (key.k === "menu") {
         if (page?.kind === "lists") {
-          const name = (i: number) => page.cols[i]?.name ?? sheet.letter(i).toLowerCase();
+          // An unnamed column is a[] (column A), as the handheld writes it in the dialogs.
+          const name = (i: number) => page.cols[i]?.name ?? `${sheet.letter(i).toLowerCase()}[]`;
           setMenu({ items: listsMenu(name(page.sel.col), name(page.sel.col + 1)), state: openMenu() });
           return;
         }

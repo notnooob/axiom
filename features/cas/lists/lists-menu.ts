@@ -1,19 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { app, off, rule, sub, type Menu, type WizardField } from "../menus/types";
+import { CONFIDENCE_INTERVALS, DISTRIBUTIONS, STAT_CALCULATIONS, STAT_TESTS } from "../menus/calculator-menu";
+import { app, off, rule, sub, type Menu, type MenuItem, type WizardField } from "../menus/types";
 
-const listField = (label: string, value: string): WizardField => ({ label, value });
+/** Where a dialog's list fields start: the selected column on x, the next one on y. */
+const X_FIELDS = new Set(["X List:", "X1 List:"]);
+const Y_FIELDS = new Set(["Y List:"]);
 
 /**
- * The menu key on a Lists & Spreadsheet page. The statistics dialogs start on
- * the selected column (and the next one for two-variable work).
+ * One of the Calculator's statistics items as Lists & Spreadsheet runs it:
+ * the same dialog, starting on the selected columns, and run by the page
+ * (lists:run:…) instead of pasted into an entry line. Items that only paste
+ * text keep their place, greyed, so the keys still line up.
+ */
+export function forLists(item: MenuItem, x: string, y: string): MenuItem {
+  const keep = item.rule ? { rule: true } : {};
+  if (item.items) return { ...sub(item.label, item.items.map((i) => forLists(i, x, y))), ...keep };
+  const a = item.action;
+  if (a?.kind !== "wizard") return { ...off(item.label), ...keep };
+  const fields = a.fields.map((f): WizardField => (X_FIELDS.has(f.label) ? { ...f, value: x } : Y_FIELDS.has(f.label) ? { ...f, value: y } : f));
+  return { ...item, action: { ...a, fields, build: `lists:run:${a.build}` } };
+}
+
+/**
+ * The menu key on a Lists & Spreadsheet page. The statistics are the
+ * Calculator's, in the handheld's order, starting on the selected column
+ * (and the next one for two-variable work): its name, or a[] for an unnamed
+ * column A, as the handheld writes it.
  */
 export function listsMenu(x: string, y: string): Menu {
   const wiz = (label: string, title: string, fields: WizardField[], build: string) => ({
     label,
     action: { kind: "wizard" as const, title, fields, build },
   });
-  const twoVar = (label: string, cmd: string) =>
-    wiz(label, label, [listField("X List:", x), listField("Y List:", y)], `lists:stat:${cmd}:{0}:{1}`);
+  const stats = (items: MenuItem[]) => items.map((i) => forLists(i, x, y));
   return [
     sub("Actions", [
       app("Insert Row", "listsInsertRow"),
@@ -33,16 +52,10 @@ export function listsMenu(x: string, y: string): Menu {
       app("Sort Descending", "listsSortDown"),
     ]),
     sub("Statistics", [
-      sub("Stat Calculations", [
-        wiz("One-Variable Statistics...", "One-Variable Statistics", [listField("X1 List:", x)], "lists:stat:OneVar:{0}"),
-        twoVar("Two-Variable Statistics...", "TwoVar"),
-        rule(twoVar("Linear Regression (mx+b)...", "LinRegMx")),
-        twoVar("Linear Regression (a+bx)...", "LinRegBx"),
-        twoVar("Quadratic Regression...", "QuadReg"),
-        twoVar("Exponential Regression...", "ExpReg"),
-        twoVar("Power Regression...", "PowerReg"),
-        twoVar("Logarithmic Regression...", "LnReg"),
-      ]),
+      sub("Stat Calculations", stats(STAT_CALCULATIONS)),
+      sub("Distributions", stats(DISTRIBUTIONS)),
+      sub("Confidence Intervals", stats(CONFIDENCE_INTERVALS)),
+      sub("Stat Tests", stats(STAT_TESTS)),
     ]),
     off("Table"),
   ];

@@ -59,7 +59,7 @@ const modeMenu = (label: string, mode: number, values: string[]): MenuItem => su
 /** The F distribution's two degrees of freedom, as its wizards ask for them. */
 const F_DF = [{ label: "Numerator df:" }, { label: "Denominator df:" }];
 
-const DISTRIBUTIONS: MenuItem[] = [
+export const DISTRIBUTIONS: MenuItem[] = [
   wiz("Normal Pdf...", "Normal Pdf", [{ label: "X Value:" }, ...MU_SIGMA], "normPdf({0},{1},{2})"),
   wiz(
     "Normal Cdf...",
@@ -129,6 +129,192 @@ const DISTRIBUTIONS: MenuItem[] = [
     "Poisson Cdf",
     [{ label: "λ:" }, { label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }],
     "poissCdf({0},{1},{2})",
+  ),
+];
+
+/** Statistics ▸ Stat Calculations: the Calculator's, and Lists & Spreadsheet's (lists/lists-menu.ts). */
+export const STAT_CALCULATIONS: MenuItem[] = [
+  wiz(
+    "One-Variable Statistics...",
+    "One-Variable Statistics",
+    [{ label: "X1 List:" }, { label: "Frequency List:", value: "1" }],
+    "OneVar {0},{1}",
+  ),
+  wiz(
+    "Two-Variable Statistics...",
+    "Two-Variable Statistics",
+    [{ label: "X List:" }, { label: "Y List:" }, { label: "Frequency List:", value: "1" }],
+    "TwoVar {0},{1},{2}",
+  ),
+  regWizard("Linear Regression (mx+b)", "LinRegMx"),
+  regWizard("Linear Regression (a+bx)", "LinRegBx"),
+  regWizard("Median-Median Line", "MedMed"),
+  regWizard("Quadratic Regression", "QuadReg"),
+  regWizard("Cubic Regression", "CubicReg"),
+  regWizard("Quartic Regression", "QuartReg"),
+  regWizard("Power Regression", "PowerReg"),
+  regWizard("Exponential Regression", "ExpReg"),
+  regWizard("Logarithmic Regression", "LnReg"),
+  wiz(
+    "Sinusoidal Regression...",
+    "Sinusoidal Regression",
+    [
+      { label: "X List:" },
+      { label: "Y List:" },
+      { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
+      { label: "Iterations:", value: "8" },
+      { label: "Period:", hint: "(optional)" },
+    ],
+    "SinReg {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results",
+  ),
+  logisticWizard("Logistic Regression (d=0)", "Logistic"),
+  logisticWizard("Logistic Regression (d≠0)", "LogisticD"),
+  wiz(
+    "Multiple Linear Regression...",
+    "Multiple Linear Regression",
+    [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }],
+    "MultReg {0},{1}: stat.results",
+  ),
+  ins("Correlation Matrix", "corrMat("),
+];
+
+/** Statistics ▸ Confidence Intervals, shared with Lists & Spreadsheet. */
+export const CONFIDENCE_INTERVALS: MenuItem[] = [
+  wiz(
+    "z Interval...",
+    "z Interval",
+    [{ label: "σ:" }, { label: "x̄:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
+    "zInterval {0},{1},{2},{3}",
+  ),
+  wiz(
+    "t Interval...",
+    "t Interval",
+    [{ label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
+    "tInterval {0},{1},{2},{3}",
+  ),
+  wiz(
+    "2-Sample z Interval...",
+    "2-Sample z Interval",
+    [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, C_LEVEL],
+    "zInterval_2Samp {0},{1},{2},{3},{4},{5},{6}",
+  ),
+  wiz(
+    "2-Sample t Interval...",
+    "2-Sample t Interval",
+    [{ label: "x̄1:" }, { label: "sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "sx2:" }, { label: "n2:" }, C_LEVEL, POOLED],
+    "tInterval_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
+  ),
+  wiz(
+    "1-Prop z Interval...",
+    "1-Prop z Interval",
+    [{ label: "Successes, x:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
+    "zInterval_1Prop {0},{1},{2}",
+  ),
+  wiz(
+    "2-Prop z Interval...",
+    "2-Prop z Interval",
+    [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, C_LEVEL],
+    "zInterval_2Prop {0},{1},{2},{3},{4}",
+  ),
+  wiz(
+    "Linear Reg t Intervals...",
+    "Linear Reg t Intervals",
+    [
+      { label: "X List:" },
+      { label: "Y List:" },
+      { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
+      { label: "Frequency List:", value: "1" },
+      { label: "Interval (0 slope, 1 response):", value: "0", options: ["0", "1"] },
+      { label: "X Value:", value: "0" },
+      C_LEVEL,
+    ],
+    "LinRegtIntervals {0},{1},{3},{4},{5},{6}: CopyVar stat.RegEqn,{2}: stat.results",
+  ),
+  wiz(
+    "Multiple Reg Intervals...",
+    "Multiple Reg Intervals",
+    [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }, { label: "X Values:", hint: "{x1,x2,…}" }, C_LEVEL],
+    "MultRegIntervals {0},{1},{2},{3}",
+  ),
+];
+
+/** Statistics ▸ Stat Tests, shared with Lists & Spreadsheet. */
+export const STAT_TESTS: MenuItem[] = [
+  wiz(
+    "z Test...",
+    "z Test",
+    [
+      { label: "μ0:" },
+      { label: "σ:" },
+      { label: "x̄:" },
+      { label: "n:" },
+      // 0: μ ≠ μ0, −1: μ < μ0, 1: μ > μ0, as the command takes it.
+      { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] },
+    ],
+    "zTest {0},{1},{2},{3},{4}",
+  ),
+  wiz(
+    "t Test...",
+    "t Test",
+    [{ label: "μ0:" }, { label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
+    "tTest {0},{1},{2},{3},{4}",
+  ),
+  wiz(
+    "2-Sample z Test...",
+    "2-Sample z Test",
+    [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, ALT],
+    "zTest_2Samp {0},{1},{2},{3},{4},{5},{6}",
+  ),
+  wiz(
+    "2-Sample t Test...",
+    "2-Sample t Test",
+    [{ label: "x̄1:" }, { label: "sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "sx2:" }, { label: "n2:" }, ALT, POOLED],
+    "tTest_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
+  ),
+  wiz(
+    "1-Prop z Test...",
+    "1-Prop z Test",
+    [{ label: "p0:" }, { label: "Successes, x:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
+    "zTest_1Prop {0},{1},{2},{3}",
+  ),
+  wiz(
+    "2-Prop z Test...",
+    "2-Prop z Test",
+    [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, ALT],
+    "zTest_2Prop {0},{1},{2},{3},{4}",
+  ),
+  wiz(
+    "χ² GOF...",
+    "χ² GOF",
+    [{ label: "Observed List:" }, { label: "Expected List:" }, { label: "Deg of Freedom, df:" }],
+    "χ²GOF {0},{1},{2}",
+  ),
+  wiz("χ² 2-way Test...", "χ² 2-way Test", [{ label: "Observed Matrix:" }], "χ²2way {0}"),
+  wiz(
+    "2-Sample F Test...",
+    "2-Sample F Test",
+    [{ label: "sx1:" }, { label: "n1:" }, { label: "sx2:" }, { label: "n2:" }, ALT],
+    "FTest_2Samp {0},{1},{2},{3},{4}",
+  ),
+  wiz(
+    "Linear Reg t Test...",
+    "Linear Reg t Test",
+    [
+      { label: "X List:" },
+      { label: "Y List:" },
+      { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
+      { label: "Frequency List:", value: "1" },
+      ALT,
+    ],
+    "LinRegtTest {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results",
+  ),
+  wiz("Multiple Reg Tests...", "Multiple Reg Tests", [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }], "MultRegTests {0},{1}"),
+  wiz("ANOVA...", "ANOVA", [{ label: "Lists:", hint: "list1,list2,…" }], "ANOVA {0}"),
+  wiz(
+    "ANOVA 2-Way...",
+    "ANOVA 2-Way",
+    [{ label: "Lists:", hint: "list1,list2,…" }, { label: "Levels of Row Factor:", value: "1" }],
+    "ANOVA2way {0},{1}",
   ),
 ];
 
@@ -296,50 +482,7 @@ export const calculatorMenu: Menu = [
     sub("Distributions", DISTRIBUTIONS),
   ]),
   sub("Statistics", [
-    sub("Stat Calculations", [
-      wiz(
-        "One-Variable Statistics...",
-        "One-Variable Statistics",
-        [{ label: "X1 List:" }, { label: "Frequency List:", value: "1" }],
-        "OneVar {0},{1}",
-      ),
-      wiz(
-        "Two-Variable Statistics...",
-        "Two-Variable Statistics",
-        [{ label: "X List:" }, { label: "Y List:" }, { label: "Frequency List:", value: "1" }],
-        "TwoVar {0},{1},{2}",
-      ),
-      regWizard("Linear Regression (mx+b)", "LinRegMx"),
-      regWizard("Linear Regression (a+bx)", "LinRegBx"),
-      regWizard("Median-Median Line", "MedMed"),
-      regWizard("Quadratic Regression", "QuadReg"),
-      regWizard("Cubic Regression", "CubicReg"),
-      regWizard("Quartic Regression", "QuartReg"),
-      regWizard("Power Regression", "PowerReg"),
-      regWizard("Exponential Regression", "ExpReg"),
-      regWizard("Logarithmic Regression", "LnReg"),
-      wiz(
-        "Sinusoidal Regression...",
-        "Sinusoidal Regression",
-        [
-          { label: "X List:" },
-          { label: "Y List:" },
-          { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
-          { label: "Iterations:", value: "8" },
-          { label: "Period:", hint: "(optional)" },
-        ],
-        "SinReg {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results",
-      ),
-      logisticWizard("Logistic Regression (d=0)", "Logistic"),
-      logisticWizard("Logistic Regression (d≠0)", "LogisticD"),
-      wiz(
-        "Multiple Linear Regression...",
-        "Multiple Linear Regression",
-        [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }],
-        "MultReg {0},{1}: stat.results",
-      ),
-      ins("Correlation Matrix", "corrMat("),
-    ]),
+    sub("Stat Calculations", STAT_CALCULATIONS),
     ins("Stat Results", "stat.results"),
     sub("List Math", [
       ins("Minimum", "min("),
@@ -368,142 +511,8 @@ export const calculatorMenu: Menu = [
       ins("Right", "right("),
     ]),
     sub("Distributions", DISTRIBUTIONS),
-    sub("Confidence Intervals", [
-      wiz(
-        "z Interval...",
-        "z Interval",
-        [{ label: "σ:" }, { label: "x̄:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
-        "zInterval {0},{1},{2},{3}",
-      ),
-      wiz(
-        "t Interval...",
-        "t Interval",
-        [{ label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
-        "tInterval {0},{1},{2},{3}",
-      ),
-      wiz(
-        "2-Sample z Interval...",
-        "2-Sample z Interval",
-        [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, C_LEVEL],
-        "zInterval_2Samp {0},{1},{2},{3},{4},{5},{6}",
-      ),
-      wiz(
-        "2-Sample t Interval...",
-        "2-Sample t Interval",
-        [{ label: "x̄1:" }, { label: "sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "sx2:" }, { label: "n2:" }, C_LEVEL, POOLED],
-        "tInterval_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
-      ),
-      wiz(
-        "1-Prop z Interval...",
-        "1-Prop z Interval",
-        [{ label: "Successes, x:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
-        "zInterval_1Prop {0},{1},{2}",
-      ),
-      wiz(
-        "2-Prop z Interval...",
-        "2-Prop z Interval",
-        [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, C_LEVEL],
-        "zInterval_2Prop {0},{1},{2},{3},{4}",
-      ),
-      wiz(
-        "Linear Reg t Intervals...",
-        "Linear Reg t Intervals",
-        [
-          { label: "X List:" },
-          { label: "Y List:" },
-          { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
-          { label: "Frequency List:", value: "1" },
-          { label: "Interval (0 slope, 1 response):", value: "0", options: ["0", "1"] },
-          { label: "X Value:", value: "0" },
-          C_LEVEL,
-        ],
-        "LinRegtIntervals {0},{1},{3},{4},{5},{6}: CopyVar stat.RegEqn,{2}: stat.results",
-      ),
-      wiz(
-        "Multiple Reg Intervals...",
-        "Multiple Reg Intervals",
-        [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }, { label: "X Values:", hint: "{x1,x2,…}" }, C_LEVEL],
-        "MultRegIntervals {0},{1},{2},{3}",
-      ),
-    ]),
-    sub("Stat Tests", [
-      wiz(
-        "z Test...",
-        "z Test",
-        [
-          { label: "μ0:" },
-          { label: "σ:" },
-          { label: "x̄:" },
-          { label: "n:" },
-          // 0: μ ≠ μ0, −1: μ < μ0, 1: μ > μ0, as the command takes it.
-          { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] },
-        ],
-        "zTest {0},{1},{2},{3},{4}",
-      ),
-      wiz(
-        "t Test...",
-        "t Test",
-        [{ label: "μ0:" }, { label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
-        "tTest {0},{1},{2},{3},{4}",
-      ),
-      wiz(
-        "2-Sample z Test...",
-        "2-Sample z Test",
-        [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, ALT],
-        "zTest_2Samp {0},{1},{2},{3},{4},{5},{6}",
-      ),
-      wiz(
-        "2-Sample t Test...",
-        "2-Sample t Test",
-        [{ label: "x̄1:" }, { label: "sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "sx2:" }, { label: "n2:" }, ALT, POOLED],
-        "tTest_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
-      ),
-      wiz(
-        "1-Prop z Test...",
-        "1-Prop z Test",
-        [{ label: "p0:" }, { label: "Successes, x:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
-        "zTest_1Prop {0},{1},{2},{3}",
-      ),
-      wiz(
-        "2-Prop z Test...",
-        "2-Prop z Test",
-        [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, ALT],
-        "zTest_2Prop {0},{1},{2},{3},{4}",
-      ),
-      wiz(
-        "χ² GOF...",
-        "χ² GOF",
-        [{ label: "Observed List:" }, { label: "Expected List:" }, { label: "Deg of Freedom, df:" }],
-        "χ²GOF {0},{1},{2}",
-      ),
-      wiz("χ² 2-way Test...", "χ² 2-way Test", [{ label: "Observed Matrix:" }], "χ²2way {0}"),
-      wiz(
-        "2-Sample F Test...",
-        "2-Sample F Test",
-        [{ label: "sx1:" }, { label: "n1:" }, { label: "sx2:" }, { label: "n2:" }, ALT],
-        "FTest_2Samp {0},{1},{2},{3},{4}",
-      ),
-      wiz(
-        "Linear Reg t Test...",
-        "Linear Reg t Test",
-        [
-          { label: "X List:" },
-          { label: "Y List:" },
-          { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
-          { label: "Frequency List:", value: "1" },
-          ALT,
-        ],
-        "LinRegtTest {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results",
-      ),
-      wiz("Multiple Reg Tests...", "Multiple Reg Tests", [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }], "MultRegTests {0},{1}"),
-      wiz("ANOVA...", "ANOVA", [{ label: "Lists:", hint: "list1,list2,…" }], "ANOVA {0}"),
-      wiz(
-        "ANOVA 2-Way...",
-        "ANOVA 2-Way",
-        [{ label: "Lists:", hint: "list1,list2,…" }, { label: "Levels of Row Factor:", value: "1" }],
-        "ANOVA2way {0},{1}",
-      ),
-    ]),
+    sub("Confidence Intervals", CONFIDENCE_INTERVALS),
+    sub("Stat Tests", STAT_TESTS),
   ]),
   sub("Matrix & Vector", [
     sub("Create", [
