@@ -136,7 +136,11 @@ export function graphKey(
   key: Key,
   taken: ReadonlySet<number> = new Set(),
 ): { page: GraphsPage; effect: GraphEffect } {
-  const done = (q: Partial<GraphsPage>, effect: GraphEffect = null) => ({ page: { ...p, ...q }, effect });
+  // A key that changes nothing keeps the same page, so it isn't an edit (or an undo step).
+  const done = (q: Partial<GraphsPage>, effect: GraphEffect = null) => ({
+    page: (Object.keys(q) as (keyof GraphsPage)[]).every((k) => p[k] === q[k]) ? p : { ...p, ...q },
+    effect,
+  });
   const visible = p.functions.filter((f) => !f.hidden).map((f) => f.n);
   const step = p.traceStep ?? (p.window.xmax - p.window.xmin) / 100;
 

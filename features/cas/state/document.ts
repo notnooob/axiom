@@ -353,6 +353,35 @@ export function newDocument(first: AppKind = "calculator", title = "Untitled"): 
 
 export const problemOf = (p: Page | undefined): number => p?.problem ?? 1;
 
+/**
+ * What a page shows while it's being worked on, rather than what it holds:
+ * the tool in use, the selection, the entry line. Changing only these leaves
+ * an imported page's original card still true to it.
+ */
+const VIEW_ONLY: Partial<Record<Page["kind"], ReadonlySet<string>>> = {
+  graphs: new Set(["tool", "editing", "entryKind", "edit", "parDraft", "zoomBox", "selected", "mathDraw", "pathPlot"]),
+};
+
+/** Whether next changes what page p holds (so its imported card no longer matches), not just how it's being worked on. */
+export function editsContent(p: Page, next: Page): boolean {
+  if (p === next) return false;
+  if (p.kind !== next.kind) return true;
+  const view = VIEW_ONLY[p.kind];
+  const a = p as Record<string, unknown>;
+  const b = next as Record<string, unknown>;
+  for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) {
+    if (k === "xml" || view?.has(k) || a[k] === b[k]) continue;
+    // A Graphs page's construction: its tool and selection are view, its objects are content.
+    if (k === "geo" && p.kind === "graphs") {
+      const g = a.geo as GraphsPage["geo"];
+      const h = b.geo as GraphsPage["geo"];
+      if ((g?.objects ?? []) === (h?.objects ?? []) || (!g?.objects?.length && !h?.objects?.length)) continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 /** A page's label, problem.page: 2.1 is the first page of problem 2. Pages laid out together on one screen share theirs. */
 export function pageLabel(doc: CasDocument, i: number): string {
   const p = doc.pages[i];

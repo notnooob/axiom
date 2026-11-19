@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { buildTns } from "./encode";
-import { exportTns } from "./export";
+import { droppedMessage, exportTns } from "./export";
 import { DEFAULT_SETTINGS } from "../engine/evaluate";
 import { newPage, type CasDocument } from "../state/document";
 import { classify, decodeTns } from "./decode";
@@ -57,8 +57,10 @@ describe("export", () => {
         { kind: "graphs", id: 4, problem: 2, functions: [], window: { xmin: -1, xmax: 1, xscl: 1, ymin: -1, ymax: 1, yscl: 1 }, editing: null, edit: { row: [], cursor: { path: [], index: 0 } }, tool: null, marks: [], table: false, grid: "none", axes: true },
       ],
     };
-    const { bytes, dropped } = exportTns(doc, DEFAULT_SETTINGS);
+    const { bytes, dropped, droppedKinds } = exportTns(doc, DEFAULT_SETTINGS);
     expect(dropped).toBe(1); // the Graphs page made here
+    expect(droppedKinds).toEqual(["Graphs"]);
+    expect(droppedMessage({ dropped, droppedKinds })).toContain("(Graphs)");
     const back = decodeTns(bytes);
     const p1 = back.xml.get("Problem1.xml")!;
     expect(p1).toContain("<sp:entr>2+3&lt;4</sp:entr>");
@@ -67,6 +69,14 @@ describe("export", () => {
     expect(back.xml.has("Problem2.xml")).toBe(true);
     expect(back.xml.get("Document.xml")).toContain("<nps>2</nps>");
     expect(dec.decode(back.files.get("a.py"))).toBe("print(1)");
+  });
+
+  it("keeps imported variables and functions that were never opened", () => {
+    // importTns needs a DOMParser, so this reads the <sym> entries it would: the same shape import.ts takes back.
+    const doc: CasDocument = { title: "t", active: 0, pages: [newPage("calculator")], pendingSym: { "1": ["a:=3", "Define g(x)=x^2+1"] } };
+    const p1 = decodeTns(exportTns(doc, DEFAULT_SETTINGS).bytes).xml.get("Problem1.xml")!;
+    expect(p1).toContain('<e t="3" f="0" c="0"><n>a</n><v>3</v></e>');
+    expect(p1).toContain('<e t="6" f="0" c="0"><n>g</n><p>x</p><v>x^2+1</v></e>');
   });
 });
 

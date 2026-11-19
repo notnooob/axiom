@@ -90,7 +90,7 @@ import { HOME_START, HomeScreen, homeKeyPress, type HomeAction, type HomeSel } f
 import * as files from "./files/store";
 import { addFiles } from "./files/upload";
 import { classify, decodeTns } from "./tns/decode";
-import { exportTns } from "./tns/export";
+import { droppedMessage, exportTns } from "./tns/export";
 import { importTns } from "./tns/import";
 import { ListsApp } from "./lists/lists-app";
 import { listsMenu } from "./lists/lists-menu";
@@ -122,6 +122,7 @@ import { docDefaults, loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Set
 import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
   bumpIds,
+  editsContent,
   insertProblem,
   newDocument,
   newId,
@@ -520,8 +521,9 @@ export function CasApp() {
         if (!p || p.kind !== kind) return d;
         const pages = d.pages.slice();
         let next = fn(p as Extract<Page, { kind: K }>);
-        // An imported Graphs page's original XML no longer matches once it's edited.
-        if ((next.kind === "graphs" || next.kind === "datastats" || next.kind === "notes") && next.xml && next !== p) next = { ...next, xml: undefined };
+        // An imported page's original XML no longer matches once what it holds is edited
+        // (not when only its tool, selection or entry line changes).
+        if ((next.kind === "graphs" || next.kind === "datastats" || next.kind === "notes") && next.xml && editsContent(p, next)) next = { ...next, xml: undefined };
         recordUndo(p, next);
         pages[d.active] = next;
         return { ...d, pages };
@@ -1626,16 +1628,27 @@ export function CasApp() {
     } else void closeDocument();
   }, [closeDocument, writeNow]);
 
-  const tnsOf = useCallback((saved: Saved): Uint8Array => exportTns(saved.doc, saved.settings).bytes, []);
+  /** A saved document as .tns bytes; pages that can't be written are added to `dropped` when it's given. */
+  const tnsOf = useCallback((saved: Saved, dropped?: { dropped: number; droppedKinds: string[] }): Uint8Array => {
+    const r = exportTns(saved.doc, saved.settings);
+    if (dropped) {
+      dropped.dropped += r.dropped;
+      for (const k of r.droppedKinds) if (!dropped.droppedKinds.includes(k)) dropped.droppedKinds.push(k);
+    }
+    return r.bytes;
+  }, []);
 
   const downloadFile = useCallback(
     async (path: string) => {
       const rec = await files.getFile(path);
       if (!rec || rec.type !== "file") return;
       const name = files.nameOf(path);
-      const bytes = rec.bytes && !rec.edited ? rec.bytes : rec.doc ? tnsOf(rec.doc) : null;
+      const lost = { dropped: 0, droppedKinds: [] as string[] };
+      const bytes = rec.bytes && !rec.edited ? rec.bytes : rec.doc ? tnsOf(rec.doc, lost) : null;
       if (!bytes) return;
       download(new Blob([bytes as BlobPart]), /\.\w+$/.test(name) ? name : `${name}.tns`);
+      const warn = droppedMessage(lost);
+      if (warn) toast(warn);
     },
     [tnsOf],
   );
@@ -2255,7 +2268,8 @@ export function CasApp() {
       else if (action.id === "fileDownload") {
         const r = exportTns(doc, settings);
         download(new Blob([r.bytes as BlobPart]), `${doc.title}.tns`);
-        if (r.dropped) toast(`${r.dropped} page${r.dropped === 1 ? "" : "s"} made here can't be written to .tns yet (Graphs); the rest is in the file.`);
+        const warn = droppedMessage(r);
+        if (warn) toast(warn);
       } else if (action.id === "handheldSetup")
         setWizard(
           openWizard({
@@ -2306,11 +2320,20 @@ export function CasApp() {
             await files.put({ ...rec, path: files.join(folder, name), modified: Date.now() });
             await refreshFiles();
             toast.success(`Pasted ${name}`);
-          })();
+          })().catch((err: unknown) => toast.error(`Couldn't paste: ${(err as Error).message || "the browser refused"}`));
         } else if (action.id === "browseUpload") uploadInput.current?.click();
         else if (action.id === "browseDownload" && r && !r.folder) void downloadFile(r.path);
-        else if (action.id === "browseExportAll")
-          void files.exportAll((rec) => (rec.doc ? tnsOf(rec.doc) : null)).then((zip) => download(new Blob([zip as BlobPart]), "My Documents.zip"));
+        else if (action.id === "browseExportAll") {
+          const lost = { dropped: 0, droppedKinds: [] as string[] };
+          void files
+            .exportAll((rec) => (rec.doc ? tnsOf(rec.doc, lost) : null))
+            .then((zip) => {
+              download(new Blob([zip as BlobPart]), "My Documents.zip");
+              const warn = droppedMessage(lost);
+              if (warn) toast(warn);
+            })
+            .catch((err: unknown) => toast.error(`Couldn't export: ${(err as Error).message}`));
+        }
         else if (action.id === "browseSortName") setBrowse((b) => ({ ...b, sort: "name" }));
         else if (action.id === "browseSortSize") setBrowse((b) => ({ ...b, sort: "size" }));
       } else if (action.id.startsWith("lists") && page?.kind === "lists") {

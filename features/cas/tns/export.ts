@@ -86,11 +86,29 @@ function symXml(pages: Page[], pending: string[]): string {
   for (const s of pending) {
     const a = /^([a-zA-Z]\w*):=(.*)$/s.exec(s);
     if (a) out.push(`<e t="3" f="0" c="0"><n>${esc(a[1]!)}</n><v>${esc(a[2]!)}</v></e>`);
+    const f = /^Define\s+([a-zA-Z]\w*)\(([^)]*)\)=(.*)$/s.exec(s);
+    if (f) out.push(`<e t="6" f="0" c="0"><n>${esc(f[1]!)}</n><p>${esc(f[2]!)}</p><v>${esc(f[3]!)}</v></e>`);
   }
   return `<sym>${out.join("")}</sym>`;
 }
 
-export type ExportResult = { bytes: Uint8Array; dropped: number };
+/** The apps whose pages can be dropped, as the page names them. */
+const APP_LABELS: Partial<Record<Page["kind"], string>> = {
+  graphs: "Graphs",
+  geometry: "Geometry",
+  datastats: "Data & Statistics",
+  notes: "Notes",
+};
+
+/** dropped: how many pages couldn't be written; droppedKinds: their apps, once each. */
+export type ExportResult = { bytes: Uint8Array; dropped: number; droppedKinds: string[] };
+
+/** The warning for pages left out of an export, or null when nothing was. */
+export function droppedMessage(r: Pick<ExportResult, "dropped" | "droppedKinds">): string | null {
+  if (!r.dropped) return null;
+  const kinds = r.droppedKinds.length ? ` (${r.droppedKinds.join(", ")})` : "";
+  return `${r.dropped} page${r.dropped === 1 ? "" : "s"} made here can't be written to .tns yet${kinds}; the rest is in the file.`;
+}
 
 export function exportTns(doc: CasDocument, settings: Settings): ExportResult {
   const xml = new Map<string, string>();
@@ -98,6 +116,7 @@ export function exportTns(doc: CasDocument, settings: Settings): ExportResult {
   const enc = new TextEncoder();
   const problems = [...new Set(doc.pages.map(problemOf))].sort((a, b) => a - b);
   let dropped = 0;
+  const droppedKinds = new Set<string>();
   problems.forEach((n, i) => {
     const pages = doc.pages.filter((p) => problemOf(p) === n);
     const cards: string[] = [];
@@ -121,7 +140,10 @@ export function exportTns(doc: CasDocument, settings: Settings): ExportResult {
           `${CARD}<wdgt xmlns:np="urn:TI.Notepad" type="TI.Notepad" ver="2.0"><np:mFlags>0</np:mFlags><np:value>3</np:value>` +
             `<np:fmtxt>${esc(notesFmtxt(p.paras))}</np:fmtxt></wdgt></card>`,
         );
-      else dropped++;
+      else {
+        dropped++;
+        droppedKinds.add(APP_LABELS[p.kind] ?? p.kind);
+      }
     }
     xml.set(
       `Problem${i + 1}.xml`,
@@ -129,5 +151,5 @@ export function exportTns(doc: CasDocument, settings: Settings): ExportResult {
     );
   });
   xml.set("Document.xml", documentXml(problems.length, settings));
-  return { bytes: buildTns(xml, files), dropped };
+  return { bytes: buildTns(xml, files), dropped, droppedKinds: [...droppedKinds] };
 }
