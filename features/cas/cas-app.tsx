@@ -2398,6 +2398,8 @@ export function CasApp() {
         } else if (id === "dsConnect") setData((p) => ({ ...p, connect: !p.connect }));
         else if (id === "dsWhiskers") setData((p) => ({ ...p, extendWhiskers: !p.extendWhiskers }));
         else if (id === "dsNormal") setData((p) => ({ ...p, normalPdf: !p.normalPdf }));
+        else if (id === "dsResidSquares") setData((p) => ({ ...p, residualSquares: !p.residualSquares }));
+        else if (id === "dsResidPlot") setData((p) => ({ ...p, residualPlot: !p.residualPlot }));
         else if (id.startsWith("dsScale:")) {
           // Count is the default, so it's stored as unset; the window refits to the new heights.
           const scale = id.slice(8) as NonNullable<DataStatsPage["histScale"]>;
@@ -2425,7 +2427,7 @@ export function CasApp() {
         else if (id === "dsRemoveY") setData((p) => ({ ...p, y: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
         else if (id === "dsClearAll") setData((p) => ({ kind: "datastats", id: p.id, problem: p.problem, plot: "dot" }));
         else if (id === "dsRemoveAnalysis")
-          setData((p) => ({ ...p, regression: undefined, movable: undefined, functions: undefined, values: undefined, normalPdf: undefined }));
+          setData((p) => ({ ...p, regression: undefined, movable: undefined, functions: undefined, values: undefined, normalPdf: undefined, residualSquares: undefined, residualPlot: undefined }));
         else if (id.startsWith("dsReg:")) {
           const kind = id.slice(6);
           setData((p) => ({ ...p, regression: p.regression === kind ? undefined : kind }));

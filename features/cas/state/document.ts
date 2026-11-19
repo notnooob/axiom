@@ -247,6 +247,9 @@ export type DataStatsPage = {
   /** A regression command (LinRegMx, QuadReg …) shown with its equation. */
   regression?: string;
   movable?: { m: number; b: number; lock?: boolean };
+  /** Analyze ▸ Residuals: squares from each point to the curve, and a plot of the residuals under the data. */
+  residualSquares?: boolean;
+  residualPlot?: boolean;
   /** Plot Function: expressions in x. */
   functions?: string[];
   /** Plot Value: expressions (mean(a) …) drawn as vertical lines. */

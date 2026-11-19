@@ -135,10 +135,25 @@ export function ticks(lo: number, hi: number, target = 6): number[] {
   return out;
 }
 
-/** A regression's own equation (from stats.ts, our numbers) as a function of x. */
+/** A regression's own equation (from stats.ts or stats-tests.ts, our numbers) as a function of x. */
 export function equationFn(eqn: string): (x: number) => number {
-  const js = eqn.replace(/\^/g, "**").replace(/\bln\(/g, "Math.log(");
-  // Only digits, x, operators and Math.log come from stats.ts; anything else is refused.
-  if (!/^[\d\s.e+\-*/()x]*$/.test(js.replace(/Math\.log/g, ""))) return () => NaN;
-  return new Function("x", `return ${js};`) as (x: number) => number;
+  const js = eqn
+    .replace(/\^/g, "**")
+    .replace(/\bln\(/g, "Math.log(")
+    .replace(/\bsin\(/g, "Math.sin(")
+    .replace(/ℯ\*\*/g, "Math.E**")
+    // The logistic equation's −b with b already negative: "--" would be JavaScript's decrement.
+    .replace(/-(?=-)/g, "- ");
+  // Only digits, x, operators and those Math names come from our equations; anything else is refused.
+  if (!/^[\d\s.e+\-*/()x]*$/.test(js.replace(/Math\.(log|sin|E)/g, ""))) return () => NaN;
+  try {
+    return new Function("x", `return ${js};`) as (x: number) => number;
+  } catch {
+    return () => NaN;
+  }
+}
+
+/** Each point's residual from a curve: the point's y less the curve's, by x. */
+export function residuals(pts: [number, number][], f: (x: number) => number): [number, number][] {
+  return pts.map(([x, y]) => [x, y - f(x)] as [number, number]).filter(([, r]) => Number.isFinite(r));
 }

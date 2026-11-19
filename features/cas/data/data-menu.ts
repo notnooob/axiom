@@ -7,6 +7,8 @@ const tick = (on: boolean | undefined, label: string) => `${on ? "✓ " : ""}${l
 /** The menu key on a Data & Statistics page, laid out as the handheld's (greyed: not built yet). */
 export function dataMenu(p: DataStatsPage): Menu {
   const two = Boolean(p.y);
+  // Residuals are measured from what's been added to a scatter: a regression, the movable line or a function.
+  const against = two && Boolean(p.regression || p.movable || p.functions?.length);
   return [
     sub("Plot Type", [
       app(tick(p.plot === "dot", "Dot Plot"), "dsPlot:dot"),
@@ -77,12 +79,17 @@ export function dataMenu(p: DataStatsPage): Menu {
               app("Show Power", "dsReg:PowerReg"),
               app("Show Exponential", "dsReg:ExpReg"),
               app("Show Logarithmic", "dsReg:LnReg"),
-              off("Show Sinusoidal"),
-              off("Show Logistic (d=0)"),
+              app("Show Sinusoidal", "dsReg:SinReg"),
+              app("Show Logistic (d=0)", "dsReg:Logistic"),
             ])
           : off("Regression"),
       ),
-      rule(sub("Residuals", [off("Show Residual Squares"), off("Show Residual Plot")])),
+      rule(
+        sub("Residuals", [
+          against ? app(tick(p.residualSquares, "Show Residual Squares"), "dsResidSquares") : off("Show Residual Squares"),
+          against ? app(tick(p.residualPlot, "Show Residual Plot"), "dsResidPlot") : off("Show Residual Plot"),
+        ]),
+      ),
       rule(wiz("Plot Value...", "Plot Value", [{ label: "Value:", value: p.x ? `mean(${p.x})` : "" }], "ds:value:{0}")),
       p.plot === "histogram" ? app(tick(p.normalPdf, "Show Normal PDF"), "dsNormal") : off("Show Normal PDF"),
       off("Graph Trace"),

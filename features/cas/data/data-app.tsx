@@ -3,11 +3,29 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { palette } from "@/shared/lib/tokens";
 import type { Giac } from "../engine/evaluate";
 import { regression } from "../engine/stats";
+import { statProcedure } from "../engine/stats-tests";
 import { RENAME_IN } from "../engine/translate";
 import { parseNumbers } from "../graphs/analyze";
 import type { GraphWindow } from "../graphs/model";
 import type { DataStatsPage } from "../state/document";
-import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, histogramBars, normalCurve, normalScores, ONE_VAR, ticks, yAxisTitle } from "./plot";
+import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, histogramBars, normalCurve, normalScores, ONE_VAR, residuals, ticks, yAxisTitle } from "./plot";
+
+/** The regressions worked out by the statistics procedures (an iterative fit) rather than stats.ts's closed forms. */
+const ITERATIVE = new Set(["SinReg", "Logistic"]);
+
+/** A function sampled at even steps (Plot Function's points), read between them. */
+function sampled(f: [number, number][]): (x: number) => number {
+  return (x) => {
+    if (f.length < 2) return NaN;
+    const step = f[1]![0] - f[0]![0];
+    const i = Math.floor((x - f[0]![0]) / step);
+    const a = f[i];
+    const b = f[i + 1];
+    if (!a) return NaN;
+    if (!b) return Math.abs(x - a[0]) < 1e-9 ? a[1] : NaN;
+    return a[1] + ((x - a[0]) / (b[0] - a[0])) * (b[1] - a[1]);
+  };
+}
 
 const PLOT = "#2c64c8";
 const STRIP = "#b8509c";
@@ -123,7 +141,8 @@ export function DataStatsApp({
   const reg = useMemo(() => {
     if (!page.regression || pts.length < 2) return null;
     try {
-      const r = regression(page.regression, pts.map((p) => p[0]), pts.map((p) => p[1]));
+      const [rx, ry] = [pts.map((p) => p[0]), pts.map((p) => p[1])];
+      const r = ITERATIVE.has(page.regression) ? statProcedure(page.regression, [rx, ry]) : regression(page.regression, rx, ry);
       const r2 = r.rows.find(([k]) => k === "r²" || k === "R²");
       return { eqn: r.regEqn ?? "", r2: typeof r2?.[1] === "number" ? r2[1] : undefined };
     } catch {
@@ -131,11 +150,26 @@ export function DataStatsApp({
     }
   }, [page.regression, pts]);
 
+  // What residuals are measured from, as the handheld picks: the regression, else the movable line, else the first function.
+  const movable = page.movable;
+  const firstFn = extra.fns[0];
+  const against = useMemo<((x: number) => number) | null>(() => {
+    if (one) return null;
+    if (reg) return equationFn(reg.eqn);
+    if (movable) return (x) => movable.m * x + movable.b;
+    if (firstFn?.length) return sampled(firstFn);
+    return null;
+  }, [one, reg, movable, firstFn]);
+  const resid = useMemo(() => (against ? residuals(pts, against) : []), [against, pts]);
+  const residualPlot = Boolean(page.residualPlot && against && resid.length);
+
   // Movable line: dragging near its middle slides it, nearer an end turns it about the middle.
   const drag = useRef<{ mode: "slide" | "turn"; cx: number } | null>(null);
   const toWorld = (e: ReactPointerEvent) => {
     const r = canvas.current!.getBoundingClientRect();
-    return { x: w!.xmin + ((e.clientX - r.left) / r.width) * (w!.xmax - w!.xmin), y: w!.ymax - ((e.clientY - r.top) / r.height) * (w!.ymax - w!.ymin) };
+    // With the residual plot under it, the data fills the top two thirds.
+    const h = residualPlot ? r.height * (2 / 3) : r.height;
+    return { x: w!.xmin + ((e.clientX - r.left) / r.width) * (w!.xmax - w!.xmin), y: w!.ymax - ((e.clientY - r.top) / h) * (w!.ymax - w!.ymin) };
   };
 
   useEffect(() => {
@@ -159,7 +193,8 @@ export function DataStatsApp({
       return;
     }
     // One-list plots stand on the x-axis with its numbers under it; two-list plots put the axes through 0.
-    const plotH = one ? size.h - fs * 1.6 : size.h;
+    // Show Residual Plot gives the lower third to the residuals.
+    const plotH = one ? size.h - fs * 1.6 : residualPlot ? size.h * (2 / 3) : size.h;
     const X = (x: number) => ((x - w.xmin) / (w.xmax - w.xmin)) * size.w;
     const Y = (y: number) => ((w.ymax - y) / (w.ymax - w.ymin)) * plotH;
 
@@ -191,7 +226,7 @@ export function DataStatsApp({
     if (!one) {
       const left = X(Math.max(w.xmin, Math.min(w.xmax, 0)));
       g.moveTo(left, 0);
-      g.lineTo(left, size.h);
+      g.lineTo(left, plotH);
     }
     g.stroke();
     g.textAlign = "center";
@@ -330,16 +365,57 @@ export function DataStatsApp({
       g.lineWidth = 1.4;
       g.beginPath();
       g.moveTo(X(v.at), 0);
-      g.lineTo(X(v.at), size.h);
+      g.lineTo(X(v.at), plotH);
       g.stroke();
       labels.push({ text: v.label, colour: "#1e8c2f" });
     }
+    // Residuals: from the regression, else the movable line, else the first plotted function.
+    if (against && resid.length) {
+      const f = against;
+      if (page.residualSquares) {
+        g.strokeStyle = "#8a5cc2";
+        g.fillStyle = "rgba(138, 92, 194, 0.15)";
+        g.lineWidth = 1;
+        let sum = 0;
+        for (const [x, r] of resid) {
+          sum += r * r;
+          // A square on screen: as wide as the gap is tall.
+          const side = Math.abs(Y(f(x)) - Y(f(x) + r));
+          g.fillRect(X(x), Math.min(Y(f(x)), Y(f(x) + r)), side, side);
+          g.strokeRect(X(x), Math.min(Y(f(x)), Y(f(x) + r)), side, side);
+        }
+        labels.push({ text: `Sum of squares = ${shown(sum, page.digits)}`, colour: "#8a5cc2" });
+      }
+      if (residualPlot) {
+        const top = plotH + fs * 0.4;
+        const h = size.h - top - fs * 0.3;
+        const big = Math.max(...resid.map(([, r]) => Math.abs(r)), 1e-9) * 1.15;
+        const RY = (r: number) => top + h / 2 - (r / big) * (h / 2);
+        g.strokeStyle = palette.casInk;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(0, plotH);
+        g.lineTo(size.w, plotH);
+        g.stroke();
+        g.strokeStyle = palette.casRule;
+        g.beginPath();
+        g.moveTo(0, RY(0));
+        g.lineTo(size.w, RY(0));
+        g.stroke();
+        g.fillStyle = PLOT;
+        for (const [x, r] of resid) dot(X(x), RY(r));
+        g.fillStyle = palette.casLabel;
+        g.textAlign = "left";
+        g.fillText(`residual (±${shown(big, page.digits)})`, fs * 0.3, top + fs * 0.9);
+      }
+    }
+
     g.textAlign = "right";
     labels.forEach((l, i) => {
       g.fillStyle = l.colour;
       g.fillText(l.text, size.w - fs * 0.5, fs * (1.3 + i * 1.25));
     });
-  }, [size, w, page, xs, ys, pts, one, reg, extra]);
+  }, [size, w, page, xs, ys, pts, one, reg, extra, against, resid, residualPlot]);
 
   // A one-list plot's y-axis names what it measures (Frequency, z-Quantile …) when there's a list on x.
   const yTitle = one && page.x ? yAxisTitle(page) : undefined;

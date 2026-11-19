@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, fiveNumber, histogram, histogramBars, invNorm, normalCurve, ticks, yAxisTitle } from "./plot";
+import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, fiveNumber, histogram, histogramBars, invNorm, normalCurve, residuals, ticks, yAxisTitle } from "./plot";
 
 describe("data & statistics numbers", () => {
   it("five-number summary as the handheld works it out", () => {
@@ -26,6 +26,18 @@ describe("data & statistics numbers", () => {
     expect(equationFn("2*x+1")(3)).toBe(7);
     expect(equationFn("1.5+2*ln(x)")(Math.E)).toBeCloseTo(3.5);
     expect(equationFn("alert(1)")(1)).toBeNaN();
+  });
+  it("sinusoidal and logistic equations, whatever the signs", () => {
+    expect(equationFn("2*sin(0.5*x+-1)+3")(2)).toBeCloseTo(3);
+    expect(equationFn("10/(1+4*ℯ^(-0.5*x))")(0)).toBeCloseTo(2);
+    // A negative b makes "--" in the logistic equation.
+    expect(equationFn("10/(1+4*ℯ^(--0.5*x))")(0)).toBeCloseTo(2);
+    expect(equationFn("10/(1+4*ℯ^(--0.5*x))")(2)).toBeCloseTo(10 / (1 + 4 * Math.E));
+    expect(equationFn("1e-7*x+2")(1)).toBeCloseTo(2);
+  });
+  it("residuals from a curve", () => {
+    expect(residuals([[1, 3], [2, 4], [3, 8]], (x) => 2 * x)).toEqual([[1, 1], [2, 0], [3, 2]]);
+    expect(residuals([[0, 1]], () => NaN)).toEqual([]);
   });
 });
 
