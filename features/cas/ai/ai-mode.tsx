@@ -111,7 +111,7 @@ export function AiMode({
         <HeaderAction label="New chat" onClick={assistant.newChat}>
           <SquarePenIcon />
         </HeaderAction>
-        <HeaderAction label="Keys and services" onClick={onSettings}>
+        <HeaderAction label="Assistant settings" onClick={onSettings}>
           <Settings2Icon />
         </HeaderAction>
         <Button variant="outline" size="sm" className="ml-1" onClick={onExit} aria-label="Back to the calculator">
