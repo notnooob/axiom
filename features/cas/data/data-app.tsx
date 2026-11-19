@@ -77,11 +77,15 @@ export function DataStatsApp({
 
   const one = ONE_VAR.includes(page.plot);
   const xs = data.xs;
-  const ys = one ? [] : data.ys.slice(0, xs.length);
-  const pts = one ? [] : xs.slice(0, ys.length).map((x, i) => [x, ys[i]!] as [number, number]);
+  // Kept between renders, so what's worked out from them (the regression, the drawing) isn't redone each time.
+  const ys = useMemo(() => (one ? [] : data.ys.slice(0, xs.length)), [one, data.ys, xs.length]);
+  const pts = useMemo(() => (one ? [] : xs.slice(0, ys.length).map((x, i) => [x, ys[i]!] as [number, number])), [one, xs, ys]);
   const usable = xs.length > 0 && (one || pts.length > 0);
-  const w: GraphWindow | null = page.window ?? (usable ? fitWindow(page, xs, ys) : null);
-  onWindow(w);
+  const fitted = useMemo(() => (usable ? fitWindow(page, xs, ys) : null), [usable, page, xs, ys]);
+  const w: GraphWindow | null = page.window ?? fitted;
+  const tellWindow = useRef(onWindow);
+  tellWindow.current = onWindow;
+  useEffect(() => tellWindow.current(w), [w]);
 
   // Plot Function and Plot Value: worked out by the engine over the window.
   const fnKey = JSON.stringify([page.functions, page.values, w && [w.xmin, w.xmax], xs.length]);
