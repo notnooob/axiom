@@ -10,7 +10,7 @@ import * as React from "react";
 import { Chat, useChat } from "@ai-sdk/react";
 import { getToolName, isToolUIPart, lastAssistantMessageIsCompleteWithToolCalls, type FileUIPart } from "ai";
 import { Combobox } from "@base-ui/react/combobox";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotionConfig } from "framer-motion";
 import {
   NotebookPenIcon,
   TriangleIcon,
@@ -1464,7 +1464,7 @@ export function AssistantChat({
   const [files, setFiles] = React.useState<FileUIPart[]>([]);
   const formRef = React.useRef<HTMLFormElement>(null);
   const picker = React.useRef<HTMLInputElement>(null);
-  const reduce = useReducedMotion();
+  const reduce = useReducedMotionConfig();
   const busy = status === "submitted" || status === "streaming";
   const ready = configured(config);
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");

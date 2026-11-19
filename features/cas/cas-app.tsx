@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, MotionConfig } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { ScaleIn } from "@/src/components/amicro/scale-in";
@@ -118,6 +118,7 @@ import { ownsOpenDoc, restoreOf } from "./ai/threads";
 import type { AgentDialog, AgentHost } from "./ai/tools";
 import { registerWebMcp } from "./ai/webmcp";
 import { clearPrefs, load, pref, save, setPref, type Saved } from "./state/persist";
+import { loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Setup } from "./state/setup";
 import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
   bumpIds,
@@ -204,9 +205,9 @@ const DIGIT_OPTIONS = ["Float", ...Array.from({ length: 12 }, (_, i) => `Float${
 type View = "home" | "browse" | "doc" | "new";
 /** The open document, kept in this browser between Saves (and while the Scratchpad is shown). */
 type Cached = { saved: Saved; path: string | null; dirty: boolean };
-type Setup = { text: "Small" | "Medium" | "Large"; haptics: boolean };
-const TEXT_SCALE: Record<Setup["text"], number> = { Small: 0.88, Medium: 1, Large: 1.18 };
 const RECENT_MAX = 5;
+/** Handheld Setup's Animations, for framer-motion; index.css does the same for CSS through data-motion. */
+const MOTION = { System: "user", On: "never", Off: "always" } as const;
 
 /** The Scratchpad always has a Calculator page and a Graphs page (A Calculate, B Graph). */
 function withScratchPages(doc: CasDocument): CasDocument {
@@ -279,7 +280,7 @@ export function CasApp() {
   }, []);
   /** What to do once a Save As (asked for by "save changes?") is done. */
   const afterSave = useRef<(() => void) | null>(null);
-  const [setup, setSetupState] = useState<Setup>(() => pref<Setup>("setup", { text: "Medium", haptics: true }));
+  const [setup, setSetupState] = useState<Setup>(loadSetup);
   const [recent, setRecent] = useState<string[]>(() => pref<string[]>("recent", []));
   /** The Page Sorter's chosen page, while it's open. */
   const [sorter, setSorter] = useState<number | null>(null);
@@ -301,6 +302,11 @@ export function CasApp() {
   const rows = useMemo(() => visibleRows(fileList, browse), [fileList, browse]);
   const refreshFiles = useCallback(async () => setFileList(await files.all()), []);
   const hap = useCallback((t: Parameters<typeof haptic>[0]) => setup.haptics && haptic(t), [setup.haptics, haptic]);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (setup.motion === "System") delete root.dataset.motion;
+    else root.dataset.motion = setup.motion.toLowerCase();
+  }, [setup.motion]);
 
   // Python: the worker's state, the input() prompt waiting for an answer, and what a program has drawn.
   const [py, setPy] = useState<{ status: PyStatus; prompt: string | null; canvas: DrawOp[] | null }>({
@@ -313,6 +319,8 @@ export function CasApp() {
   const pyShell = useRef<number | null>(null);
 
   const restored = useRef(false);
+  /** The Scratchpad's definitions are back in the engine (Start Up In waits for it before opening another document). */
+  const startupReady = useRef<Promise<void>>(Promise.resolve());
   /** The problem whose definitions the engine holds now. */
   const shownProblem = useRef(1);
   /** The saved document's problem until that document is on screen (the first render still shows the default one). */
@@ -329,7 +337,7 @@ export function CasApp() {
       opening.current = shownProblem.current;
       setDoc(saved.doc);
       setSettings(saved.settings);
-      void e.restore(saved.definitions).then(async () => {
+      startupReady.current = e.restore(saved.definitions).then(async () => {
         // Each Graphs page's own names, for documents saved before pages had them.
         for (const pg of saved.doc.pages)
           if (pg.kind === "graphs")
@@ -1573,6 +1581,24 @@ export function CasApp() {
     } else toast("No document is open. Choose New or Browse.");
   }, [openSaved, writeNow]);
 
+  // Handheld Setup's Start Up In: Last Document opens what Home's 4 Current would, once the
+  // Scratchpad has finished loading (opening sooner would mix its definitions into the document's).
+  // StrictMode mounts twice: the first run is cancelled, and the second waits for the second engine.
+  useEffect(() => {
+    if (loadSetup().start !== "Last Document") return;
+    let live = true;
+    const cached = pref<Cached | null>("current", null);
+    const go = () => {
+      if (!live) return;
+      if (cached?.saved?.doc?.pages?.length) void openSaved(cached.saved, cached.path, false, cached.dirty);
+      else setView("doc");
+    };
+    startupReady.current.then(go, go);
+    return () => {
+      live = false;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** Where leaving a document goes: the screen it was opened from (Home or My Documents). */
   const backTo = useRef<"home" | "browse">("home");
   useEffect(() => {
@@ -2232,10 +2258,15 @@ export function CasApp() {
             kind: "wizard",
             title: "Handheld Setup",
             fields: [
-              { label: "Text Size:", value: setup.text, options: ["Small", "Medium", "Large"] },
+              { label: "Text Size:", value: setup.text, options: [...SETUP_OPTIONS.text] },
               { label: "Haptics", value: setup.haptics ? "Yes" : "No", check: true },
+              // Axiom's own, after the handheld's two.
+              { label: "Keypad Layout:", value: setup.keypad, options: [...SETUP_OPTIONS.keypad] },
+              { label: "Show Keypad", value: setup.showKeypad ? "Yes" : "No", check: true },
+              { label: "Start Up In:", value: setup.start, options: [...SETUP_OPTIONS.start] },
+              { label: "Animations:", value: setup.motion, options: [...SETUP_OPTIONS.motion] },
             ],
-            build: "setup:{0}:{1}",
+            build: "setup:{0}:{1}:{2}:{3}:{4}:{5}",
           }),
         );
       else if (action.id === "status") void showStatus();
@@ -2652,8 +2683,7 @@ export function CasApp() {
         return;
       }
       if (built.startsWith("setup:")) {
-        const [text, haptics] = built.slice(6).split(":");
-        const next: Setup = { text: (["Small", "Medium", "Large"].includes(text!) ? text : "Medium") as Setup["text"], haptics: haptics === "Yes" };
+        const next = parseSetup(built);
         setSetupState(next);
         setPref("setup", next);
         return;
@@ -3720,7 +3750,7 @@ export function CasApp() {
     },
   };
   return (
-    <>
+    <MotionConfig reducedMotion={MOTION[setup.motion]}>
     {/* On a wide window the calculator moves aside for the assistant rather than sitting under it; AI mode puts it away. */}
     <div className={cn(DEVICE_WIDTH, aiOpen && "ai-open", ai === "immersive" && "hidden")}>
       <header className="mb-4 flex items-center justify-between gap-3 px-1">
@@ -4087,7 +4117,8 @@ export function CasApp() {
             screenHost,
             )}
           </div>
-          <div className="@container lg:w-[min(24rem,calc(var(--cas-h)/2.1))] lg:shrink-0">
+          {/* Show Keypad off hides it on large screens only: a phone has no other way to type. */}
+          <div className={cn("@container lg:w-[min(24rem,calc(var(--cas-h)/2.1))] lg:shrink-0", !setup.showKeypad && "lg:hidden")}>
             <Keypad
               onKey={(k) => {
                 hap(k.k === "enter" ? "medium" : "light");
@@ -4106,6 +4137,7 @@ export function CasApp() {
                 if (o.open === "templates") setPalette(0);
                 else setCatalog(openCatalog(o.tab));
               }}
+              layout={setup.keypad}
             />
           </div>
         </DefinedNames.Provider>
@@ -4159,7 +4191,7 @@ export function CasApp() {
       )}
     </AnimatePresence>
     <AssistantSettings open={aiSettings} onOpenChange={setAiSettings} config={assistant.config} setConfig={assistant.setConfig} />
-    </>
+    </MotionConfig>
   );
 }
 

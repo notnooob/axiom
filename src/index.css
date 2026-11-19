@@ -182,24 +182,33 @@ body {
   background: radial-gradient(60rem 40rem at 50% 35%, rgba(255, 255, 255, 0.045), transparent 70%) fixed;
 }
 
+/*
+  Reduced motion: the computer's setting, unless Handheld Setup's Animations
+  says otherwise (data-motion on <html>: "on" ignores the setting, "off"
+  reduces motion whatever it says).
+*/
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :root:not([data-motion="on"]) *,
+  :root:not([data-motion="on"]) *::before,
+  :root:not([data-motion="on"]) *::after {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
   /* Reduced, not none: the chrome's surfaces still fade, without moving. */
-  .ui-pop,
-  .ui-modal,
-  .ui-backdrop,
-  .ui-sheet,
-  .ui-rise,
-  .ui-fade,
-  .ui-swap {
+  :root:not([data-motion="on"]) :is(.ui-pop, .ui-modal, .ui-backdrop, .ui-sheet, .ui-rise, .ui-fade, .ui-swap) {
     transition-property: opacity !important;
     transition-duration: 150ms !important;
   }
+}
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+}
+:root[data-motion="off"] :is(.ui-pop, .ui-modal, .ui-backdrop, .ui-sheet, .ui-rise, .ui-fade, .ui-swap) {
+  transition-property: opacity !important;
+  transition-duration: 150ms !important;
 }
 
 /*
