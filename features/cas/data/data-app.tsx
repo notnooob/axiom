@@ -347,7 +347,7 @@ export function DataStatsApp({
     };
     if (reg) {
       curve(equationFn(reg.eqn), "#1f4fd8");
-      labels.push({ text: `y = ${reg.eqn.replace(/(-?\d+\.\d{5,})/g, (n) => shown(Number(n), page.digits)).replace(/\*/g, "·").replace(/\+-/g, "−")}`, colour: "#1f4fd8" });
+      labels.push({ text: `y = ${reg.eqn.replace(/(-?\d+\.\d{5,})/g, (n) => shown(Number(n), page.digits)).replace(/\*/g, "·").replace(/\+[-−]/g, "−")}`, colour: "#1f4fd8" });
       if (page.diagnostics && reg.r2 !== undefined) labels.push({ text: `r² = ${shown(reg.r2, page.digits)}`, colour: "#1f4fd8" });
     }
     if (page.movable) {
