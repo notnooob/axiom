@@ -8,7 +8,12 @@
 
 import { classify as classifyConic } from "../graphs/conics";
 
-export type GeoObj =
+/** Actions ▸ Attributes: line weight, style and colour (a palette name); unset is the default. */
+export type GeoAttrs = { weight?: "Thin" | "Medium" | "Thick"; style?: "Continuous" | "Dotted" | "Dashed"; colour?: string };
+/** What every object can have: Hide/Show's flag (a hidden object is still worked out, for what's built on it) and its Attributes. */
+export type GeoCommon = { hidden?: boolean; attrs?: GeoAttrs };
+
+export type GeoObj = GeoCommon & (
   | { id: string; kind: "point"; x: number; y: number }
   | { id: string; kind: "midpoint"; of: [string, string] }
   | { id: string; kind: "intersection"; of: [string, string]; n: number }
@@ -43,7 +48,10 @@ export type GeoObj =
   /** A circle about centre with the radius of a segment (r: [segment]) or two points' distance (r: [p, q]). */
   | { id: string; kind: "compass"; centre: string; r: string[] }
   /** A point a measurement's value along a line, ray or circle from a point. */
-  | { id: string; kind: "transfer"; measure: string; onto: string; from: string };
+  | { id: string; kind: "transfer"; measure: string; onto: string; from: string }
+  /** Coordinates and Equations: a point's coordinates, or a line's or circle's equation, kept beside it as it moves. */
+  | { id: string; kind: "coords"; of: string }
+);
 
 export type TransformOp = "symmetry" | "reflection" | "translation" | "rotation" | "dilation";
 
@@ -186,6 +194,9 @@ export function resolve(objs: GeoObj[]): Map<string, Shape> {
       case "measure":
         s = measure(o, out);
         break;
+      case "coords":
+        s = coordsOf(out.get(o.of));
+        break;
       case "transform": {
         const f = mapping(o, out);
         const src = out.get(o.of);
@@ -198,6 +209,29 @@ export function resolve(objs: GeoObj[]): Map<string, Shape> {
     if (s) out.set(o.id, s);
   }
   return out;
+}
+
+/** A number in an equation: two places, a minus sign, and no "+−". */
+const signed = (v: number) => (v < 0 ? `−${round(-v)}` : `+${round(v)}`);
+/** (x−h)² with h's sign folded in; x² when h is 0. */
+const shifted = (v: string, h: number) => (Math.abs(h) < 0.005 ? `${v}²` : `(${v}${signed(-h)})²`);
+
+/** Coordinates and Equations: the text, just beside the object it describes. */
+function coordsOf(s: Shape | undefined): Shape | undefined {
+  const label = (text: string, at: Pt): Shape => ({ t: "value", value: NaN, text, at: { x: at.x + 0.3, y: at.y + 0.5 } });
+  // A point's name sits above it, so its coordinates go underneath.
+  if (s?.t === "pt") return { t: "value", value: NaN, text: `(${round(s.p.x)}, ${round(s.p.y)})`, at: { x: s.p.x, y: s.p.y - 0.9 } };
+  if (s?.t === "line") {
+    const dx = s.q.x - s.p.x;
+    const mid = { x: (s.p.x + s.q.x) / 2, y: (s.p.y + s.q.y) / 2 };
+    if (Math.abs(dx) < EPS) return label(`x=${round(s.p.x)}`, mid);
+    const m = (s.q.y - s.p.y) / dx;
+    const b = s.p.y - m * s.p.x;
+    const text = Math.abs(m) < 0.005 ? `y=${round(b)}` : `y=${round(m)}·x${Math.abs(b) < 0.005 ? "" : signed(b)}`;
+    return label(text, mid);
+  }
+  if (s?.t === "circle") return label(`${shifted("x", s.c.x)}+${shifted("y", s.c.y)}=${round(s.r * s.r)}`, { x: s.c.x + s.r * 0.72, y: s.c.y + s.r * 0.72 });
+  return undefined;
 }
 
 /** The point map a transformation makes, and how it scales lengths. */
@@ -313,7 +347,7 @@ export function nextLabel(objs: GeoObj[]): string {
 
 /** A new object's id: its kind's letter and the next number (s1, l1, c1…). Points are named instead. */
 export function nextId(objs: GeoObj[], kind: GeoObj["kind"]): string {
-  const prefix = { segment: "s", line: "l", ray: "r", perpendicular: "l", parallel: "l", bisector: "l", anglebisector: "r", circle: "c", polygon: "p", measure: "m", tangent: "l", vector: "v", arc: "a", rectangle: "p", regpoly: "p", conic: "k", locus: "lo", compass: "c" }[kind as string] ?? "o";
+  const prefix = { segment: "s", line: "l", ray: "r", perpendicular: "l", parallel: "l", bisector: "l", anglebisector: "r", circle: "c", polygon: "p", measure: "m", tangent: "l", vector: "v", arc: "a", rectangle: "p", regpoly: "p", conic: "k", locus: "lo", compass: "c", coords: "e" }[kind as string] ?? "o";
   const used = new Set(objs.map((o) => o.id));
   let n = 1;
   while (used.has(`${prefix}${n}`)) n++;
@@ -369,6 +403,8 @@ export function remove(objs: GeoObj[], ids: string[]): GeoObj[] {
         return [o.centre, ...o.r];
       case "transfer":
         return [o.measure, o.onto, o.from];
+      case "coords":
+        return [o.of];
     }
   };
   return objs.filter((o) => {
@@ -585,14 +621,14 @@ export function describe(objs: GeoObj[]): Record<string, unknown>[] {
   const n = (v: number) => Number(v.toFixed(4));
   return objs.map((o) => {
     const s = shapes.get(o.id);
-    const { id, kind, ...def } = o;
+    const { id, kind, hidden, attrs, ...def } = o;
     const now =
       !s ? { undefined: true }
       : s.t === "pt" ? { x: n(s.p.x), y: n(s.p.y) }
       : s.t === "circle" ? { centre: [n(s.c.x), n(s.c.y)], radius: n(s.r) }
       : s.t === "value" ? { value: Number.isFinite(s.value) ? n(s.value) : "undefined", shown: s.text }
       : {};
-    return { id, kind, ...(kind === "point" ? {} : def), ...now };
+    return { id, kind, ...(kind === "point" ? {} : def), ...now, ...(hidden ? { hidden: true } : {}), ...(attrs ? { attrs } : {}) };
   });
 }
 
@@ -680,7 +716,8 @@ const kinds = (s: Shape | undefined): Want[] =>
   : s.t === "circle" ? ["curve", "region", "measurable"]
   : s.t === "poly" ? ["region", "measurable"]
   : s.t === "curve" ? ["curve"]
-  : s.t === "value" ? ["value"]
+  // A value with no number (Coordinates and Equations' text) can't be used as a measurement.
+  : s.t === "value" ? (Number.isNaN(s.value) ? [] : ["value"])
   : [];
 
 /** What the tool takes next, given what's been picked. */

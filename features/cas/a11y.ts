@@ -37,8 +37,21 @@ export function wizardSaid(w: WizardState): string {
   return f ? `${w.wizard.title}. ${f.label} ${w.values[w.focus] ?? ""}` : w.wizard.title;
 }
 
+/** Each app's name, as the page's tab and the add-page menu give it. */
+const APP_SAID: Record<Page["kind"], string> = {
+  calculator: "Calculator",
+  graphs: "Graphs",
+  lists: "Lists & Spreadsheet",
+  datastats: "Data & Statistics",
+  notes: "Notes",
+  geometry: "Geometry",
+  python: "Python",
+  pyshell: "Python Shell",
+  unsupported: "an app Axiom doesn't have yet",
+};
+
 export function pageSaid(page: Page, label: string): string {
-  return `Page ${label}, ${page.kind === "calculator" ? "Calculator" : "Graphs"}`;
+  return `Page ${label}, ${page.kind === "unsupported" ? `${page.app}, not built yet` : APP_SAID[page.kind]}`;
 }
 
 export function toolSaid(tool: Tool | null): string {

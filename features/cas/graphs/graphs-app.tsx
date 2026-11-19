@@ -28,6 +28,7 @@ import {
 } from "./analyze";
 import { formatFloat } from "../engine/format";
 import { SliderView } from "./sliders";
+import { dashPattern, NAMED_COLOURS, weightFactor } from "./colours";
 import { autoScale, deName, fmt3, fnName, pageDigits, parNames, relName, type GraphWindow, type Samples } from "./model";
 import { graphSaid } from "../a11y";
 import { parseTerms, SEQ_TERMS, seqName, seqTermsCommand } from "./sequence";
@@ -37,16 +38,6 @@ import { RENAME_IN } from "../engine/translate";
 
 export const CURVE = [palette.casF1, palette.casF2, palette.casF3, palette.casF4, palette.casF5, palette.casF6];
 export const curveColour = (n: number) => CURVE[(n - 1) % CURVE.length]!;
-/** Attributes' colours, by the names the dialog lists. */
-export const NAMED_COLOURS: Record<string, string> = {
-  Blue: palette.casF1,
-  Red: palette.casF2,
-  Green: palette.casF3,
-  Orange: palette.casF4,
-  Purple: palette.casF5,
-  Teal: palette.casF6,
-  Black: palette.casInk,
-};
 /** A function's colour: its Attributes' choice, or its place in the palette. */
 const fnColour = (page: GraphsPage, n: number) => NAMED_COLOURS[page.functions.find((f) => f.n === n)?.attrs?.colour ?? ""] ?? curveColour(n);
 /** Relations take the next colours after the functions'. */
@@ -1788,9 +1779,8 @@ function draw(
   for (const s of samples) {
     const attrs = page.functions.find((f) => f.n === s.n)?.attrs;
     g.strokeStyle = fnColour(page, s.n);
-    const weight = attrs?.weight === "Thin" ? 0.6 : attrs?.weight === "Thick" ? 1.9 : 1;
-    g.lineWidth = Math.max(1.2, W * 0.004) * weight * (s.n === searched ? 2 : 1);
-    g.setLineDash(attrs?.style === "Dotted" ? [1.5, 4] : attrs?.style === "Dashed" ? [8, 5] : []);
+    g.lineWidth = Math.max(1.2, W * 0.004) * weightFactor(attrs?.weight) * (s.n === searched ? 2 : 1);
+    g.setLineDash(dashPattern(attrs?.style));
     const path = new Path2D();
     let pen = false;
     for (let i = 0; i < s.xs.length; i++) {

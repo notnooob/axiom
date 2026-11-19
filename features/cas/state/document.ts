@@ -291,6 +291,8 @@ export type GeometryPage = {
   grid?: boolean;
   /** What's shown: the centre (cm) and the width across; unset is (0, 0) and 20 cm. */
   view?: { x: number; y: number; w: number };
+  /** Texts placed with Actions ▸ Text, at a point of the plane (cm). */
+  texts?: GraphText[];
 };
 
 /** A page from an app that isn't built yet (Lua, Widgets…), kept so the document stays whole. */

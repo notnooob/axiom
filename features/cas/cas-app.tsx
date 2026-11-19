@@ -99,9 +99,10 @@ import { NotesApp, UnsupportedApp, type NotesApi } from "./notes/notes-app";
 import { NOTES_MENU } from "./notes/notes-menu";
 import { DataStatsApp } from "./data/data-app";
 import { dataMenu } from "./data/data-menu";
-import { GeometryApp, geometryKey, zoomed as zoomedGeo } from "./geometry/geometry-app";
+import { GeometryApp, geometryKey, VIEW as GEO_VIEW, zoomed as zoomedGeo } from "./geometry/geometry-app";
+import { COLOUR_OPTIONS } from "./graphs/colours";
 import { geometryMenu } from "./geometry/geometry-menu";
-import { ASKS, nextLabel as nextGeoLabel, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
+import { ASKS, nextId as nextGeoId, nextLabel as nextGeoLabel, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
 import { ONE_VAR } from "./data/plot";
 import type { GraphWindow } from "./graphs/model";
 import { PythonCanvas, PythonEditor, PythonShell, type DrawOp } from "./python/python-app";
@@ -1755,10 +1756,64 @@ export function CasApp() {
     ...(g.des ?? []).map((d) => ({ name: `d${d.n}`, kind: "de" as const, n: d.n, hidden: d.hidden })),
   ];
 
+  /**
+   * Geometry's Actions dialogs (Hide/Show, Attributes, Text, Coordinates and
+   * Equations) on a construction: a Geometry page's, or a Graphs page's
+   * when one of its objects is selected. wizardDone applies them to whichever
+   * page is active.
+   */
+  const geoDialog = (which: "hide" | "attrs" | "text" | "label", p: GeometryPage) => {
+    const ids = p.objects.map((o) => o.id);
+    if (which === "text") {
+      const v = p.view ?? GEO_VIEW;
+      const at = (n: number) => String(Number(n.toFixed(2)));
+      setWizard(openWizard({ kind: "wizard", title: "Text", arrows: false, fields: [{ label: "Text:", value: "" }, { label: "x:", value: at(v.x) }, { label: "y:", value: at(v.y) }], build: "geotext:{1}:{2}:{0}" }));
+      return;
+    }
+    if (!ids.length) return setError("Error: No objects on this page");
+    if (which === "hide") {
+      setWizard(openWizard({ kind: "wizard", title: "Hide/Show", arrows: false, fields: p.objects.map((o) => ({ label: `Show ${o.id}`, value: o.hidden ? "No" : "Yes", check: true })), build: `geohide:${ids.join(",")}:${ids.map((_, i) => `{${i}}`).join(":")}` }));
+      return;
+    }
+    if (which === "attrs") {
+      const o = p.objects.find((x) => x.id === p.sel) ?? p.objects[0]!;
+      const a = o.attrs;
+      setWizard(
+        openWizard({
+          kind: "wizard",
+          title: "Attributes",
+          arrows: false,
+          fields: [
+            { label: "Object:", value: o.id, options: ids },
+            { label: "Line Weight:", value: a?.weight ?? "Medium", options: ["Thin", "Medium", "Thick"] },
+            { label: "Line Style:", value: a?.style ?? "Continuous", options: ["Continuous", "Dotted", "Dashed"] },
+            { label: "Colour:", value: a?.colour ?? "Auto", options: COLOUR_OPTIONS },
+          ],
+          build: "geoattrs:{0}:{1}:{2}:{3}",
+        }),
+      );
+      return;
+    }
+    // Coordinates and Equations: a point's coordinates, a line's or circle's equation.
+    const shapes = resolveGeo(p.objects);
+    const labelled = ids.filter((id) => {
+      const t = shapes.get(id)?.t;
+      return t === "pt" || t === "line" || t === "circle";
+    });
+    if (!labelled.length) return setError("Error: Coordinates and Equations needs a point, a line or a circle");
+    const first = p.sel && labelled.includes(p.sel) ? p.sel : labelled[0]!;
+    setWizard(openWizard({ kind: "wizard", title: "Coordinates and Equations", arrows: false, fields: [{ label: "Object:", value: first, options: labelled }], build: "geolabel:{0}" }));
+  };
+
   /** Graphs ▸ Actions: true when the id was one of them. */
   const graphsActions = (id: string): boolean => {
     const g = page?.kind === "graphs" ? page : null;
     if (!g) return false;
+    // With one of the page's geometry objects selected, these act on the construction rather than the graphs.
+    if (g.geo?.sel && (id === "hideShow" || id === "attributes" || id === "coordinates")) {
+      geoDialog(id === "hideShow" ? "hide" : id === "attributes" ? "attrs" : "label", geoOfGraph(g));
+      return true;
+    }
     const fns = g.functions.map((f) => `f${f.n}`);
     const needFns = () => (fns.length ? false : (setError("Error: No functions on this page"), true));
     const w = g.window;
@@ -2384,6 +2439,10 @@ export function CasApp() {
         else if (id === "geoZoomIn") setGeo((p) => zoomedGeo(p, 0.8));
         else if (id === "geoZoomOut") setGeo((p) => zoomedGeo(p, 1.25));
         else if (id === "geoZoomReset") setGeo((p) => ({ ...p, view: undefined }));
+        else if (id === "geoHideShow") geoDialog("hide", page);
+        else if (id === "geoAttrs") geoDialog("attrs", page);
+        else if (id === "geoText") geoDialog("text", page);
+        else if (id === "geoLabel") geoDialog("label", page);
         else if (id === "geoStore") {
           const m = page.objects.find((o) => o.id === page.sel && o.kind === "measure");
           if (m?.kind === "measure")
@@ -2675,6 +2734,41 @@ export function CasApp() {
           }
           return { ...p, objects: r.objs! };
         });
+        return;
+      }
+      if (/^geo(hide|attrs|text|label):/.test(built)) {
+        const set = page?.kind === "graphs" ? setGraphGeo : setGeo;
+        const [kind = "", ...rest] = built.split(":");
+        if (kind === "geohide") {
+          const [names = "", ...vals] = rest;
+          const shown = new Map(names.split(",").map((n, i) => [n, vals[i]?.trim() !== "No"]));
+          set((p) => ({
+            ...p,
+            objects: p.objects.map((o) => (shown.has(o.id) ? { ...o, hidden: !shown.get(o.id) || undefined } : o)),
+            sel: p.sel && shown.get(p.sel) === false ? null : p.sel,
+          }));
+          const hidden = [...shown].filter(([, v]) => !v).map(([n]) => n);
+          return say(hidden.length ? `Hidden: ${hidden.join(", ")}` : "Every object shown");
+        }
+        if (kind === "geoattrs") {
+          const [id = "", weight, style, colour] = rest.map((v) => v.trim());
+          set((p) => ({
+            ...p,
+            objects: p.objects.map((o) =>
+              o.id !== id ? o : { ...o, attrs: { weight: weight as "Thin", style: style as "Continuous", colour: colour === "Auto" ? undefined : colour } },
+            ),
+          }));
+          return say(`${id}: ${weight}, ${style}${colour && colour !== "Auto" ? `, ${colour}` : ""}`);
+        }
+        if (kind === "geotext") {
+          const [xs = "", ys = "", ...text] = rest;
+          const [x, y] = [Number(xs.trim().replace("−", "-")), Number(ys.trim().replace("−", "-"))];
+          if (![x, y].every(Number.isFinite)) return setError("Error: The place is two numbers, x and y");
+          if (!text.join(":").trim()) return;
+          return setGeo((p) => ({ ...p, texts: [...(p.texts ?? []), { x, y, text: text.join(":") }] }));
+        }
+        const of = rest.join(":").trim();
+        set((p) => (p.objects.some((o) => o.id === of) ? { ...p, objects: [...p.objects, { id: nextGeoId(p.objects, "coords"), kind: "coords", of }] } : p));
         return;
       }
       if (built.startsWith("geocoords:")) {

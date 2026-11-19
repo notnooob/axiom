@@ -215,6 +215,7 @@ export function pageContent(doc: CasDocument, i: number): Record<string, unknown
         ...base,
         units: `lengths in cm, angles in degrees; the page shows x from ${num((p.view?.x ?? 0) - (p.view?.w ?? 20) / 2)} to ${num((p.view?.x ?? 0) + (p.view?.w ?? 20) / 2)}, centred on y = ${num(p.view?.y ?? 0)}`,
         objects: describeGeometry(p.objects),
+        ...(p.texts?.length ? { texts: p.texts } : {}),
         ...(p.tool ? { tool: p.tool } : {}),
         ...(p.axes ? { axes: true } : {}),
       };
@@ -305,6 +306,7 @@ export function describeScreen(s: AgentSnapshot): string {
         out.push(`Showing x from ${said(v.x - v.w / 2)} to ${said(v.x + v.w / 2)} cm.${p.axes ? " Axes on." : ""}`);
         const objs = describeGeometry(p.objects);
         out.push(objs.length ? `Objects: ${objs.slice(0, 20).map((o) => JSON.stringify(o)).join("; ")}${objs.length > 20 ? "; …" : ""}` : "The page is empty.");
+        if (p.texts?.length) out.push(`Texts: ${p.texts.map((t) => `"${t.text}" at (${said(t.x)}, ${said(t.y)})`).join("; ")}`);
         break;
       }
       case "notes":

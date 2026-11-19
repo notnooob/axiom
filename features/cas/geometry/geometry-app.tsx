@@ -4,6 +4,7 @@ import { palette } from "@/shared/lib/tokens";
 import type { Highlight } from "../ai/highlights";
 import type { Key } from "../keys";
 import { FlagBadge, flagHex } from "../screen/flag";
+import { dashPattern, NAMED_COLOURS, weightFactor } from "../graphs/colours";
 import type { GeometryPage } from "../state/document";
 import { click, prompt, remove, resolve, TOOL_NAMES, type GeoTool, type Pt, type Shape } from "./model";
 
@@ -97,7 +98,13 @@ export function GeometryApp({
     };
   }, [onChange]);
 
-  const shapes = useMemo(() => resolve(page.objects), [page.objects]);
+  const all = useMemo(() => resolve(page.objects), [page.objects]);
+  // Hidden objects are still worked out (others are built on them), but aren't drawn or picked.
+  const shapes = useMemo(() => {
+    const hidden = new Set(page.objects.flatMap((o) => (o.hidden ? [o.id] : [])));
+    return hidden.size ? new Map([...all].filter(([id]) => !hidden.has(id))) : all;
+  }, [all, page.objects]);
+  const attrsOf = useMemo(() => new Map(page.objects.flatMap((o) => (o.attrs ? [[o.id, o.attrs] as const] : []))), [page.objects]);
   const view = overlay?.view ?? page.view ?? VIEW;
   const k = size.w / view.w;
   const X = (x: number) => size.w / 2 + (x - view.x) * k;
@@ -173,6 +180,10 @@ export function GeometryApp({
   const tool = page.tool ?? null;
   const marked = new Set([...(tool?.picked ?? []), ...(page.sel ? [page.sel] : [])]);
   const stored = new Set(page.objects.flatMap((o) => (o.kind === "measure" && o.store ? [o.id] : [])));
+  /** An object's stroke as its Attributes set it (a picked one is always the pick colour, and bolder). */
+  const ink = (id: string, base: string = palette.casInk) => (marked.has(id) ? PICK : NAMED_COLOURS[attrsOf.get(id)?.colour ?? ""] ?? base);
+  const width = (id: string) => (marked.has(id) ? 2.5 : 1.3 * weightFactor(attrsOf.get(id)?.weight));
+  const dash = (id: string) => dashPattern(attrsOf.get(id)?.style).join(" ") || undefined;
 
   const lineEnds = (s: Extract<Shape, { t: "line" }>) => {
     // Far enough past the edge of what's shown, wherever the line starts.
@@ -250,7 +261,7 @@ export function GeometryApp({
           className={overlay && !tool ? "pointer-events-none absolute inset-0 select-none [&>*]:pointer-events-auto" : "absolute inset-0 touch-none select-none"}
           style={{ cursor: tool ? "crosshair" : drag.current && "pan" in drag.current ? "grabbing" : "default" }}
           role="img"
-          aria-label={`Geometry: ${page.objects.length} objects${tool ? `; ${TOOL_NAMES[tool.name]} tool` : ""}`}
+          aria-label={`Geometry: ${page.objects.length} objects${shapes.size < all.size ? ` (${all.size - shapes.size} hidden)` : ""}${tool ? `; ${TOOL_NAMES[tool.name]} tool` : ""}`}
           onPointerDown={(e) => {
             const raw = toWorld(e);
             const hit = hitAt(raw);
@@ -324,14 +335,15 @@ export function GeometryApp({
                 key={id}
                 points={s.pts.map((p) => `${X(p.x)},${Y(p.y)}`).join(" ")}
                 fill={marked.has(id) ? "rgba(31,111,209,0.18)" : "rgba(120,150,200,0.12)"}
-                stroke={marked.has(id) ? PICK : palette.casInk}
-                strokeWidth={marked.has(id) ? 2.5 : 1.3}
+                stroke={ink(id)}
+                strokeWidth={width(id)}
+                strokeDasharray={dash(id)}
                 strokeLinejoin="round"
               />
             ) : s.t === "circle" ? (
-              <circle key={id} cx={X(s.c.x)} cy={Y(s.c.y)} r={s.r * k} fill="none" stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={marked.has(id) ? 2.5 : 1.3} />
+              <circle key={id} cx={X(s.c.x)} cy={Y(s.c.y)} r={s.r * k} fill="none" stroke={ink(id)} strokeWidth={width(id)} strokeDasharray={dash(id)} />
             ) : s.t === "curve" ? (
-              <g key={id} fill="none" stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={marked.has(id) ? 2.5 : 1.3} strokeLinejoin="round">
+              <g key={id} fill="none" stroke={ink(id)} strokeWidth={width(id)} strokeDasharray={dash(id)} strokeLinejoin="round">
                 {s.pieces.map((piece, i) => (
                   <polyline key={i} points={piece.map((p) => `${X(p.x)},${Y(p.y)}`).join(" ")} />
                 ))}
@@ -341,13 +353,13 @@ export function GeometryApp({
           {[...shapes].map(([id, s]) =>
             s.t === "line" ? (
               <g key={id}>
-                <line {...lineEnds(s)} stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={marked.has(id) ? 2.5 : 1.3} strokeLinecap="round" />
+                <line {...lineEnds(s)} stroke={ink(id)} strokeWidth={width(id)} strokeDasharray={dash(id)} strokeLinecap="round" />
                 {s.arrow && (() => {
                   // A vector's arrowhead at its end.
                   const [x2, y2] = [X(s.q.x), Y(s.q.y)];
                   const a = Math.atan2(y2 - Y(s.p.y), x2 - X(s.p.x));
                   const h = fs * 0.7;
-                  return <path d={`M${x2} ${y2}L${x2 - h * Math.cos(a - 0.4)} ${y2 - h * Math.sin(a - 0.4)}L${x2 - h * Math.cos(a + 0.4)} ${y2 - h * Math.sin(a + 0.4)}Z`} fill={marked.has(id) ? PICK : palette.casInk} />;
+                  return <path d={`M${x2} ${y2}L${x2 - h * Math.cos(a - 0.4)} ${y2 - h * Math.sin(a - 0.4)}L${x2 - h * Math.cos(a + 0.4)} ${y2 - h * Math.sin(a + 0.4)}Z`} fill={ink(id)} />;
                 })()}
               </g>
             ) : null,
@@ -355,12 +367,12 @@ export function GeometryApp({
           {[...shapes].map(([id, s]) => {
             if (s.t !== "value") return null;
             const l = labelAt(s);
-            const ink = marked.has(id) ? PICK : "#1d4fa8";
+            const colour = ink(id, "#1d4fa8");
             return (
               <g key={id}>
-                {s.arc && <path d={arc(s)} fill="none" stroke={ink} strokeWidth={1.2} />}
+                {s.arc && <path d={arc(s)} fill="none" stroke={colour} strokeWidth={1.2} />}
                 {/* A stored measurement is bold, as on the handheld. */}
-                <text x={l.x} y={l.y - fs * 0.4} fontSize={fs} fontWeight={stored.has(id) ? 700 : undefined} textAnchor="middle" fill={ink} paintOrder="stroke" stroke={palette.casScreen} strokeWidth={3}>
+                <text x={l.x} y={l.y - fs * 0.4} fontSize={fs} fontWeight={stored.has(id) ? 700 : undefined} textAnchor="middle" fill={colour} paintOrder="stroke" stroke={palette.casScreen} strokeWidth={3}>
                   {s.text}
                 </text>
               </g>
@@ -371,13 +383,18 @@ export function GeometryApp({
             const free = page.objects.some((o) => o.id === id && o.kind === "point");
             return (
               <g key={id}>
-                <circle cx={X(s.p.x)} cy={Y(s.p.y)} r={marked.has(id) ? 5 : 3.5} fill={marked.has(id) ? PICK : free ? palette.casInk : "#fff"} stroke={marked.has(id) ? PICK : palette.casInk} strokeWidth={1.3} />
+                <circle cx={X(s.p.x)} cy={Y(s.p.y)} r={marked.has(id) ? 5 : 3.5 * weightFactor(attrsOf.get(id)?.weight)} fill={marked.has(id) || free ? ink(id) : "#fff"} stroke={ink(id)} strokeWidth={1.3} />
                 <text x={X(s.p.x) + fs * 0.35} y={Y(s.p.y) - fs * 0.35} fontSize={fs} fontStyle="italic" fontFamily='"STIX Two Text Variable", serif' fill={palette.casInk} paintOrder="stroke" stroke={palette.casScreen} strokeWidth={3}>
                   {id.replace(/'/g, "′")}
                 </text>
               </g>
             );
           })}
+          {(page.texts ?? []).map((t, i) => (
+            <text key={`text${i}`} x={X(t.x)} y={Y(t.y)} fontSize={fs} fill={palette.casInk} paintOrder="stroke" stroke={palette.casScreen} strokeWidth={3}>
+              {t.text}
+            </text>
+          ))}
         </svg>
       )}
       {badgeSpots(flags.map((f) => ({ x: f.at.x + 6, y: f.at.y - 26 })), fs * 1.6).map((at, i) => (
