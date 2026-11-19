@@ -12,13 +12,17 @@ export type EngineStatus = "loading" | "ready" | "busy" | "failed";
 
 const TIMEOUT_MS = 20000;
 
-type Pending = { resolve: (out: string) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> };
+type Pending = { resolve: (out: string) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout>; timedOut?: boolean };
 
 export class CasEngine {
   private worker: Worker | null = null;
   private nextId = 1;
   private pending = new Map<number, Pending>();
+  /** Resolves once the worker has loaded and the settings and definitions are replayed: what commands wait for. */
   private ready!: Promise<void>;
+  /** Bumped on each start, so a replay that a restart overtook stops posting to the new worker. */
+  private generation = 0;
+  private replaying = false;
   private definitions: string[] = [];
   private settings: Settings;
   private listeners = new Set<(s: EngineStatus) => void>();
@@ -44,9 +48,10 @@ export class CasEngine {
 
   private start() {
     this.setStatus("loading");
+    const gen = ++this.generation;
     const worker = new Worker(`${import.meta.env.BASE_URL}cas/worker.js`);
     this.worker = worker;
-    this.ready = new Promise((resolve, reject) => {
+    const loaded = new Promise<void>((resolve, reject) => {
       worker.onmessage = (e: MessageEvent) => {
         const d = e.data as { type?: string; id?: number; out?: string; error?: string };
         if (d.type === "ready") {
@@ -57,12 +62,14 @@ export class CasEngine {
         if (!p) return;
         clearTimeout(p.timer);
         this.pending.delete(d.id!);
-        if (!this.pending.size) this.setStatus("ready");
+        if (!this.pending.size && !this.replaying) this.setStatus("ready");
         if (d.error !== undefined) {
           p.resolve(`Error: ${d.error}`);
           // A Giac exception leaves the wasm runtime broken (every later call
           // aborts), so the engine is restarted with the user's definitions.
-          queueMicrotask(() => this.restart());
+          queueMicrotask(() => {
+            if (gen === this.generation) this.restart();
+          });
         } else p.resolve(d.out ?? "");
       };
       worker.onerror = (ev: ErrorEvent) => {
@@ -71,20 +78,55 @@ export class CasEngine {
         reject(new Error("engine failed to load"));
       };
     });
-    this.ready
-      .then(async () => {
-        for (const c of setupCommands(this.settings)) await this.raw(c);
-        for (const c of this.definitions) await this.raw(c);
+    // Commands wait for the replay too, so none runs before the variables it uses are back.
+    this.ready = loaded.then(() => this.replay(gen));
+    this.ready.catch(() => this.setStatus("failed"));
+  }
+
+  /**
+   * Put the settings and every definition back in a fresh worker. A definition
+   * that fails or times out here would fail on every restart, so it's dropped.
+   */
+  private async replay(gen: number) {
+    this.replaying = true;
+    try {
+      for (const c of setupCommands(this.settings)) {
+        if (gen !== this.generation) return;
+        await this.raw(c);
+      }
+      for (const c of this.definitions.slice()) {
+        if (gen !== this.generation) return;
+        const { out, timedOut } = await this.send(c);
+        if (gen !== this.generation && !timedOut) return;
+        if (timedOut || out.startsWith("Error:")) {
+          this.definitions = this.definitions.filter((d) => d !== c);
+          // A Giac error leaves the worker broken, so start again without c (a timeout has already restarted).
+          if (gen === this.generation) this.restart();
+          return;
+        }
+      }
+    } finally {
+      if (gen === this.generation) {
+        this.replaying = false;
         this.setStatus("ready");
-      })
-      .catch(() => this.setStatus("failed"));
+      }
+    }
   }
 
   private raw(cmd: string): Promise<string> {
+    return this.send(cmd).then((r) => r.out);
+  }
+
+  private send(cmd: string): Promise<{ out: string; timedOut: boolean }> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.restart(), TIMEOUT_MS);
-      this.pending.set(id, { resolve, reject, timer });
+      const timer = setTimeout(() => {
+        const p = this.pending.get(id);
+        if (p) p.timedOut = true;
+        this.restart();
+      }, TIMEOUT_MS);
+      const entry: Pending = { resolve: (out) => resolve({ out, timedOut: Boolean(entry.timedOut) }), reject, timer };
+      this.pending.set(id, entry);
       this.worker?.postMessage({ id, cmd });
     });
   }
@@ -92,6 +134,7 @@ export class CasEngine {
   /** Kill a stuck computation and bring the engine back with its variables. */
   restart() {
     this.worker?.terminate();
+    this.replaying = false;
     for (const p of this.pending.values()) {
       clearTimeout(p.timer);
       p.resolve("Error: Interrupted");
@@ -100,9 +143,18 @@ export class CasEngine {
     this.start();
   }
 
+  /** Wait for the engine, through any restarts that happen meanwhile. */
+  private async whenReady() {
+    let r: Promise<void>;
+    do {
+      r = this.ready;
+      await r;
+    } while (r !== this.ready);
+  }
+
   /** Evaluate one Giac command. */
   giac = async (cmd: string): Promise<string> => {
-    await this.ready;
+    await this.whenReady();
     this.setStatus("busy");
     return this.raw(cmd);
   };
@@ -119,19 +171,19 @@ export class CasEngine {
 
   async restore(defs: string[]) {
     this.definitions = defs.slice();
-    await this.ready;
+    await this.whenReady();
     for (const c of defs) await this.raw(c);
   }
 
   async applySettings(s: Settings) {
     this.settings = s;
-    await this.ready;
+    await this.whenReady();
     for (const c of setupCommands(s)) await this.raw(c);
   }
 
   async clearAll() {
     this.definitions = [];
-    await this.ready;
+    await this.whenReady();
     await this.raw("restart");
     for (const c of setupCommands(this.settings)) await this.raw(c);
   }
