@@ -281,6 +281,7 @@ export function CasApp() {
   }, []);
   /** What to do once a Save As (asked for by "save changes?") is done. */
   const afterSave = useRef<(() => void) | null>(null);
+  const scratchWarned = useRef(false);
   const [setup, setSetupState] = useState<Setup>(loadSetup);
   const [recent, setRecent] = useState<string[]>(() => pref<string[]>("recent", []));
   /** The Page Sorter's chosen page, while it's open. */
@@ -375,7 +376,13 @@ export function CasApp() {
   }, []);
   const writeNow = useCallback(async () => {
     const c = current.current;
-    if (c.isScratch) save(snapshot());
+    if (c.isScratch) {
+      // Told once a session: the Scratchpad keeps working, it just isn't kept.
+      if (!save(snapshot()) && !scratchWarned.current) {
+        scratchWarned.current = true;
+        toast.error("The Scratchpad couldn't be saved: browser storage is full");
+      }
+    }
     else setPref("current", { saved: snapshot(), path: c.openPath, dirty: c.dirty } satisfies Cached);
   }, [snapshot]);
   useEffect(() => {
@@ -1527,20 +1534,28 @@ export function CasApp() {
 
   /** Save: to the document's file, or Save As for one that hasn't been saved (or the Scratchpad). */
   const saveDocument = useCallback(
-    async (then?: () => void) => {
+    /** Resolves false when the save failed; true once saved, or once Save As has been asked for (it runs `then` itself). */
+    async (then?: () => void): Promise<boolean> => {
       const c = current.current;
       if (c.isScratch || !c.openPath) {
         afterSave.current = then ?? null;
         setWizard(openWizard({ kind: "wizard", title: "Save As", arrows: false, fields: [{ label: "File Name:", value: c.isScratch || c.doc.title === "Untitled" ? "" : c.doc.title }], build: "saveas:{0}" }));
-        return;
+        return true;
       }
-      await files.saveDoc(c.openPath, snapshot());
-      setDirty(false);
-      current.current.dirty = false;
-      await writeNow();
-      await refreshFiles();
+      try {
+        await files.saveDoc(c.openPath, snapshot());
+        setDirty(false);
+        current.current.dirty = false;
+        await writeNow();
+        await refreshFiles();
+      } catch (err) {
+        // Storage full or IndexedDB unavailable: the document stays unsaved (and dirty), and New/Open/Close don't go ahead.
+        toast.error(`Couldn't save: ${(err as Error).message || "the browser refused"}`);
+        return false;
+      }
       toast.success(`Saved ${files.nameOf(c.openPath)}`);
       then?.();
+      return true;
     },
     [snapshot, writeNow, refreshFiles],
   );
@@ -1560,7 +1575,7 @@ export function CasApp() {
           lines: [`Do you want to save changes to "${c.doc.title}"?`],
           ok: () => undefined,
           buttons: [
-            { label: "Yes", run: () => void saveDocument(() => resolve(true)) },
+            { label: "Yes", run: () => void saveDocument(() => resolve(true)).then((ok) => ok || resolve(false)) },
             { label: "No", run: () => resolve(true) },
             { label: "Cancel", run: () => resolve(false) },
           ],
@@ -2672,7 +2687,13 @@ export function CasApp() {
         void (async () => {
           const path = files.join(files.ROOT, await files.freeName(files.ROOT, `${name}.tns`));
           const s: Saved = { doc: { ...current.current.doc, title: stem(files.nameOf(path)) }, settings: current.current.settings, definitions: engine.current?.saved ?? [] };
-          await files.put({ path, type: "file", doc: s, size: files.sizeOf(s), modified: Date.now() });
+          try {
+            await files.put({ path, type: "file", doc: s, size: files.sizeOf(s), modified: Date.now() });
+          } catch (err) {
+            afterSave.current = null;
+            toast.error(`Couldn't save: ${(err as Error).message || "the browser refused"}`);
+            return;
+          }
           skipSave.current = true;
           setDoc(s.doc);
           setIsScratch(false);
@@ -3533,7 +3554,10 @@ export function CasApp() {
       await newDoc(first);
     },
     openFile,
-    save: async (name) => (name ? wizardDone(`saveas:${name}`) : saveDocument()),
+    save: async (name) => {
+      if (name) return wizardDone(`saveas:${name}`);
+      if (!(await saveDocument())) throw new Error("The browser couldn't save the document (its storage may be full); ask the student to free some space or download it instead.");
+    },
     discard: () => {
       setDirty(false);
       current.current.dirty = false;
