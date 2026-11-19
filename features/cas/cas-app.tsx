@@ -118,7 +118,7 @@ import { ownsOpenDoc, restoreOf } from "./ai/threads";
 import type { AgentDialog, AgentHost } from "./ai/tools";
 import { registerWebMcp } from "./ai/webmcp";
 import { clearPrefs, load, pref, save, setPref, type Saved } from "./state/persist";
-import { loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Setup } from "./state/setup";
+import { docDefaults, loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Setup } from "./state/setup";
 import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
   bumpIds,
@@ -216,7 +216,7 @@ function withScratchPages(doc: CasDocument): CasDocument {
   if (!pages.some((p) => p.kind === "graphs")) pages.push(newPage("graphs"));
   return { ...doc, title: "Scratchpad", pages };
 }
-const freshScratch = (): Saved => ({ doc: withScratchPages(newDocument()), settings: DEFAULT_SETTINGS, definitions: [] });
+const freshScratch = (): Saved => ({ doc: withScratchPages(newDocument()), settings: docDefaults(), definitions: [] });
 
 const stem = (name: string) => name.replace(/\.tns$/i, "");
 
@@ -329,7 +329,8 @@ export function CasApp() {
     // Pick up the document from this browser's last visit, if there is one.
     const loaded = load();
     const saved = loaded ? { ...loaded, doc: withScratchPages(loaded.doc) } : null;
-    const e = new CasEngine(saved?.settings ?? DEFAULT_SETTINGS);
+    const fresh = saved ? null : freshScratch();
+    const e = new CasEngine(saved?.settings ?? fresh!.settings);
     engine.current = e;
     if (saved) {
       // The engine is given the active problem's definitions below: no swap on opening.
@@ -348,7 +349,10 @@ export function CasApp() {
       });
       setDefined(definedNames(saved.definitions));
     }
-    else setDoc(freshScratch().doc);
+    else {
+      setDoc(fresh!.doc);
+      setSettings(fresh!.settings);
+    }
     restored.current = true;
     skipSave.current = true;
     void refreshFiles();
@@ -1462,7 +1466,7 @@ export function CasApp() {
       const name = files.nameOf(path);
       if (/\.py$/i.test(name)) {
         const doc: CasDocument = { title: stem(name), pages: [{ kind: "python", id: newId(), problem: 1, file: name, source: new TextDecoder().decode(bytes) }, newPage("pyshell")], active: 0 };
-        const saved: Saved = { doc, settings: DEFAULT_SETTINGS, definitions: [] };
+        const saved: Saved = { doc, settings: docDefaults(), definitions: [] };
         await files.cacheImport(path, saved);
         remember(path);
         await openSaved(saved, path);
@@ -1514,7 +1518,7 @@ export function CasApp() {
     async (first: "calculator" | "graphs" | "lists" | "python" | "datastats" | "notes" | "geometry") => {
       const doc = newDocument(first, "Untitled");
       if (first === "python") doc.pages.push(newPage("pyshell"));
-      await openSaved({ doc, settings: DEFAULT_SETTINGS, definitions: [] }, null);
+      await openSaved({ doc, settings: docDefaults(), definitions: [] }, null);
     },
     [openSaved],
   );
@@ -2476,8 +2480,10 @@ export function CasApp() {
               { label: "Vector Format:", value: "Rectangular", options: ["Rectangular"] },
               { label: "Base:", value: "Decimal", options: ["Decimal"] },
               { label: "Unit System:", value: "SI", options: ["SI"] },
+              // The handheld's Make Default is a button; the wizard has only OK and Cancel, so it's a box to tick.
+              { label: "Make Default", value: "No", check: true },
             ],
-            build: "settings:{0}:{1}:{3}:{4}",
+            build: "settings:{0}:{1}:{3}:{4}:{9}",
           }),
         );
       } else if (action.id === "prgmNew")
@@ -2759,7 +2765,7 @@ export function CasApp() {
         }
       }
       if (built.startsWith("settings:")) {
-        const [digits, angle, complex, mode] = built.slice(9).split(":");
+        const [digits, angle, complex, mode, makeDefault] = built.slice(9).split(":");
         const next: Settings = {
           digits: digits === "Float" ? 12 : Number(digits?.replace("Float", "")) || 6,
           angle: angle === "Degree" ? "deg" : "rad",
@@ -2768,6 +2774,8 @@ export function CasApp() {
         };
         setSettings(next);
         void engine.current?.applySettings(next);
+        // New documents start with these from now on (state/setup.ts docDefaults).
+        if (makeDefault === "Yes") setPref("docDefaults", next);
         return;
       }
       if (built.startsWith("slider:")) {
