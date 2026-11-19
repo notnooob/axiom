@@ -10,6 +10,9 @@ import "./index.css";
 import { CasApp } from "@/features/cas";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { registerOffline } from "./offline";
+import { listenForInstall } from "./install";
+
+listenForInstall();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

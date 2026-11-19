@@ -3349,6 +3349,41 @@ export function CasApp() {
   const uploadRef = useRef(upload);
   uploadRef.current = upload;
 
+  // The installed app opening files from the computer (the manifest's
+  // file_handlers: double-click a .tns, or Open with). One document goes into
+  // My Documents and opens; several, or a zip, are added as an upload is.
+  const launch = useCallback(
+    async (list: File[]) => {
+      const f = list[0];
+      if (list.length !== 1 || !f || !/\.(tns|py)$/i.test(f.name)) return upload(list);
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      let path = files.join(files.ROOT, f.name);
+      const there = await files.getFile(path);
+      const same = there?.bytes?.length === bytes.length && there.bytes.every((b, i) => b === bytes[i]);
+      // The same file again opens the copy here, with the changes made since.
+      // A different file by that name gets a new name rather than replace it.
+      if (!same) {
+        if (there) path = files.join(files.ROOT, await files.freeName(files.ROOT, f.name));
+        await addFiles(files.ROOT, [new File([bytes], files.nameOf(path))]);
+        await refreshFiles();
+      }
+      await openFile(path);
+    },
+    [upload, refreshFiles, openFile],
+  );
+  const launchRef = useRef(launch);
+  launchRef.current = launch;
+  useEffect(() => {
+    // Chromium only, and only in the installed app; elsewhere there's no launchQueue.
+    const queue = (window as { launchQueue?: { setConsumer(fn: (p: { files: readonly FileSystemHandle[] }) => void): void } }).launchQueue;
+    queue?.setConsumer(({ files: handles }) => {
+      if (!handles.length) return;
+      void Promise.all(handles.filter((h): h is FileSystemFileHandle => h.kind === "file").map((h) => h.getFile()))
+        .then((list) => launchRef.current(list))
+        .catch((err: Error) => toast.error(`Couldn't open that file: ${err.message}`));
+    });
+  }, []);
+
   // The window-wide key listener below reads the newest state through a ref.
   const latest = useRef({ doc, page, runAction, handleKey, addPage, setCalc });
   latest.current = { doc, page, runAction, handleKey, addPage, setCalc };

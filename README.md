@@ -16,7 +16,7 @@ Axiom is built on [VCE Hub's open-source CAS](https://github.com/vcehub/cas), th
 
 - **Nothing to install or buy.** It's a static website that runs in any modern browser.
 - **The layout your class uses.** Pages, menus and keys sit where they do on the handheld, and commands are typed the way you'd type them there. Of 188 commands typed as a student would, all 188 give the handheld's answer ([benchmark](docs/cas-benchmark.md)).
-- **Works offline.** After the first visit, the whole calculator (the CAS and Python included) is kept in your browser, so it runs with no connection. It can be installed as an app.
+- **Works offline.** After the first visit, the whole calculator (the CAS and Python included) is kept in your browser, so it runs with no connection. It can be installed as an app, and in Chrome or Edge the installed app opens `.tns` files from your computer.
 - **Your files.** `.tns` documents open here (Calculator history, Lists, Notes, Python, variables) and save back out. They're kept in your browser, not on a server.
 - **No sign-in, no trackers, no analytics.** VCE Hub's hosted calculator asks you to sign in; Axiom runs its open-source base without an account.
 
