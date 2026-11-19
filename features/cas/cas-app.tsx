@@ -80,8 +80,8 @@ import {
   type CatalogState,
 } from "./catalog/catalog";
 import { PALETTE, paletteKeyPress, pickCell, TemplatePalette } from "./menus/palette";
-import { FinanceSolver, financeKeyPress, newFinance, type FinanceState } from "./finance/finance-solver";
-import { openWizard, WizardDialog, wizardKeyPress, type WizardState } from "./menus/wizard";
+import { FinanceSolver, financeKeyPress, financePick, newFinance, PMT_AT, type FinanceState } from "./finance/finance-solver";
+import { openWizard, WizardDialog, wizardKeyPress, wizardPick, type WizardState } from "./menus/wizard";
 import { download, screenPng } from "./screen/capture";
 import { ADD_PAGE, BROWSE_MENU, DOC_MENU, SETTINGS_MENU } from "./menus/doc-menus";
 import { app as menuApp } from "./menus/types";
@@ -2532,7 +2532,7 @@ export function CasApp() {
           }
         });
       } else if (action.id === "refreshLibs") void refreshLibraries();
-      else if (action.id === "financeSolver") setFinance({ ...lastFinance.current, focus: 0, fresh: true });
+      else if (action.id === "financeSolver") setFinance({ ...lastFinance.current, focus: 0, fresh: true, list: null });
       else if (action.id === "clearHistory") setCalc((p) => ({ ...p, history: [], sel: null }));
       else if (action.id === "clearAZ") {
         const e = engine.current;
@@ -3294,7 +3294,7 @@ export function CasApp() {
   }, [menu, say]);
   useEffect(() => {
     if (wizard) say(wizardSaid(wizard));
-  }, [wizard?.focus, wizard?.wizard, say]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [wizard?.focus, wizard?.wizard, wizard?.list?.sel, Boolean(wizard?.list), say]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (error) {
       say(error);
@@ -3308,7 +3308,8 @@ export function CasApp() {
     if (catalog) say(catalogSaid(catalog));
   }, [catalog, say]);
   useEffect(() => {
-    if (finance) say(`Finance Solver. ${FINANCE_NAMES[finance.focus]} ${finance.values[finance.focus]}`);
+    if (finance?.list) say(`PmtAt list, ${PMT_AT[finance.list.sel]}, ${finance.list.sel + 1} of ${PMT_AT.length}`);
+    else if (finance) say(`Finance Solver. ${FINANCE_NAMES[finance.focus]} ${finance.values[finance.focus]}`);
   }, [finance, say]);
   useEffect(() => {
     const c = palette !== null ? PALETTE[palette] : undefined;
@@ -3602,7 +3603,8 @@ export function CasApp() {
         }
         out[i] = v;
       }
-      setWizard({ ...wizard, values: out, fresh: false });
+      // An open list would take the OK's Enter as a pick: filling the dialog closes it.
+      setWizard({ ...wizard, values: out, fresh: false, list: null });
       return null;
     },
     wizardDone,
@@ -3856,18 +3858,25 @@ export function CasApp() {
                   {wizard && (
                     <WizardDialog
                       state={wizard}
-                      onFocus={(i) => setWizard((w) => (w ? { ...w, focus: i, fresh: true } : w))}
+                      onFocus={(i) => setWizard((w) => (w ? { ...w, focus: i, fresh: true, list: null } : w))}
                       onOk={() => handleKey({ k: "enter" })}
                       onCancel={() => setWizard(null)}
                       onArrow={(i) =>
-                        setWizard((w) => (w ? (wizardKeyPress({ ...w, focus: i }, { k: "right" }).state ?? w) : w))
+                        setWizard((w) => (w ? (wizardKeyPress({ ...w, focus: i, list: null }, { k: "right" }).state ?? w) : w))
                       }
+                      onPick={(i) => setWizard((w) => (w ? wizardPick(w, i) : w))}
+                      onHighlight={(i) => setWizard((w) => (w?.list ? { ...w, list: { ...w.list, sel: i } } : w))}
+                      onCloseList={() => setWizard((w) => (w ? { ...w, list: null } : w))}
                     />
                   )}
                   {finance && (
                     <FinanceSolver
                       state={finance}
-                      onFocus={(i) => setFinance((f) => (f ? { ...f, focus: i, fresh: true } : f))}
+                      onFocus={(i) => setFinance((f) => (f ? { ...f, focus: i, fresh: true, list: null } : f))}
+                      onOpenList={() => setFinance((f) => (f ? (financeKeyPress({ ...f, focus: 7, list: null }, { k: "right" }).state ?? f) : f))}
+                      onPick={(i) => setFinance((f) => (f ? financePick(f, i) : f))}
+                      onHighlight={(i) => setFinance((f) => (f?.list ? { ...f, list: { ...f.list, sel: i } } : f))}
+                      onCloseList={() => setFinance((f) => (f ? { ...f, list: null } : f))}
                     />
                   )}
                   <AnimatePresence>

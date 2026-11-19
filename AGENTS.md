@@ -107,6 +107,7 @@ The `@/` import alias is the repo root (`vite.config.ts`, `tsconfig.json`).
 | `types.ts` | Menu tree helpers: `ins` (insert text), `tpl` (a template), `app(label, id)`, `wiz(...)`, `sub`, `off` (greyed), `rule`. |
 | `menu.tsx` | Renders and animates menus. `menuKeyPress` handles their keys. |
 | `wizard.tsx` | Form dialogs. A wizard's `build` string has `{0}`, `{1}` … filled from its fields. The result either goes into the entry line or, for app-level wizards, is handled in `cas-app.tsx` → `wizardDone`. |
+| `dropdown.tsx` | A dialog's dropdown list (wizards and the Finance Solver): ► or a click opens it, ▲▼ and Enter pick, and a long list scrolls or opens upward to stay on screen. |
 | `calculator-menu.ts`, `graphs-menu.ts`, `doc-menus.ts` | Each app's menu, plus Ctrl+I/Ctrl+K and Settings. `doc-menus.ts` is the add-page list. |
 | `palette.tsx`, `panels.ts` | The templates palette and the keypad's character panels. |
 

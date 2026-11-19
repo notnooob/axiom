@@ -30,6 +30,9 @@ export function menuSaid(menu: Menu, state: MenuState): string {
 }
 
 export function wizardSaid(w: WizardState): string {
+  // A dropdown's open list: the highlighted option and where it is in the list.
+  const lf = w.list ? w.wizard.fields[w.list.field] : undefined;
+  if (w.list && lf?.options) return `${lf.label.replace(/:$/, "")} list, ${lf.options[w.list.sel]}, ${w.list.sel + 1} of ${lf.options.length}`;
   const f = w.wizard.fields[w.focus];
   return f ? `${w.wizard.title}. ${f.label} ${w.values[w.focus] ?? ""}` : w.wizard.title;
 }

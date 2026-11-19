@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/shared/lib/utils";
 import { formatFloat } from "../engine/format";
 import type { Key } from "../keys";
+import { DropArrow, DropdownList, listKeyPress, openList, type ListState } from "../menus/dropdown";
 import { solveTvm, type TvmField } from "./tvm";
 
 /**
@@ -30,7 +31,18 @@ const FIELDS: Field[] = [
  * as the handheld does, so solving back for another field comes out exact.
  * Editing a field drops its full value.
  */
-export type FinanceState = { values: string[]; full?: (number | undefined)[]; focus: number; fresh: boolean };
+export type FinanceState = { values: string[]; full?: (number | undefined)[]; focus: number; fresh: boolean; list?: ListState | null };
+
+/** PmtAt's dropdown. */
+const AT = 7;
+export const PMT_AT = ["END", "BEGIN"];
+
+/** Choose PmtAt's option i from its open list. */
+export function financePick(s: FinanceState, i: number): FinanceState {
+  const v = PMT_AT[i];
+  if (!s.list || v === undefined) return { ...s, list: null };
+  return { ...s, list: null, focus: AT, fresh: true, values: s.values.map((x, k) => (k === AT ? v : x)) };
+}
 
 export const newFinance = (): FinanceState => ({
   values: ["0.", "0.", "0.", "0.", "0.", "1", "1", "END"],
@@ -44,6 +56,12 @@ const show = (v: number) => formatFloat(v, 12);
 export type FinanceResult = { state: FinanceState | null; error?: string };
 
 export function financeKeyPress(s: FinanceState, key: Key): FinanceResult {
+  if (s.list) {
+    const r = listKeyPress(s.list, PMT_AT, key);
+    if (r.pick !== undefined) return { state: financePick(s, r.pick) };
+    if (!r.pass) return { state: { ...s, list: r.list } };
+    s = { ...s, list: null };
+  }
   const field = FIELDS[s.focus]!;
   const n = FIELDS.length;
   const set = (v: string): FinanceResult => {
@@ -65,9 +83,9 @@ export function financeKeyPress(s: FinanceState, key: Key): FinanceResult {
       return { state: { ...s, focus: (s.focus + 1) % n, fresh: true } };
     case "up":
       return { state: { ...s, focus: (s.focus - 1 + n) % n, fresh: true } };
-    case "left":
     case "right":
-      if (field.key === "at") return set(s.values[7] === "END" ? "BEGIN" : "END");
+      // ► opens PmtAt's list, as on the handheld.
+      if (field.key === "at") return { state: { ...s, list: openList(AT, PMT_AT, s.values[AT] ?? "") } };
       return { state: s };
     case "backspace":
       return field.key === "at" ? { state: s } : set(current.slice(0, -1));
@@ -106,8 +124,24 @@ export function financeKeyPress(s: FinanceState, key: Key): FinanceResult {
   }
 }
 
-export function FinanceSolver({ state, onFocus }: { state: FinanceState; onFocus: (i: number) => void }) {
+export function FinanceSolver({
+  state,
+  onFocus,
+  onOpenList,
+  onPick,
+  onHighlight,
+  onCloseList,
+}: {
+  state: FinanceState;
+  onFocus: (i: number) => void;
+  /** PmtAt clicked: its list opens. */
+  onOpenList: () => void;
+  onPick: (i: number) => void;
+  onHighlight: (i: number) => void;
+  onCloseList: () => void;
+}) {
   const list = useRef<HTMLDivElement>(null);
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     const box = list.current;
     const el = box?.querySelector<HTMLElement>(`[data-field="${state.focus}"]`);
@@ -121,6 +155,7 @@ export function FinanceSolver({ state, onFocus }: { state: FinanceState; onFocus
   const solvable = state.focus < 5;
   return (
     <div
+      ref={setRoot}
       role="dialog"
       aria-label="Finance Solver"
       className="absolute inset-0 flex animate-fade flex-col bg-casScreen font-casui text-[3.9cqw]"
@@ -130,11 +165,13 @@ export function FinanceSolver({ state, onFocus }: { state: FinanceState; onFocus
       </div>
       <div
         ref={list}
+        data-scroll
         className="relative grid min-h-0 flex-1 grid-cols-[auto_1fr] items-center gap-x-[2cqw] gap-y-[1.8cqw] overflow-y-auto py-[1.4cqw] pl-[2cqw] pr-[3cqw] scrollbar-thin"
       >
         {FIELDS.map((f, i) => {
           const focused = i === state.focus;
           const spinner = f.key === "ppy" || f.key === "cpy";
+          const at = f.key === "at";
           return (
             <div key={f.key} className="contents">
               <label className="whitespace-nowrap text-right text-casLabel">{f.label}</label>
@@ -142,29 +179,30 @@ export function FinanceSolver({ state, onFocus }: { state: FinanceState; onFocus
                 type="button"
                 tabIndex={-1}
                 data-field={i}
+                {...(at ? { "aria-haspopup": "listbox" as const, "aria-expanded": Boolean(state.list) } : {})}
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => onFocus(i)}
+                onClick={() => (at ? onOpenList() : onFocus(i))}
                 className={cn(
                   "flex h-[6.6cqw] items-center justify-between text-left",
                   focused ? "border-[0.4cqw] border-casSelect" : "border-[0.25cqw] border-casInk",
                 )}
               >
                 <span className={cn("flex min-w-0 flex-1 items-center px-[1.2cqw]", spinner && "justify-center")}>
-                  <span className={cn(focused && state.fresh && "bg-casSelectSoft", f.key === "at" && "text-casLabel")}>
+                  <span className={cn(focused && state.fresh && !(at && state.list) && "bg-casSelectSoft", at && "text-casLabel")}>
                     {state.values[i]}
                   </span>
-                  {focused && f.key !== "at" && (
+                  {focused && !at && (
                     <span className="ml-px h-[4cqw] w-px bg-casInk motion-safe:animate-casblink" />
                   )}
                 </span>
                 <span className="flex h-full w-[5cqw] shrink-0 items-center justify-center border-l-[0.25cqw] border-casInk">
-                  <svg aria-hidden viewBox="0 0 6 10" className="h-[2cqw]">
-                    {spinner ? (
+                  {spinner ? (
+                    <svg aria-hidden viewBox="0 0 6 10" className="h-[2cqw]">
                       <path d="M3 0.5 L5.5 4 L0.5 4 Z M3 9.5 L5.5 6 L0.5 6 Z" fill="currentColor" />
-                    ) : (
-                      <path d="M0.5 0.5 L5.5 5 L0.5 9.5 Z" fill="currentColor" />
-                    )}
-                  </svg>
+                    </svg>
+                  ) : (
+                    <DropArrow open={at && Boolean(state.list)} />
+                  )}
                 </span>
               </button>
             </div>
@@ -175,6 +213,18 @@ export function FinanceSolver({ state, onFocus }: { state: FinanceState; onFocus
         {solvable && <span>Enter works this one out from the others</span>}
         <span>{field.help}</span>
       </div>
+      {state.list && (
+        <DropdownList
+          root={root}
+          anchor={root?.querySelector<HTMLElement>(`[data-field="${AT}"]`) ?? null}
+          options={PMT_AT}
+          sel={state.list.sel}
+          label="PmtAt"
+          onPick={onPick}
+          onHighlight={onHighlight}
+          onClose={onCloseList}
+        />
+      )}
     </div>
   );
 }

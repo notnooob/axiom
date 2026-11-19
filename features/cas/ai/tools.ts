@@ -1133,8 +1133,10 @@ export const TOOLS: AgentTool[] = [
       const d = h.snapshot().dialog;
       if (!d) throw new Error("No dialog is open.");
       const button = String(a.button ?? "OK");
-      if (d.kind === "dialog" && Array.isArray(a.fields)) {
-        const err = h.fillDialog(Object.fromEntries((a.fields as { label: string; value: string }[]).map((f) => [f.label, String(f.value)])));
+      // Always through fillDialog: it also shuts an open dropdown list, which would take OK's Enter as a pick.
+      if (d.kind === "dialog") {
+        const fields = Array.isArray(a.fields) ? (a.fields as { label: string; value: string }[]) : [];
+        const err = h.fillDialog(Object.fromEntries(fields.map((f) => [f.label, String(f.value)])));
         if (err) throw new Error(err);
         await tick();
       }
