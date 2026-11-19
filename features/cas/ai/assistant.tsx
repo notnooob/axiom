@@ -79,6 +79,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/components/ui/input-group";
 import { Message, MessageContent, MessageFooter } from "@/components/ui/message";
@@ -111,6 +112,10 @@ import {
   modelName,
   modelOf,
   modelsFor,
+  ABOUT_MAX,
+  preferencesOf,
+  STEP_LIMITS,
+  stepsOf,
   PROVIDERS,
   titleFor,
   usable,
@@ -119,6 +124,8 @@ import {
   type CalcMessage,
   type Effort,
   type ProviderId,
+  type ReplyLength,
+  type StepLimit,
 } from "./agent";
 import { isScreenOutput } from "./history";
 import { MODE_IDS, MODES, modeOf, type Mode } from "./modes";
@@ -167,6 +174,8 @@ export type Assistant = {
   switchTo: (id: string) => Promise<void>;
   rename: (id: string, title: string) => void;
   remove: (id: string) => Promise<void>;
+  /** Settings ▸ Delete all chats. False while a reply is running. */
+  removeAll: () => Promise<boolean>;
   /** Undo what the open thread's latest reply did to the calculator. False if there was nothing to undo. */
   undoLast: () => Promise<boolean>;
   /** Whether the student undid a reply since the last message (said once, in the next message's context). */
@@ -350,6 +359,20 @@ function threadStore(config: () => AiConfig, host: () => AgentHost, binding: () 
       }
       publish();
     },
+    removeAll: async () => {
+      if (chatBusy(cur.chat)) return false;
+      const saved = await listThreads().catch(() => [] as Thread[]);
+      const ids = new Set([...records.keys(), ...saved.map((t) => t.id), cur.thread.id]);
+      records.clear();
+      pending.clear();
+      undone.clear();
+      await Promise.all([...ids].map((id) => deleteThread(id).catch(() => undefined)));
+      // As remove: the open document stays on the calculator, its changes still to save there.
+      binding().release(cur.thread.id, false);
+      select(newThread());
+      publish();
+      return true;
+    },
     undoLast: async () => {
       const id = cur.thread.id;
       const cp = fresh(id)?.checkpoint;
@@ -411,6 +434,7 @@ export function useAssistant(host: () => AgentHost, binding: () => DocBinding): 
     switchTo: store.switchTo,
     rename: store.rename,
     remove: store.remove,
+    removeAll: store.removeAll,
     undoLast: store.undoLast,
     takeNote: store.takeNote,
   };
@@ -1055,7 +1079,7 @@ function AssistantTurn({
         {paused && (
           <div className="ui-fade flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
             <PauseIcon className="size-3.5 shrink-0" aria-hidden />
-            Paused after {MAX_STEPS} steps.
+            Paused after {typeof message.metadata?.limit === "number" ? message.metadata.limit : MAX_STEPS} steps.
             {onContinue && (
               <Button size="xs" variant="outline" onClick={onContinue}>
                 Continue
@@ -1276,12 +1300,63 @@ function ImagesField({ value, onChange }: { value: boolean | undefined; onChange
   );
 }
 
-export function AssistantSettings({ open, onOpenChange, config, setConfig }: { open: boolean; onOpenChange: (o: boolean) => void; config: AiConfig; setConfig: (c: AiConfig) => void }) {
+/** A labelled choice, as ImagesField shows its own: the Behaviour settings' lengths, limits and on/off switches. */
+function ChoiceField<T extends string>({ label, hint, value, choices, onChange }: { label: string; hint?: string; value: T; choices: Record<T, string>; onChange: (v: T) => void }) {
+  return (
+    <div className="grid gap-1.5">
+      <span className="text-sm font-medium">{label}</span>
+      <Select items={choices} value={value} onValueChange={(v) => v && onChange(v as T)}>
+        <SelectTrigger className="w-full" aria-label={label}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {(Object.keys(choices) as T[]).map((id) => (
+              <SelectItem key={id} value={id}>
+                {choices[id]}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+const LENGTHS: Record<ReplyLength, string> = { brief: "Brief", normal: "Normal", detailed: "Detailed" };
+const STEP_CHOICES = Object.fromEntries(STEP_LIMITS.map((n) => [String(n), `${n} steps`])) as Record<`${StepLimit}`, string>;
+const ON_OFF = { on: "On", off: "Off" };
+/** Unset is on: these settings only ever turn something off. */
+const onOff = (v: boolean | undefined) => (v === false ? "off" : "on");
+
+/** Whether two configs use the same service, key and model: Behaviour can be saved without a working service. */
+const sameService = (a: AiConfig, b: AiConfig) =>
+  a.provider === b.provider && a.baseUrl === b.baseUrl && a.keys[a.provider] === b.keys[b.provider] && (a.models[a.provider] ?? "") === (b.models[b.provider] ?? "");
+
+export function AssistantSettings({
+  open,
+  onOpenChange,
+  config,
+  setConfig,
+  onDeleteAll,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  config: AiConfig;
+  setConfig: (c: AiConfig) => void;
+  /** Delete every chat; false if a reply is running. */
+  onDeleteAll?: () => Promise<boolean>;
+}) {
   const [draft, setDraft] = React.useState(config);
   const [fetching, setFetching] = React.useState(false);
   const [fetched, setFetched] = React.useState<string | null>(null);
+  const [deleting, setDeleting] = React.useState<"ask" | "busy" | null>(null);
   React.useEffect(() => {
-    if (open) setDraft(config);
+    if (open) {
+      setDraft(config);
+      setDeleting(null);
+    }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   React.useEffect(() => setFetched(null), [draft.provider]);
   const p = draft.provider;
@@ -1298,18 +1373,19 @@ export function AssistantSettings({ open, onOpenChange, config, setConfig }: { o
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>AI service</DialogTitle>
+          <DialogTitle>Assistant settings</DialogTitle>
           <DialogDescription>Bring your own key. It stays in this browser and goes only to this service, with the calculator&apos;s state for each message.</DialogDescription>
         </DialogHeader>
         <form
           id="ai-service"
-          className="grid gap-4"
+          className="-mx-1 grid max-h-[65vh] gap-4 overflow-y-auto px-1 pb-1"
           onSubmit={(e) => {
             e.preventDefault();
             setConfig(draft);
             onOpenChange(false);
           }}
         >
+          <h3 className="text-xs font-medium tracking-wide text-muted-foreground uppercase">Service</h3>
           <div className="grid gap-1.5">
             <span className="text-sm font-medium">Service</span>
             <Select items={SERVICE_NAMES} value={p} onValueChange={(v) => v && setDraft({ ...draft, provider: v as ProviderId })}>
@@ -1391,18 +1467,107 @@ export function AssistantSettings({ open, onOpenChange, config, setConfig }: { o
               }}
             />
           )}
+
+          <h3 className="mt-2 border-t pt-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">Behaviour</h3>
+          <div className="grid gap-1.5">
+            <label htmlFor="ai-language" className="text-sm font-medium">
+              Reply language
+            </label>
+            <Input id="ai-language" placeholder="Same as my messages" value={draft.language ?? ""} onChange={(e) => setDraft({ ...draft, language: e.target.value })} />
+          </div>
+          <ChoiceField label="Reply length" value={draft.length ?? "normal"} choices={LENGTHS} onChange={(v) => setDraft({ ...draft, length: v })} />
+          <div className="grid gap-1.5">
+            <div className="flex items-center justify-between">
+              <label htmlFor="ai-about" className="text-sm font-medium">
+                About me
+              </label>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {(draft.about ?? "").length}/{ABOUT_MAX}
+              </span>
+            </div>
+            <Textarea
+              id="ai-about"
+              rows={3}
+              maxLength={ABOUT_MAX}
+              placeholder="e.g. Year 12 Methods; show working like an exam answer"
+              value={draft.about ?? ""}
+              onChange={(e) => setDraft({ ...draft, about: e.target.value.slice(0, ABOUT_MAX) })}
+            />
+            <p className="text-xs text-muted-foreground">Sent with every message. It shapes replies but doesn&apos;t change what a mode allows.</p>
+          </div>
+          <ChoiceField
+            label="Let the assistant change the calculator"
+            hint="Off: it only reads your pages and tells you what to enter."
+            value={onOff(draft.canEdit)}
+            choices={ON_OFF}
+            onChange={(v) => setDraft({ ...draft, canEdit: v === "on" })}
+          />
+          <ChoiceField
+            label="Send pictures of the screen"
+            hint="Off: the model gets the screen described in words only."
+            value={onOff(draft.pictures)}
+            choices={ON_OFF}
+            onChange={(v) => setDraft({ ...draft, pictures: v === "on" })}
+          />
+          <ChoiceField
+            label="Steps per reply"
+            hint="How far it goes before pausing to ask whether to continue."
+            value={String(stepsOf(draft)) as `${StepLimit}`}
+            choices={STEP_CHOICES}
+            onChange={(v) => setDraft({ ...draft, steps: Number(v) as StepLimit })}
+          />
+          <ChoiceField
+            label="Share tools with browser agents (WebMCP)"
+            value={onOff(draft.webmcp)}
+            choices={ON_OFF}
+            onChange={(v) => setDraft({ ...draft, webmcp: v === "on" })}
+          />
+          {onDeleteAll && (
+            <div className="grid gap-1.5">
+              <span className="text-sm font-medium">Chats</span>
+              {deleting === "ask" ? (
+                <div className="flex flex-wrap items-center gap-2 text-sm" role="alert">
+                  <span className="text-destructive">Delete every chat? This can&apos;t be undone.</span>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    onClick={async () => {
+                      const done = await onDeleteAll();
+                      setDeleting(done ? null : "busy");
+                      if (done) toast.success("Deleted every chat");
+                    }}
+                  >
+                    Delete
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setDeleting(null)}>
+                    Keep them
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" className="w-fit text-destructive" onClick={() => setDeleting("ask")}>
+                    Delete all chats
+                  </Button>
+                  {deleting === "busy" && <span className="text-xs text-muted-foreground">Wait for the reply to finish first.</span>}
+                </div>
+              )}
+            </div>
+          )}
         </form>
         <p className="text-xs text-muted-foreground">
           WebMCP:{" "}
-          {modelContext()
-            ? `this browser has it, so its agents can use the calculator's ${TOOLS.length} tools too.`
-            : "not in this browser, so only this chat uses the calculator's tools."}
+          {!modelContext()
+            ? "not in this browser, so only this chat uses the calculator's tools."
+            : draft.webmcp === false
+              ? "this browser has it, but sharing is off, so only this chat uses the calculator's tools."
+              : `this browser has it, so its agents can use the calculator's ${TOOLS.length} tools too.`}
         </p>
         <DialogFooter>
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button type="submit" form="ai-service" disabled={!usable(draft, p) || !modelOf(draft)}>
+          <Button type="submit" form="ai-service" disabled={(!usable(draft, p) || !modelOf(draft)) && !sameService(draft, config)}>
             Save
           </Button>
         </DialogFooter>
@@ -1493,11 +1658,13 @@ export function AssistantChat({
     const note = assistant.takeNote()
       ? "The student undid your last reply's changes: the calculator is back as it was before that reply (files it saved stay in My Documents)."
       : undefined;
+    const prefs = preferencesOf(config);
     const state = {
       ...stateOf(s),
       ...(immersive ? { studentView: "AI mode: they see this chat and a live view of the screen while you work, not the calculator itself" } : {}),
       ...(mode !== "solve" ? { mode } : {}),
       ...(note ? { note } : {}),
+      ...(prefs ? { preferences: prefs } : {}),
     };
     const context = contextBlock(state, s.view === "doc" ? pageContent(s.doc, s.doc.active) : null);
     clearError();

@@ -25,7 +25,7 @@ import {
   type UIMessageChunk,
 } from "ai";
 import { screenModelOutput, trimHistory } from "./history";
-import { allowedTools, modeOf, type Mode } from "./modes";
+import { allowedTools, modeOf, restrictToReadOnly, type Mode } from "./modes";
 import { SYSTEM_PROMPT } from "./prompt";
 import { runTool, TOOLS, type AgentHost, type ToolImage } from "./tools";
 import { injectScreens, visionFetch, visionKey } from "./vision";
@@ -63,7 +63,26 @@ export type AiConfig = {
   vision?: Record<string, boolean>;
   /** Older settings: tutor mode, now Guide (modeOf). */
   tutor?: boolean;
+  // Behaviour (the settings dialog's second half). Unset means the default, so older settings still load.
+  /** Reply in this language; unset follows the student's own messages. */
+  language?: string;
+  length?: ReplyLength;
+  /** Standing notes from the student about themselves and how they like answers. */
+  about?: string;
+  /** false: only tools that look (and highlight, ask_user), in every mode. */
+  canEdit?: boolean;
+  /** false: look_at_screen sends its words only, never the picture. */
+  pictures?: boolean;
+  steps?: StepLimit;
+  /** false: the tools aren't offered to browser agents through WebMCP. */
+  webmcp?: boolean;
 };
+
+export type ReplyLength = "brief" | "normal" | "detailed";
+export const STEP_LIMITS = [20, 40, 80] as const;
+export type StepLimit = (typeof STEP_LIMITS)[number];
+/** Longest About me kept and sent. */
+export const ABOUT_MAX = 500;
 
 export const DEFAULT_CONFIG: AiConfig = { provider: "anthropic", keys: {}, models: {}, baseUrl: "", effort: "low", mode: "solve" };
 
@@ -183,10 +202,21 @@ export function errorText(e: unknown): string {
     : m;
 }
 
-/** context: the calculator's state sent with a student's message; mode: the mode it was sent in; limit: the reply stopped at MAX_STEPS. */
-export type CalcMessage = UIMessage<{ context?: string; mode?: Mode; limit?: boolean }>;
+/** context: the calculator's state sent with a student's message; mode: the mode it was sent in; limit: the reply stopped at the step limit (the number; true in older chats, MAX_STEPS). */
+export type CalcMessage = UIMessage<{ context?: string; mode?: Mode; limit?: boolean | number }>;
 
 export const MAX_STEPS = 40;
+/** What the Behaviour settings ask of each reply, sent in the message's context (never the prompt, which stays cached); nothing when all are default. */
+export function preferencesOf(c: AiConfig): { replyLanguage?: string; replyLength?: ReplyLength; aboutStudent?: string } | undefined {
+  const replyLanguage = c.language?.trim();
+  const aboutStudent = c.about?.trim().slice(0, ABOUT_MAX);
+  const replyLength = c.length && c.length !== "normal" ? c.length : undefined;
+  const out = { ...(replyLanguage ? { replyLanguage } : {}), ...(replyLength ? { replyLength } : {}), ...(aboutStudent ? { aboutStudent } : {}) };
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Steps per reply, as the settings say. */
+export const stepsOf = (c: AiConfig): number => (STEP_LIMITS.includes(c.steps as StepLimit) ? c.steps! : MAX_STEPS);
 const MAX_RESULT = 20000;
 
 /** Tools that only look; the rest change the calculator, which makes the open document the chat's own. */
@@ -261,7 +291,9 @@ export class CalcTransport implements ChatTransport<CalcMessage> {
           description: t.description,
           inputSchema: jsonSchema<Record<string, unknown>>(t.inputSchema as JSONSchema7),
           execute: async (input, options): Promise<unknown> => {
-            const r = await runTool(t.name, input ?? {}, host());
+            const ran = await runTool(t.name, input ?? {}, host());
+            // Send pictures of the screen off: the words only, wherever the picture would have gone.
+            const r = config.pictures === false ? { ...ran, image: undefined } : ran;
             if (!LOOKS.has(t.name)) claim?.();
             if (!r.ok) throw new Error(r.text.replace(/^Error: /, ""));
             const text = r.text.length > MAX_RESULT ? `${r.text.slice(0, MAX_RESULT)}… (cut)` : r.text;
@@ -275,7 +307,11 @@ export class CalcTransport implements ChatTransport<CalcMessage> {
       ["ask_user", askUser],
     ]);
     // Only the mode's tools (modes.ts): Guide and Check never change the calculator, Exam keeps to what a student would use.
-    const allowed = allowedTools(modeOf(config), [...TOOLS, { name: "ask_user", readOnly: true }]);
+    const every = [...TOOLS, { name: "ask_user", readOnly: true }];
+    // "Let the assistant change the calculator" off: looking only, whatever the mode.
+    const byMode = allowedTools(modeOf(config), every);
+    const allowed = config.canEdit === false ? restrictToReadOnly(byMode, every) : byMode;
+    const limit = stepsOf(config);
     // Earlier turns slimmed (history.ts), then each student message led by the calculator's state sent with it.
     const withContext = trimHistory(messages).map((m) =>
       m.role === "user" && m.metadata?.context ? { ...m, parts: [{ type: "text" as const, text: m.metadata.context }, ...m.parts] } : m,
@@ -293,10 +329,10 @@ export class CalcTransport implements ChatTransport<CalcMessage> {
       messages: modelMessages,
       tools,
       activeTools: allowed,
-      stopWhen: stepCountIs(MAX_STEPS),
+      stopWhen: stepCountIs(limit),
       prepareStep: ({ stepNumber, messages: now }) => ({
         // The last step allowed has no tools, so the turn ends in words (what's done, what's left), not mid-task in silence.
-        ...(stepNumber === MAX_STEPS - 1 ? { toolChoice: "none" as const } : {}),
+        ...(stepNumber === limit - 1 ? { toolChoice: "none" as const } : {}),
         // A picture from look_at_screen, as a message after its result (injectScreens adds each once).
         ...(pending.size ? { messages: injectScreens(now, pending) } : {}),
       }),
@@ -311,7 +347,7 @@ export class CalcTransport implements ChatTransport<CalcMessage> {
       sendReasoning: true,
       onError: errorText,
       // Stopped by the limit: the chat offers Continue.
-      messageMetadata: ({ part }) => (part.type === "finish" && steps >= MAX_STEPS ? { limit: true } : undefined),
+      messageMetadata: ({ part }) => (part.type === "finish" && steps >= limit ? { limit } : undefined),
     });
   }
 

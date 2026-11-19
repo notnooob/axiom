@@ -89,6 +89,7 @@ The `@/` import alias is the repo root (`vite.config.ts`, `tsconfig.json`).
 | `keys.ts` | The `Key` union. The keyboard (`keyFromEvent`) and the on-screen keypad produce the same keys, so apps never see raw DOM events. |
 | `state/document.ts` | The document model: problems → pages (1.1, 1.2 …), the `Page` union (one variant per app), and `newPage(kind)`. |
 | `state/persist.ts` | The Scratchpad in `localStorage`. |
+| `state/setup.ts` | Handheld Setup (text size, haptics, keypad layout, start-up, animations) and Make Default's settings for new documents, kept with `pref`. |
 | `files/store.ts` | My Documents in IndexedDB. |
 | `files/home.tsx`, `files/browse.tsx` | The Home screen and the file browser. |
 | `screen/screen.tsx` | The 4:3 screen frame and its top bar. All sizes are in `cqw` units, so the screen scales as one piece. |

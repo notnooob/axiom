@@ -3641,7 +3641,6 @@ export function CasApp() {
   // A tool holds its host across awaits: each call goes through to the newest render's, never a stale one.
   const agentProxy = useMemo(() => new Proxy({} as AgentHost, { get: (_, k) => agentHost.current[k as keyof AgentHost] }), []);
   const agent = useCallback(() => agentProxy, [agentProxy]);
-  useEffect(() => registerWebMcp(agent), [agent]);
   // Which thread owns the open document. One calculator, many chats: a thread's document is set aside when it's left and put back when it's opened.
   const docBinding = useRef<DocBinding>(null!);
   const restoring = useRef<string | null>(null);
@@ -3712,6 +3711,9 @@ export function CasApp() {
   };
   const binding = useCallback(() => docBinding.current, []);
   const assistant = useAssistant(agent, binding);
+  // The assistant's settings can stop offering the tools to browser agents; turning it back on offers them again.
+  const shareTools = assistant.config.webmcp !== false;
+  useEffect(() => (shareTools ? registerWebMcp(agent) : undefined), [agent, shareTools]);
   // Back in AI mode with nothing open (a reload, say): the open chat's document comes back.
   useEffect(() => {
     if (ai === "immersive" && view !== "doc" && assistant.thread.doc) void docBinding.current.restore(assistant.thread);
@@ -4198,7 +4200,7 @@ export function CasApp() {
         />
       )}
     </AnimatePresence>
-    <AssistantSettings open={aiSettings} onOpenChange={setAiSettings} config={assistant.config} setConfig={assistant.setConfig} />
+    <AssistantSettings open={aiSettings} onOpenChange={setAiSettings} config={assistant.config} setConfig={assistant.setConfig} onDeleteAll={assistant.removeAll} />
     </MotionConfig>
   );
 }

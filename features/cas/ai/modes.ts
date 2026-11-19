@@ -76,6 +76,16 @@ export function allowedTools(mode: Mode, all: { name: string; readOnly?: boolean
   }
 }
 
+/**
+ * The settings' "Let the assistant change the calculator" off: of a mode's
+ * tools, only those that look, plus highlight (rings that are never saved)
+ * and ask_user.
+ */
+export function restrictToReadOnly(names: string[], all: { name: string; readOnly?: boolean }[]): string[] {
+  const looks = new Set(all.filter((t) => t.readOnly || t.name === "highlight" || t.name === "ask_user").map((t) => t.name));
+  return names.filter((n) => looks.has(n));
+}
+
 /** The mode a saved setting means; an older setting's tutor: true is Guide. */
 export function modeOf(c: { mode?: string; tutor?: boolean }): Mode {
   if (c.mode && c.mode in MODES) return c.mode as Mode;
