@@ -103,7 +103,10 @@ export function DataStatsApp({
   const w: GraphWindow | null = page.window ?? fitted;
   const tellWindow = useRef(onWindow);
   tellWindow.current = onWindow;
-  useEffect(() => tellWindow.current(w), [w]);
+  useEffect(() => {
+    // A block, not an arrow's value: React would take what onWindow returns for a clean-up.
+    tellWindow.current(w);
+  }, [w]);
 
   // Plot Function and Plot Value: worked out by the engine over the window.
   const fnKey = JSON.stringify([page.functions, page.values, w && [w.xmin, w.xmax], xs.length]);
