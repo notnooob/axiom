@@ -3260,9 +3260,9 @@ export function CasApp() {
   useEffect(() => {
     if (error) {
       say(error);
-      haptic("error");
+      hap("error");
     }
-  }, [error, say, haptic]);
+  }, [error, say, hap]);
   useEffect(() => {
     if (warning) say(`Warning. ${warning.filter(Boolean).join(" ")}`);
   }, [warning, say]);
@@ -4090,19 +4090,19 @@ export function CasApp() {
           <div className="@container lg:w-[min(24rem,calc(var(--cas-h)/2.1))] lg:shrink-0">
             <Keypad
               onKey={(k) => {
-                haptic(k.k === "enter" ? "medium" : "light");
+                hap(k.k === "enter" ? "medium" : "light");
                 handleKey(k);
               }}
               onKeys={(ks) => {
-                haptic("light");
+                hap("light");
                 handleKeys(ks);
               }}
               onPanel={(p) => {
-                haptic("light");
+                hap("light");
                 setMenu({ items: p.items, state: openMenu(p.cols) });
               }}
               onOpen={(o) => {
-                haptic("light");
+                hap("light");
                 if (o.open === "templates") setPalette(0);
                 else setCatalog(openCatalog(o.tab));
               }}
@@ -4116,6 +4116,7 @@ export function CasApp() {
           screen={() => screenHost.firstElementChild as HTMLElement | null}
           label={pageLabel(doc, doc.active)}
           onClear={clearAll}
+          haptics={setup.haptics}
         />
         <Legal />
       </div>

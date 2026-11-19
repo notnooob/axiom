@@ -63,9 +63,11 @@ export function Legal() {
  * all sits apart at the far edge, quiet until it asks for the second click
  * (the document is saved and undo doesn't reach it).
  */
-export function ScreenBar({ screen, label, onClear }: { screen: () => HTMLElement | null; label: string; onClear: () => void }) {
+export function ScreenBar({ screen, label, onClear, haptics = true }: { screen: () => HTMLElement | null; label: string; onClear: () => void; haptics?: boolean }) {
   const [confirming, setConfirming] = useState(false);
-  const { trigger: haptic } = useWebHaptics();
+  const { trigger } = useWebHaptics();
+  // Handheld Setup's Haptics: off means none at all, here too.
+  const haptic = (t: Parameters<typeof trigger>[0]) => haptics && trigger(t);
   useEffect(() => {
     if (!confirming) return;
     const t = setTimeout(() => setConfirming(false), 4000);
