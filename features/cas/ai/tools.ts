@@ -745,7 +745,7 @@ export const TOOLS: AgentTool[] = [
         x: { type: "string" },
         y: { type: "string" },
         plot: { type: "string", enum: ["dot", "box", "histogram", "normprob", "scatter", "xyline"] },
-        regression: { type: "string", enum: ["none", "LinRegMx", "LinRegBx", "QuadReg", "PowerReg", "ExpReg", "LnReg"] },
+        regression: { type: "string", enum: ["none", "LinRegMx", "LinRegBx", "QuadReg", "PowerReg", "ExpReg", "LnReg", "SinReg", "Logistic"] },
         diagnostics: { type: "boolean" },
       },
     },
