@@ -112,6 +112,8 @@ function callToRow(f: string, args: Ast[]): Row {
   if (f === "abs" && args.length === 1 && a0) return [group("|", r(a0))];
   if (f === "exp" && args.length === 1 && a0) return [{ t: "exp", exp: r(a0) }];
   if (f === "log" && args.length === 2 && a0 && a1) return [{ t: "logbase", base: r(a1), arg: r(a0) }];
+  // log typed with one argument is base 10: once the entry is locked in, the handheld shows it as log₁₀( ), the template.
+  if (f === "log" && args.length === 1 && a0) return [{ t: "logbase", base: chars("10"), arg: r(a0) }];
   if (f === "d" && a0 && a1) return [{ t: "deriv", body: r(a0), v: r(a1), ...(a2 ? { n: r(a2) } : {}) }];
   if (f === "∫" && a0 && a1 && (args.length === 2 || args.length === 4))
     return [{ t: "integral", body: r(a0), v: r(a1), ...(a2 && a3 ? { lo: r(a2), hi: r(a3) } : {}) }];
