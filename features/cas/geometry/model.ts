@@ -466,6 +466,8 @@ export function addSpec(objs: GeoObj[], spec: GeoSpec): { objs: GeoObj[]; id: st
     return { error: `there's no line ${ref}` };
   };
   const add = (o: GeoObj) => ({ objs: [...objs, o], id: o.id });
+  // An object given without its type (the assistant's slip) says so, rather than failing on the missing name.
+  if (typeof spec.type !== "string") throw new Error(`Each object needs a type (point, segment, circle …)${spec.name ? `: ${spec.name} has none` : ""}`);
   const type = spec.type.toLowerCase().replace(/[\s-]+/g, "_");
   const pts = spec.points ?? spec.of;
   switch (type) {
