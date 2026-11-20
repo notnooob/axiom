@@ -1438,16 +1438,19 @@ function deYFree(p: GraphsPage): number {
 }
 
 /** A slider's right-click menu, in the handheld's menu style and order. */
-function SliderMenu({
+export function SliderMenu({
   slider,
   at,
   fs,
+  without = [],
   onPick,
   onClose,
 }: {
   slider: import("../state/document").Slider | undefined;
   at: { x: number; y: number };
   fs: number;
+  /** Items a page leaves out (Data & Statistics has no Move or Animate). */
+  without?: ("move" | "settings" | "animate" | "minimize" | "delete")[];
   onPick: (action: "move" | "settings" | "animate" | "minimize" | "delete") => void;
   onClose: () => void;
 }) {
@@ -1458,7 +1461,7 @@ function SliderMenu({
     [slider.minimized ? "Maximize" : "Minimize", "minimize"],
     [slider.animating ? "Stop Animate" : "Animate", "animate"],
     ["Delete", "delete"],
-  ];
+  ].filter(([, a]) => !without.includes(a as (typeof without)[number])) as typeof items;
   return (
     <div className="absolute inset-0" onPointerDown={(e) => (e.stopPropagation(), onClose())}>
       <div

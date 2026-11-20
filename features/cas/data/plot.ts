@@ -270,3 +270,78 @@ export function equationFn(eqn: string): (x: number) => number {
 export function residuals(pts: [number, number][], f: (x: number) => number): [number, number][] {
   return pts.map(([x, y]) => [x, y - f(x)] as [number, number]).filter(([, r]) => Number.isFinite(r));
 }
+
+/** A list's values: numbers, or categories (text). */
+export type Values = { nums: number[]; cats?: string[] };
+
+/**
+ * Force Numeric (text such as "12" read as the number 12; other text is
+ * left out) and Force Categorical (each number a category of its own).
+ */
+export function forceValues(v: Values, force?: "num" | "cat"): Values {
+  if (force === "num" && v.cats) return { nums: v.cats.map((c) => (c.trim() ? Number(c.replace(/−/g, "-")) : NaN)) };
+  if (force === "cat" && !v.cats) return { nums: [], cats: v.nums.map((n) => (Number.isFinite(n) ? String(n) : "")) };
+  return v;
+}
+
+/**
+ * Which list the plot is of, as the handheld lays it out: x alone plots
+ * along the x-axis, y alone up the y-axis. With both, numbers on one axis
+ * and categories on the other plot the numbers in a column (or row) for
+ * each category; two lists of numbers make a scatter plot. two: there's a
+ * second list. Two categorical lists can't be plotted against each other.
+ */
+export function layoutOf(x: Values | null, y: Values | null): { main: "x" | "y"; two: boolean } | "bothCat" | null {
+  if (!x && !y) return null;
+  if (x && !y) return { main: "x", two: false };
+  if (!x && y) return { main: "y", two: false };
+  if (x!.cats && y!.cats) return "bothCat";
+  return { main: !x!.cats && y!.cats ? "y" : "x", two: true };
+}
+
+/** Variable Bin Width: a bar between each pair of boundaries (the last takes its right edge too), scaled as Histogram Scale asks. */
+export function edgeBars(values: number[], edges: number[], scale: HistScale = "count") {
+  const e = [...new Set(edges.filter(Number.isFinite))].sort((a, b) => a - b);
+  const n = values.length || 1;
+  return e.slice(0, -1).map((from, i) => {
+    const to = e[i + 1]!;
+    const last = i === e.length - 2;
+    const count = values.filter((v) => v >= from && (v < to || (last && v === to))).length;
+    const h = scale === "percent" ? (count * 100) / n : scale === "density" ? count / (n * (to - from)) : count;
+    return { from, to, n: count, h };
+  });
+}
+
+/** Split Categories by Variable: the values in each category of the split list, in the order the categories first appear. */
+export function splitGroups(values: number[], groups: string[]): { name: string; values: number[] }[] {
+  const out = new Map<string, number[]>();
+  values.forEach((v, i) => {
+    const g = groups[i];
+    if (!g || !Number.isFinite(v)) return;
+    out.set(g, [...(out.get(g) ?? []), v]);
+  });
+  return [...out].map(([name, vs]) => ({ name, values: vs }));
+}
+
+/** A window across: x and y swapped, for a plot drawn up the y-axis. */
+export const swapWindow = (w: GraphWindow): GraphWindow => ({ xmin: w.ymin, xmax: w.ymax, ymin: w.xmin, ymax: w.xmax, xscl: w.yscl, yscl: w.xscl });
+
+/** Plots drawn as points, which Select All Points and clicking work on. */
+export const POINT_PLOTS: DataPlot[] = ["dot", "normprob", "scatter", "xyline", "dotchart"];
+
+/** What the page's lists turned out to be, which the menu needs and only the fetched data can tell. */
+export type DataInfo = {
+  /** Whether each list holds text, before Force Numeric or Force Categorical. */
+  xText: boolean;
+  yText: boolean;
+  /** The list the plot is of (null: none), whether it's categorical after forcing, and whether there's a second list. */
+  main: "x" | "y" | null;
+  categorical: boolean;
+  two: boolean;
+};
+export const NO_INFO: DataInfo = { xText: false, yText: false, main: null, categorical: false, two: false };
+
+/** The page as its main list sees it: the other list as y, and the summary list on the other axis. */
+export function logicalPage(p: DataStatsPage, info: Pick<DataInfo, "main" | "two">): Pick<DataStatsPage, "plot" | "y" | "ySummary"> {
+  return { plot: p.plot, y: info.two ? (info.main === "y" ? p.x : p.y) : undefined, ySummary: info.main === "y" ? p.xSummary : p.ySummary };
+}

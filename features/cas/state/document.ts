@@ -269,6 +269,25 @@ export type DataStatsPage = {
   labels?: boolean;
   /** Unset is list order. */
   sort?: CategoryOrder;
+  /** Add X Summary List: the frequencies for a y list plotted up the y-axis. */
+  xSummary?: string;
+  /** Variable Bin Width: the bins' boundaries, as typed (a list, or a list's name). */
+  binEdges?: string;
+  /** Force Numeric or Force Categorical for each list. */
+  forceX?: "num" | "cat";
+  forceY?: "num" | "cat";
+  /** Split Categories by Variable: a categorical list that splits a numeric plot into one band per category. */
+  split?: string;
+  /** Insert Text: notes on the plot, placed as fractions of its width and height. */
+  texts?: { text: string; x: number; y: number }[];
+  /** The text selected (clicked), for Del to remove. */
+  textSel?: number;
+  /** Insert Slider: variables a plotted function or value can use. */
+  sliders?: Slider[];
+  /** Selected points (Select All Points, or a click): their places in the list. */
+  selected?: "all" | number[];
+  /** Graph Trace: what's traced (0 the data, then each curve) and how far along. */
+  trace?: { target: number; i: number };
   digits?: string;
   diagnostics?: boolean;
   xml?: string;

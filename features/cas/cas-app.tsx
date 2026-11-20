@@ -99,11 +99,12 @@ import { NotesApp, UnsupportedApp, type NotesApi } from "./notes/notes-app";
 import { NOTES_MENU } from "./notes/notes-menu";
 import { DataStatsApp } from "./data/data-app";
 import { dataMenu } from "./data/data-menu";
+import { dataKey, dataTakesEsc } from "./data/keys";
 import { GeometryApp, geometryKey, VIEW as GEO_VIEW, zoomed as zoomedGeo } from "./geometry/geometry-app";
 import { COLOUR_OPTIONS } from "./graphs/colours";
 import { geometryMenu } from "./geometry/geometry-menu";
 import { ASKS, nextId as nextGeoId, nextLabel as nextGeoLabel, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
-import { ONE_VAR } from "./data/plot";
+import { NO_INFO, ONE_VAR, type DataInfo } from "./data/plot";
 import type { GraphWindow } from "./graphs/model";
 import { PythonCanvas, PythonEditor, PythonShell, type DrawOp } from "./python/python-app";
 import { python, type PyStatus } from "./python/runner";
@@ -577,8 +578,8 @@ export function CasApp() {
   }, []);
   /** The window a Data & Statistics page is drawn in (its own, or the one fitting the data): what zoom works from. */
   const dataWindow = useRef<GraphWindow | null>(null);
-  /** Whether the Data & Statistics page's x list is text (categories), for its menu. */
-  const dataCats = useRef(false);
+  /** What the Data & Statistics page's lists turned out to be (text or numbers, which one is plotted), for its menu. */
+  const dataInfo = useRef<DataInfo>(NO_INFO);
   /** The Notes editor's commands, for the keypad, its menu and the assistant. */
   const notesApi = useRef<NotesApi | null>(null);
   /** A Notes maths box worked out with the problem's variables; what it defines is defined for the problem. */
@@ -843,6 +844,41 @@ export function CasApp() {
         }),
       })),
     [setGraphs],
+  );
+
+  const setDataSlider = useCallback(
+    (name: string, change: (sl: Slider) => Slider | null) =>
+      setData((p) => ({
+        ...p,
+        sliders: (p.sliders ?? []).flatMap((sl) => {
+          if (sl.name !== name) return [sl];
+          const next = change(sl);
+          return next ? [next] : [];
+        }),
+      })),
+    [setData],
+  );
+
+  /** A slider's value typed in place: a number, or worked out (π/4, 1/3); the range widens to take it. */
+  const typedSlider = useCallback(
+    async (name: string, text: string, set: (name: string, change: (sl: Slider) => Slider | null) => void) => {
+      let value = Number(text.replace(/−/g, "-"));
+      if (!Number.isFinite(value) && engine.current) {
+        try {
+          value = Number((await engine.current.giac(`evalf(${translate(parse(text), settings).giac})`)).trim());
+        } catch {
+          value = NaN;
+        }
+      }
+      if (!Number.isFinite(value)) {
+        setError("Error: Enter a number");
+        return;
+      }
+      set(name, (sl) => ({ ...sl, value, min: Math.min(sl.min, value), max: Math.max(sl.max, value) }));
+      assign(name, value, true);
+      say(`${name} = ${value}`);
+    },
+    [settings, assign, say],
   );
 
   const createSliders = useCallback(
@@ -1331,6 +1367,9 @@ export function CasApp() {
       } else if (page?.kind === "geometry") {
         const next = geometryKey(page, key);
         if (next) setGeo(() => next);
+      } else if (page?.kind === "datastats") {
+        const next = dataKey(page, key);
+        if (next) setData(() => next);
       } else if (page?.kind === "notes") {
         notesApi.current?.key(key);
       } else if (page?.kind === "python") {
@@ -2463,6 +2502,23 @@ export function CasApp() {
         else if (id === "dsResidSquares") setData((p) => ({ ...p, residualSquares: !p.residualSquares }));
         else if (id === "dsResidPlot") setData((p) => ({ ...p, residualPlot: !p.residualPlot }));
         else if (id === "dsLabels") setData((p) => ({ ...p, labels: !p.labels }));
+        else if (id === "dsTrace") {
+          setData((p) => ({ ...p, trace: p.trace ? undefined : { target: 0, i: 0 }, selected: undefined }));
+          if (!page.trace) say("Graph Trace: ◄ ► move along, ▲ ▼ change what's traced, Esc ends");
+        } else if (id === "dsSelectAll") setData((p) => ({ ...p, selected: "all", textSel: undefined }));
+        else if (id === "dsText")
+          setWizard(openWizard({ kind: "wizard", title: "Insert Text", arrows: false, fields: [{ label: "Text:", value: "" }], build: "ds:text:{0}" }));
+        else if (id === "dsSlider") {
+          const taken = new Set([...defined, ...(page.sliders ?? []).map((sl) => sl.name)]);
+          let n = 1;
+          while (taken.has(`v${n}`)) n++;
+          setWizard(sliderSettings(null, `v${n}`));
+        } else if (id === "dsForceX" || id === "dsForceY") {
+          // The item forces the list the other way from how it reads (text numeric, numbers categorical), or undoes it.
+          const axis = id === "dsForceX" ? "forceX" : "forceY";
+          const text = id === "dsForceX" ? dataInfo.current.xText : dataInfo.current.yText;
+          setData((p) => ({ ...p, [axis]: p[axis] ? undefined : text ? "num" : "cat", window: undefined, sort: undefined }));
+        } else if (id === "dsRemoveSplit") setData((p) => ({ ...p, split: undefined, window: undefined }));
         else if (id.startsWith("dsSort:")) {
           // List order is the default, so it's stored as unset.
           const order = id.slice(7) as NonNullable<DataStatsPage["sort"]>;
@@ -2495,7 +2551,9 @@ export function CasApp() {
           const names = listNames();
           setMenu({
             items: names.length
-              ? names.map((n) => menuApp(n, axis === "sum" ? `dsSum:${n}` : `dsVar:${axis}:${n}`))
+              ? names.map((n) =>
+                  menuApp(n, axis === "sum" ? `dsSum:${n}` : axis === "xsum" ? `dsXSum:${n}` : axis === "split" ? `dsSplit:${n}` : `dsVar:${axis}:${n}`),
+                )
               : [{ label: "No lists in this problem" }],
             state: openMenu(),
           });
@@ -2504,18 +2562,24 @@ export function CasApp() {
           // (categories make a bar chart, which the page picks for them).
           const name = id.slice(6);
           setData((p) => ({ ...p, ySummary: name, y: undefined, regression: undefined, movable: undefined, plot: p.plot === "box" || p.plot === "pie" || p.plot === "bar" ? p.plot : "histogram", window: undefined }));
-        } else if (id.startsWith("dsVar:")) {
+        } else if (id.startsWith("dsXSum:")) {
+          // The same, for a list up the y-axis.
+          const name = id.slice(7);
+          setData((p) => ({ ...p, xSummary: name, x: undefined, regression: undefined, movable: undefined, plot: p.plot === "box" || p.plot === "pie" || p.plot === "bar" ? p.plot : "histogram", window: undefined }));
+        } else if (id.startsWith("dsSplit:")) setData((p) => ({ ...p, split: id.slice(8), window: undefined }));
+        else if (id.startsWith("dsVar:")) {
           const [, axis, name] = id.split(":");
           setData((p) => {
-            const next = { ...p, [axis === "x" ? "x" : "y"]: name, ...(axis === "y" ? { ySummary: undefined } : {}), window: undefined };
+            const next = { ...p, [axis === "x" ? "x" : "y"]: name, ...(axis === "y" ? { ySummary: undefined } : { xSummary: undefined }), window: undefined };
             // Two lists make a scatter plot, one a dot plot, as on the handheld.
             if (next.x && next.y && ONE_VAR.includes(next.plot)) next.plot = "scatter";
             if (!next.y && !ONE_VAR.includes(next.plot)) next.plot = "dot";
             return next;
           });
-        } else if (id === "dsRemoveX") setData((p) => ({ ...p, x: undefined, window: undefined }));
+        } else if (id === "dsRemoveX")
+          setData((p) => ({ ...p, x: undefined, xSummary: undefined, forceX: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
         else if (id === "dsRemoveY")
-          setData((p) => ({ ...p, y: undefined, ySummary: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
+          setData((p) => ({ ...p, y: undefined, ySummary: undefined, forceY: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
         else if (id === "dsClearAll") setData((p) => ({ kind: "datastats", id: p.id, problem: p.problem, plot: "dot" }));
         else if (id === "dsRemoveAnalysis")
           setData((p) => ({
@@ -2903,9 +2967,22 @@ export function CasApp() {
         const [, what, ...args] = built.split(":");
         if (what === "bins") {
           const [width, start] = args.map((a) => (a?.trim() ? Number(a) : NaN));
-          if (!args[0]?.trim()) setData((p) => ({ ...p, bins: undefined, window: undefined }));
+          if (!args[0]?.trim()) setData((p) => ({ ...p, bins: undefined, binEdges: undefined, window: undefined }));
           else if (!(width! > 0)) setError("Error: The bin width must be more than 0");
-          else setData((p) => ({ ...p, bins: { width: width!, start: Number.isFinite(start) ? start! : 0 }, window: undefined }));
+          else setData((p) => ({ ...p, bins: { width: width!, start: Number.isFinite(start) ? start! : 0 }, binEdges: undefined, window: undefined }));
+        } else if (what === "vbins") {
+          // Variable Bin Width: the boundaries as a list ({0,10,25,50}) or a list's name; Equal Bin Width undoes it.
+          const edges = args.join(":").trim();
+          if (!edges) setError("Error: Enter the bin boundaries");
+          else setData((p) => ({ ...p, binEdges: edges, bins: undefined, window: undefined }));
+        } else if (what === "text") {
+          const text = args.join(":").trim();
+          if (text)
+            setData((p) => {
+              const texts = p.texts ?? [];
+              // New texts go down the left, under the last one (clear of a selection's readout).
+              return { ...p, texts: [...texts, { text, x: 0.04, y: Math.min(0.85, 0.14 + texts.length * 0.08) }] };
+            });
         } else if (what === "fn" && args.join(":").trim()) setData((p) => ({ ...p, functions: [...(p.functions ?? []), args.join(":").trim()] }));
         else if (what === "value" && args.join(":").trim()) setData((p) => ({ ...p, values: [...(p.values ?? []), args.join(":").trim()] }));
         else if (what === "window") {
@@ -2990,6 +3067,17 @@ export function CasApp() {
         };
         sl.value = snap(sl, Number.isFinite(Number(value)) ? Number(value) : lo);
         assign(sl.name, sl.value, true);
+        if (page?.kind === "datastats") {
+          // Data & Statistics keeps its sliders in a column down the left; Settings keeps one's place in it.
+          setData((p) => {
+            const list = (p.sliders ?? []).slice();
+            const at = list.findIndex((x) => x.name === old);
+            const rest = list.filter((x) => x.name !== old && x.name !== sl.name);
+            rest.splice(at < 0 ? rest.length : at, 0, sl);
+            return { ...p, sliders: rest };
+          });
+          return;
+        }
         setGraphs((g) => {
           const rest = (g.sliders ?? []).filter((x) => x.name !== old && x.name !== sl.name);
           const at = (g.sliders ?? []).findIndex((x) => x.name === old);
@@ -3213,7 +3301,7 @@ export function CasApp() {
           return;
         }
         if (page?.kind === "datastats") {
-          setMenu({ items: dataMenu(page, dataCats.current), state: openMenu() });
+          setMenu({ items: dataMenu(page, dataInfo.current), state: openMenu() });
           return;
         }
         if (page?.kind === "geometry") {
@@ -3441,7 +3529,7 @@ export function CasApp() {
       case "notes":
         return <NotesApp page={p} apiRef={otherNotes} onChange={none} evaluate={notesEvaluate} />;
       case "datastats":
-        return <DataStatsApp page={p} giac={engine.current?.giac ?? null} ready={ready} toGiac={(text) => translate(parse(text), settings).giac} onAxis={none} onMovable={none} onWindow={none} />;
+        return <DataStatsApp page={p} giac={engine.current?.giac ?? null} ready={ready} toGiac={(text) => translate(parse(text), settings).giac} onAxis={none} onPage={none} onWindow={none} />;
       case "geometry":
         return <GeometryApp page={p} onChange={none} onError={none} onAsk={none} />;
       case "python":
@@ -4170,9 +4258,23 @@ export function CasApp() {
                   ready={status === "ready" || status === "busy"}
                   toGiac={(text) => translate(parse(text), settings).giac}
                   onAxis={(axis) => runAction({ kind: "app", id: `dsAxis:${axis}` })}
-                  onMovable={(m, b) => setData((p) => (p.movable ? { ...p, movable: { ...p.movable, m, b } } : p))}
+                  onPage={setData}
                   onWindow={(w) => (dataWindow.current = w)}
-                  onCategorical={(c) => (dataCats.current = c)}
+                  onInfo={(info) => (dataInfo.current = info)}
+                  onSay={say}
+                  onSlider={(name, value, final) => {
+                    setDataSlider(name, (sl) => ({ ...sl, value }));
+                    assign(name, value, final);
+                    if (final) say(`${name} = ${value}`);
+                  }}
+                  onSliderTyped={(name, text) => void typedSlider(name, text, setDataSlider)}
+                  onSliderAction={(name, action) => {
+                    const sl = page.sliders?.find((x) => x.name === name);
+                    if (!sl) return;
+                    if (action === "settings") setWizard(sliderSettings(sl));
+                    else if (action === "minimize") setDataSlider(name, (x) => ({ ...x, minimized: !x.minimized }));
+                    else if (action === "delete") setDataSlider(name, () => null);
+                  }}
                 />
               )}
               {view === "doc" && page?.kind === "geometry" && <GeometryApp page={page} highlights={pageHighlights} onChange={setGeo} onError={setError} onAsk={askGeoAmount} />}
@@ -4264,24 +4366,7 @@ export function CasApp() {
                     assign(name, value, final);
                     if (final) say(`${name} = ${value}`);
                   }}
-                  onSliderTyped={async (name, text) => {
-                    // A number as typed, or worked out (π/4, 1/3); the range widens to take it.
-                    let value = Number(text.replace(/−/g, "-"));
-                    if (!Number.isFinite(value) && engine.current) {
-                      try {
-                        value = Number((await engine.current.giac(`evalf(${translate(parse(text), settings).giac})`)).trim());
-                      } catch {
-                        value = NaN;
-                      }
-                    }
-                    if (!Number.isFinite(value)) {
-                      setError("Error: Enter a number");
-                      return;
-                    }
-                    setSlider(name, (sl) => ({ ...sl, value, min: Math.min(sl.min, value), max: Math.max(sl.max, value) }));
-                    assign(name, value, true);
-                    say(`${name} = ${value}`);
-                  }}
+                  onSliderTyped={(name, text) => void typedSlider(name, text, setSlider)}
                   onSliderPlace={(name, at) => setSlider(name, (sl) => ({ ...sl, at }))}
                   onSliderAction={(name, action) => {
                     const sl = page.sliders?.find((x) => x.name === name);
@@ -4417,6 +4502,8 @@ function pageTakesEsc(page: Page | undefined, py: { status: PyStatus; canvas: Dr
       return page.tool !== null || page.editing !== null || Boolean(page.geo?.tool || page.geo?.sel || page.zoomBox || page.mathDraw || page.pathPlot || page.selected);
     case "geometry":
       return Boolean(page.tool || page.sel);
+    case "datastats":
+      return dataTakesEsc(page);
     case "lists":
       return page.edit !== null;
     case "pyshell":

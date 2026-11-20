@@ -6,18 +6,24 @@ import {
   categoryCounts,
   categoryWindow,
   dotStacks,
+  edgeBars,
   effectivePlot,
   equationFn,
   expandSummary,
   fitWindow,
+  forceValues,
   fiveNumber,
   histogram,
   histogramBars,
   invNorm,
+  layoutOf,
+  logicalPage,
   normalCurve,
   parseValues,
   pieSlices,
   residuals,
+  splitGroups,
+  swapWindow,
   ticks,
   yAxisTitle,
 } from "./plot";
@@ -134,5 +140,41 @@ describe("histogram scale", () => {
     expect([w.xmin, w.xmax, w.ymin]).toEqual([-0.6, 1.6, 0]);
     expect(w.ymax).toBeCloseTo(11.5);
     expect(yAxisTitle({ plot: "bar" })).toBe("Frequency");
+  });
+
+  it("forces text numeric, and numbers categorical", () => {
+    expect(forceValues({ nums: [], cats: ["12", "−3", "", "a"] }, "num").nums).toEqual([12, -3, NaN, NaN]);
+    expect(forceValues({ nums: [1, 2.5, NaN] }, "cat").cats).toEqual(["1", "2.5", ""]);
+    expect(forceValues({ nums: [1] })).toEqual({ nums: [1] });
+  });
+  it("plots x along, y up, and numbers against categories in columns or rows", () => {
+    const n = { nums: [1] };
+    const c = { nums: [], cats: ["a"] };
+    expect(layoutOf(null, null)).toBeNull();
+    expect(layoutOf(n, null)).toEqual({ main: "x", two: false });
+    expect(layoutOf(null, c)).toEqual({ main: "y", two: false });
+    expect(layoutOf(n, n)).toEqual({ main: "x", two: true });
+    expect(layoutOf(c, n)).toEqual({ main: "x", two: true });
+    expect(layoutOf(n, c)).toEqual({ main: "y", two: true });
+    expect(layoutOf(c, c)).toBe("bothCat");
+  });
+  it("sees a list up the y-axis with its x summary list as the plot's own", () => {
+    const p = { kind: "datastats", id: 1, plot: "histogram", y: "h", xSummary: "f" } as const;
+    expect(logicalPage(p, { main: "y", two: false })).toEqual({ plot: "histogram", y: undefined, ySummary: "f" });
+    expect(swapWindow({ xmin: 0, xmax: 1, ymin: 2, ymax: 3, xscl: 1, yscl: 1 })).toMatchObject({ xmin: 2, xmax: 3, ymin: 0, ymax: 1 });
+  });
+  it("counts values between variable bin boundaries, the last bin taking its right edge", () => {
+    const bars = edgeBars([0, 5, 10, 12, 30, 50, 60], [50, 0, 10, 50], "count");
+    expect(bars.map((b) => [b.from, b.to, b.n])).toEqual([
+      [0, 10, 2],
+      [10, 50, 4],
+    ]);
+    expect(edgeBars([1, 2, 3, 4], [0, 2, 4], "density").map((b) => b.h)).toEqual([0.125, 0.375]);
+  });
+  it("splits values by category, in the order the categories appear", () => {
+    expect(splitGroups([1, 2, 3, NaN, 5], ["m", "f", "m", "f", ""])).toEqual([
+      { name: "m", values: [1, 3] },
+      { name: "f", values: [2] },
+    ]);
   });
 });

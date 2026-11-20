@@ -1,26 +1,38 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { app, na, off, rule, sub, wiz, type Menu } from "../menus/types";
 import type { DataStatsPage } from "../state/document";
-import { CAT_PLOTS, effectivePlot } from "./plot";
+import { CAT_PLOTS, effectivePlot, logicalPage, NO_INFO, POINT_PLOTS, type DataInfo } from "./plot";
 
 const tick = (on: boolean | undefined, label: string) => `${on ? "✓ " : ""}${label}`;
 
 /**
  * The menu key on a Data & Statistics page, laid out as the handheld's
- * (greyed: not built yet, or not for this data). A categorical x list (text)
- * offers the dot, bar and pie charts in place of the numeric plots.
+ * (greyed: not built yet, or not for this data). A categorical list (text)
+ * offers the dot, bar and pie charts in place of the numeric plots; info
+ * says what the page's lists turned out to be.
  */
-export function dataMenu(p: DataStatsPage, categorical = false): Menu {
-  const plot = effectivePlot(p, categorical);
+export function dataMenu(p: DataStatsPage, info: DataInfo = NO_INFO): Menu {
+  const { categorical } = info;
+  const plot = effectivePlot(logicalPage(p, info), categorical);
   // Two numeric lists: the scatter plots and everything fitted to them.
-  const two = Boolean(p.y) && !categorical;
+  const two = info.two && !categorical;
+  const shown = Boolean(info.main);
   // Residuals are measured from what's been added to a scatter: a regression, the movable line or a function.
   const against = two && Boolean(p.regression || p.movable || p.functions?.length);
   const num = (label: string, kind: DataStatsPage["plot"]) =>
-    categorical ? na(label, "the x list is categorical (text); it plots as a dot, bar or pie chart") : app(tick(plot === kind, label), `dsPlot:${kind}`);
+    categorical ? na(label, "the list is categorical (text); it plots as a dot, bar or pie chart") : app(tick(plot === kind, label), `dsPlot:${kind}`);
   const cat = (label: string, kind: DataStatsPage["plot"]) =>
-    categorical && !p.y ? app(tick(plot === kind, label), `dsPlot:${kind}`) : na(label, categorical ? "remove the y variable first" : "needs a categorical x list (text)");
-  const needY = categorical ? "needs a numeric x list and a y list" : "add a y variable first";
+    categorical && !info.two ? app(tick(plot === kind, label), `dsPlot:${kind}`) : na(label, categorical ? "remove the other variable first" : "needs a categorical list (text)");
+  const needY = categorical ? "needs two numeric lists" : "add a y variable first";
+  // Force Numeric reads text such as "12" as numbers; on a list of numbers the item forces it categorical. Ticked while it's on.
+  const force = (axis: "X" | "Y") => {
+    const has = axis === "X" ? p.x : p.y;
+    const forced = axis === "X" ? p.forceX : p.forceY;
+    const text = axis === "X" ? info.xText : info.yText;
+    if (!has) return na(`Force Numeric ${axis}`, `add a${axis === "X" ? "n x" : " y"} variable first`);
+    const kind = forced ? (forced === "num" ? "Numeric" : "Categorical") : text ? "Numeric" : "Categorical";
+    return app(tick(Boolean(forced), `Force ${kind} ${axis}`), `dsForce${axis}`);
+  };
   return [
     sub("Plot Type", [
       num("Dot Plot", "dot"),
@@ -43,11 +55,17 @@ export function dataMenu(p: DataStatsPage, categorical = false): Menu {
           app(tick(p.histScale === "density", "Density"), "dsScale:density"),
         ]),
         sub("Bin Settings", [
-          wiz("Equal Bin Width...", "Equal Bin Width Settings", [
-            { label: "Width:", value: String(p.bins?.width ?? "") , hint: "auto" },
-            { label: "Alignment:", value: String(p.bins?.start ?? ""), hint: "auto" },
-          ], "ds:bins:{0}:{1}"),
-          off("Variable Bin Width..."),
+          wiz(
+            "Equal Bin Width...",
+            "Equal Bin Width Settings",
+            [
+              { label: "Width:", value: String(p.bins?.width ?? ""), hint: "auto" },
+              { label: "Alignment:", value: String(p.bins?.start ?? ""), hint: "auto" },
+            ],
+            "ds:bins:{0}:{1}",
+          ),
+          // Bins between boundaries the student gives, a list or a list's name.
+          wiz("Variable Bin Width...", "Variable Bin Width Settings", [{ label: "Bin Boundaries:", value: p.binEdges ?? "", hint: "{0,10,25,50}" }], "ds:vbins:{0}"),
         ]),
       ]),
       app(tick(p.extendWhiskers, "Extend Box Plot Whiskers"), "dsWhiskers"),
@@ -56,26 +74,30 @@ export function dataMenu(p: DataStatsPage, categorical = false): Menu {
         ? app(tick(p.labels, "Show All Labels"), "dsLabels")
         : na("Show All Labels", "for bar charts, pie charts and histograms"),
       rule(app("Add X Variable", "dsAxis:x")),
-      off("Add X Summary List"),
-      p.x ? app("Remove X Variable", "dsRemoveX") : na("Remove X Variable", "there's no x variable"),
+      // How many of each y value: a frequency list in place of an x variable, for a list plotted up the y-axis.
+      p.y && !p.x ? app("Add X Summary List", "dsAxis:xsum") : na("Add X Summary List", p.x ? "remove the x variable first" : "add a y variable first"),
+      p.x || p.xSummary ? app("Remove X Variable", "dsRemoveX") : na("Remove X Variable", "there's no x variable"),
       app("Add Y Variable", "dsAxis:y"),
       // How many of each x value: a frequency list in place of a y variable.
-      p.x ? app("Add Y Summary List", "dsAxis:sum") : na("Add Y Summary List", "add an x variable first"),
+      p.x && !p.y ? app("Add Y Summary List", "dsAxis:sum") : na("Add Y Summary List", p.y ? "remove the y variable first" : "add an x variable first"),
       p.y || p.ySummary ? app("Remove Y Variable", "dsRemoveY") : na("Remove Y Variable", "there's no y variable"),
-      rule(off("Force Numeric X")),
-      off("Force Numeric Y"),
-      off("Split Categories by Variable"),
-      off("Remove Split Variable"),
+      rule(force("X")),
+      force("Y"),
+      // A band for each category of another list, each with its own plot of the numbers in it.
+      shown && !categorical && !info.two && !p.ySummary && !p.xSummary
+        ? app(tick(Boolean(p.split), "Split Categories by Variable"), "dsAxis:split")
+        : na("Split Categories by Variable", "for one numeric list without a summary list"),
+      p.split ? app("Remove Split Variable", "dsRemoveSplit") : na("Remove Split Variable", "the plot isn't split"),
       rule(app("Clear All", "dsClearAll")),
     ]),
     sub("Actions", [
       app("Remove", "dsRemoveAnalysis"),
       off("Hide Text"),
-      rule(off("Insert Text")),
-      off("Insert Slider"),
-      rule(off("Select All Points")),
+      rule(app("Insert Text", "dsText")),
+      app("Insert Slider", "dsSlider"),
+      rule(shown && POINT_PLOTS.includes(plot) ? app("Select All Points", "dsSelectAll") : na("Select All Points", "for plots drawn as points")),
       off("Select Image"),
-      categorical && !p.y
+      categorical && !info.two
         ? sub("Sort", [
             app(tick(!p.sort || p.sort === "list", "List Order"), "dsSort:list"),
             app(tick(p.sort === "value", "Value Order"), "dsSort:value"),
@@ -115,9 +137,10 @@ export function dataMenu(p: DataStatsPage, categorical = false): Menu {
           against ? app(tick(p.residualPlot, "Show Residual Plot"), "dsResidPlot") : na("Show Residual Plot", "show a regression, movable line or function first"),
         ]),
       ),
-      rule(wiz("Plot Value...", "Plot Value", [{ label: "Value:", value: p.x ? `mean(${p.x})` : "" }], "ds:value:{0}")),
+      rule(wiz("Plot Value...", "Plot Value", [{ label: "Value:", value: p.x ? `mean(${p.x})` : p.y ? `mean(${p.y})` : "" }], "ds:value:{0}")),
       plot === "histogram" ? app(tick(p.normalPdf, "Show Normal PDF"), "dsNormal") : na("Show Normal PDF", "for histograms"),
-      off("Graph Trace"),
+      // ◄ ► along the data (or a curve), ▲ ▼ between them.
+      shown ? app(tick(Boolean(p.trace), "Graph Trace"), "dsTrace") : na("Graph Trace", "add a variable first"),
     ]),
     sub("Window/Zoom", [
       app("Window Settings...", "dsWindow"),

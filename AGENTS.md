@@ -148,7 +148,7 @@ Each app has a pure key or click model plus a view, so the logic can be tested w
 | Calculator | `calculator/` | `calc-keys.ts` | `calculator-app.tsx`, `history.tsx` | Enter returns an effect, which `cas-app.tsx` runs. |
 | Graphs | `graphs/` | `graph-keys.ts`, `model.ts` | `graphs-app.tsx`, `sliders.tsx` | `analyze.ts` covers plot samples and Analyze Graph. Functions are `f1(x)…` in the engine. |
 | Lists & Spreadsheet | `lists/` | `sheet.ts` | `lists-app.tsx` | A named column becomes a list variable for the problem. |
-| Data & Statistics | `data/` | `plot.ts` | `data-app.tsx` | Draws plots from the problem's lists. |
+| Data & Statistics | `data/` | `plot.ts`, `keys.ts` | `data-app.tsx` | Draws plots from the problem's lists. |
 | Notes | `notes/` | `model.ts` | `notes-app.tsx` | A contenteditable page with maths boxes evaluated in the problem. |
 | Geometry | `geometry/` | `model.ts` | `geometry-app.tsx` | See below. |
 | Python | `python/` | n/a | `python-app.tsx` | `runner.ts` and `worker.ts` run Pyodide; `shims.ts` provides TI's `ti_draw`, `ti_system` and the other `ti_*` modules. |
