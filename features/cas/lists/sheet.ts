@@ -10,7 +10,7 @@
  * dialogs take a[] too.
  */
 import type { Key } from "../keys";
-import { parse } from "../math/ast";
+import { isReservedName, parse } from "../math/ast";
 import { editorKey, emptyEdit, rowText, setRow } from "../math/editor";
 import { astToRow, chars, type Row } from "../math/tree";
 import type { ListsColumn, ListsPage } from "../state/document";
@@ -76,6 +76,8 @@ export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: Lis
       let text = rowText(p.edit!);
       if (row === 1 && text) text = `=${text.replace(/^=/, "")}`;
       if (row === 0 && text && !/^[a-zA-Z]\w*$/.test(text)) return done({ ...p, edit: null }, { error: "Error: Invalid name" });
+      // A command's name (count, mean …) can't hold a list: the engine would refuse it without a word.
+      if (row === 0 && text && isReservedName(text)) return done({ ...p, edit: null }, { error: "Error: Reserved name" });
       return done({ ...setRaw(p, row, col, text), edit: null, sel: then }, { recalc: true });
     };
     switch (key.k) {

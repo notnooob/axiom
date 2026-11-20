@@ -29,6 +29,13 @@ describe("lists keys", () => {
     p = listsKey(type(p, "xs"), { k: "enter" }).page;
     expect(p.cols[1]!.name).toBe("xs");
   });
+  it("refuses a command's name for a column, in any case", () => {
+    for (const name of ["count", "Mean"]) {
+      const r = listsKey(type({ ...page(), sel: { row: 0, col: 0 } }, name), { k: "enter" });
+      expect(r.effect).toEqual({ error: "Error: Reserved name" });
+      expect(r.page.cols[0]?.name).toBeUndefined();
+    }
+  });
 });
 
 describe("recalc", () => {

@@ -60,7 +60,7 @@ import { parseTerms, SEQ_TERMS, seqDefinition, seqName, seqTermsCommand } from "
 import { autoScale, fnName, parNames, relName, STANDARD, zoomed, type Mark, type Samples } from "./graphs/model";
 import { Keypad } from "./keypad/keypad";
 import { keyFromEvent, type Key } from "./keys";
-import { parse, type Ast } from "./math/ast";
+import { isReservedName, parse, type Ast } from "./math/ast";
 import { print } from "./math/print";
 import { RENAME_IN, translate } from "./engine/translate";
 import { DE_DEFAULTS, type RelationOp, type Slider } from "./state/document";
@@ -3736,6 +3736,7 @@ export function CasApp() {
     setListColumn: (col, ch) => {
       if (page?.kind !== "lists") return "The active page isn't Lists & Spreadsheet.";
       if (ch.name && !/^[a-zA-Z]\w*$/.test(ch.name)) return "A list name is letters, digits and _, starting with a letter.";
+      if (ch.name && isReservedName(ch.name)) return `${ch.name} is the name of a command (Reserved name); choose another list name.`;
       const cols = page.cols.slice();
       while (cols.length <= col) cols.push({ cells: [] });
       const c = { ...cols[col]! };

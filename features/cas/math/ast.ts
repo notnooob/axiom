@@ -153,6 +153,11 @@ for (const n of [
 const canonicalName = (v: string) => COMMANDS.get(v.toLowerCase()) ?? v.toLowerCase();
 /** One of the handheld's own commands or functions, not a user's name. */
 export const isCommand = (name: string) => COMMANDS.get(name.toLowerCase()) === name;
+/**
+ * A name a variable can't take because one of the handheld's commands has
+ * it, in any case (count, Mean, LINREGMX), as the handheld refuses them.
+ */
+export const isReservedName = (name: string) => COMMANDS.has(name.toLowerCase());
 
 const isDigit = (c: string) => c >= "0" && c <= "9";
 const isIdStart = (c: string) =>
