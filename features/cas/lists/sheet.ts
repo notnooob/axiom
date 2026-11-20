@@ -64,6 +64,97 @@ const toRow = (t: string): Row => {
   }
 };
 
+/**
+ * What the formula row starts with, as the handheld writes it: the column's
+ * name and := for a named column (b:=log(x)), else =.
+ */
+export const formulaPrefix = (p: ListsPage, col: number) => {
+  const name = p.cols[col]?.name;
+  return name ? `${name}:=` : "=";
+};
+
+/** A cell's text as maths: a formula keeps its = (or name:=) in front, so editing it doesn't lose it. */
+function formulaRow(prefix: string, body: string): Row {
+  return [...chars(prefix), ...toRow(body)];
+}
+
+/** The row an edit starts from: what the cell holds, with a formula's = or name:= in front. */
+export function editRow(p: ListsPage, row: number, col: number): Row {
+  const raw = rawAt(p, row, col);
+  if (row === 0) return chars(raw);
+  if (row === 1) return raw ? formulaRow(formulaPrefix(p, col), raw.replace(/^=/, "")) : chars(formulaPrefix(p, col));
+  return raw.startsWith("=") ? formulaRow("=", raw.slice(1)) : toRow(raw);
+}
+
+/** What a cell shows when it isn't being edited: the formula row's formula, else the worked-out value. */
+export function displayRow(p: ListsPage, row: number, col: number): Row {
+  if (row === 0) return chars(rawAt(p, 0, col));
+  if (row === 1) return rawAt(p, 1, col) ? editRow(p, 1, col) : [];
+  const shown = shownAt(p, row, col);
+  return shown.startsWith("=") ? formulaRow("=", shown.slice(1)) : shown ? toRow(shown) : [];
+}
+
+/**
+ * The line under the spreadsheet: the selected cell's reference (B for the
+ * formula row, B3 for a cell) and what it holds in full, a formula as
+ * typed rather than its value, as the handheld shows it.
+ */
+export function cellLine(p: ListsPage): { ref: string; row: Row } {
+  const { row, col } = p.sel;
+  const ref = row < 2 ? letter(col) : `${letter(col)}${row - 1}`;
+  // A cell filled by its column's formula has nothing typed in it: the line shows its value.
+  return { ref, row: row < 2 || !rawAt(p, row, col) ? displayRow(p, row, col) : editRow(p, row, col) };
+}
+
+/** Names a formula binds for itself (seq's n, Σ's k): they refer to nothing outside it. */
+const BINDERS = new Set(["seq", "Σ", "Π", "∫", "d", "limit", "sum", "product", "seqGen"]);
+
+/**
+ * The single letters a formula uses that are both a column's letter and a
+ * defined variable (a column named x makes the variable x, and x is also
+ * column X): the handheld asks which is meant (Conflict Detected).
+ */
+export function formulaConflicts(formula: string, isVariable: (name: string) => boolean): string[] {
+  let ast: unknown;
+  try {
+    // Column references written out (x[]) are settled already.
+    ast = parse(formula.replace(/^=/, "").replace(/\b[a-z]\[\]/gi, "0"));
+  } catch {
+    return [];
+  }
+  const found = new Set<string>();
+  const bound = new Set<string>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    const node = n as { k?: string; name?: string; f?: string; args?: { k?: string; name?: string }[] };
+    if (node.k === "call" && node.f && BINDERS.has(node.f) && node.args?.[1]?.k === "sym" && node.args[1].name) bound.add(node.args[1].name);
+    if (node.k === "sym" && node.name && /^[a-z]$/.test(node.name)) found.add(node.name);
+    Object.values(node).forEach(walk);
+  };
+  walk(ast);
+  return [...found].filter((name) => !bound.has(name) && isVariable(name)).sort();
+}
+
+/** The formula with each conflicting letter settled: a column reference becomes x[], a variable stays x. */
+export function resolveConflicts(formula: string, choices: Record<string, "column" | "variable">): string {
+  return formula.replace(/(?<![\w.])([a-z])(?![\w[(])/g, (m, name: string) => (choices[name] === "column" ? `${name}[]` : m));
+}
+
+/** The formula an edit is about to commit, without its = or name:=, or null when it isn't a formula. */
+export function editingFormula(p: ListsPage): string | null {
+  if (!p.edit || p.sel.row === 0) return null;
+  const text = rowText(p.edit);
+  if (p.sel.row === 1) return text.startsWith(formulaPrefix(p, p.sel.col)) ? text.slice(formulaPrefix(p, p.sel.col).length) : text.replace(/^=/, "");
+  return text.startsWith("=") ? text.slice(1) : null;
+}
+
+/** The edit with its formula replaced (after Conflict Detected), its = or name:= kept. */
+export function withFormula(p: ListsPage, formula: string): ListsPage {
+  const prefix = p.sel.row === 1 ? formulaPrefix(p, p.sel.col) : "=";
+  return { ...p, edit: setRow(chars(`${prefix}${formula}`)) };
+}
+
 export type ListsEffect = { recalc: true } | { error: string } | null;
 
 export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: ListsEffect } {
@@ -74,7 +165,12 @@ export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: Lis
   if (p.edit) {
     const commit = (then: ListsPage["sel"]) => {
       let text = rowText(p.edit!);
-      if (row === 1 && text) text = `=${text.replace(/^=/, "")}`;
+      // The formula row is stored as =formula, without the column's name:= in front of it.
+      if (row === 1) {
+        const prefix = formulaPrefix(p, col);
+        const body = text.startsWith(prefix) ? text.slice(prefix.length) : text.replace(/^=/, "");
+        text = body.trim() ? `=${body}` : "";
+      }
       if (row === 0 && text && !/^[a-zA-Z]\w*$/.test(text)) return done({ ...p, edit: null }, { error: "Error: Invalid name" });
       // A command's name (count, mean …) can't hold a list: the engine would refuse it without a word.
       if (row === 0 && text && isReservedName(text)) return done({ ...p, edit: null }, { error: "Error: Reserved name" });
@@ -110,7 +206,7 @@ export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: Lis
     case "end":
       return done({ ...p, sel: { row: rowsUsed(p) + 2, col } });
     case "enter":
-      return done({ ...p, edit: setRow(toRow(rawAt(p, row, col))) });
+      return done({ ...p, edit: setRow(editRow(p, row, col)) });
     case "backspace":
     case "delete":
     case "clear":
@@ -119,9 +215,10 @@ export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: Lis
     case "text":
     case "paste":
     case "template": {
-      // Typing on a cell starts editing it afresh.
-      const next = editorKey(emptyEdit(), key);
-      return done({ ...p, edit: next ?? emptyEdit() });
+      // Typing on a cell starts editing it afresh; on the formula row, after the column's name:= (or =).
+      const start = row === 1 ? setRow(chars(formulaPrefix(p, col))) : emptyEdit();
+      const next = editorKey(start, key);
+      return done({ ...p, edit: next ?? start });
     }
     default:
       return done(p);

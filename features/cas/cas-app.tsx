@@ -580,6 +580,8 @@ export function CasApp() {
   const dataWindow = useRef<GraphWindow | null>(null);
   /** What the Data & Statistics page's lists turned out to be (text or numbers, which one is plotted), for its menu. */
   const dataInfo = useRef<DataInfo>(NO_INFO);
+  /** A Lists formula waiting on Conflict Detected: the key that was entering it, and the letters asked about. */
+  const listsConflict = useRef<{ key: Key; formula: string; names: string[] } | null>(null);
   /** The Notes editor's commands, for the keypad, its menu and the assistant. */
   const notesApi = useRef<NotesApi | null>(null);
   /** A Notes maths box worked out with the problem's variables; what it defines is defined for the problem. */
@@ -1364,6 +1366,24 @@ export function CasApp() {
         const t = page.table;
         if (key.k === "up" || key.k === "down") setLists((p) => ({ ...p, table: { ...t, start: t.start + (key.k === "down" ? t.step : -t.step) } }));
       } else if (page?.kind === "lists") {
+        // A formula about to be entered that uses a letter which is both a column (x is column X) and a
+        // variable asks which is meant first, as the handheld's Conflict Detected does.
+        const formula = key.k === "enter" || key.k === "up" || key.k === "down" ? sheet.editingFormula(page) : null;
+        const conflicts = formula ? sheet.formulaConflicts(formula, (n) => defined.has(n)) : [];
+        if (formula && conflicts.length) {
+          listsConflict.current = { key, formula, names: conflicts };
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Conflict Detected",
+              note: `=${formula}`,
+              arrows: false,
+              fields: conflicts.map((n) => ({ label: `${n}: Column or Variable?`, value: "Column Reference", options: ["Column Reference", "Variable Reference"], stacked: true })),
+              build: `listsconflict:${conflicts.map((_, i) => `{${i}}`).join(":")}`,
+            }),
+          );
+          return;
+        }
         const { page: next, effect } = sheet.listsKey(page, key);
         setLists(() => next);
         if (effect && "error" in effect) setError(effect.error);
@@ -1410,7 +1430,7 @@ export function CasApp() {
         }
       }
     },
-    [wizard, finance, page, runEvaluate, runGraphEffect, setCalc, setGraphs, setLists, recalcLists, runPython, pyEdit, py, updatePage, shellPrint, takenFns],
+    [wizard, finance, page, defined, runEvaluate, runGraphEffect, setCalc, setGraphs, setLists, recalcLists, runPython, pyEdit, py, updatePage, shellPrint, takenFns],
   );
 
   /** Clear all: one empty Calculator page and no variables. The settings stay. */
@@ -3020,6 +3040,19 @@ export function CasApp() {
             Array.isArray(v) ? `{${v.map((x) => (Array.isArray(x) ? show(x) : +x.toPrecision(8))).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v;
           setWarning(store.rows.map(([label, v]) => `${label}: ${show(v)}`));
         })();
+        return;
+      }
+      if (built.startsWith("listsconflict:") && page?.kind === "lists") {
+        // Each letter as the student settled it: a column reference becomes x[], a variable stays x; then the entry goes in.
+        const pending = listsConflict.current;
+        listsConflict.current = null;
+        if (!pending || !page.edit) return;
+        const picks = built.slice("listsconflict:".length).split(":");
+        const choices = Object.fromEntries(pending.names.map((n, i) => [n, picks[i] === "Variable Reference" ? ("variable" as const) : ("column" as const)]));
+        const { page: next, effect } = sheet.listsKey(sheet.withFormula(page, sheet.resolveConflicts(pending.formula, choices)), pending.key);
+        setLists(() => next);
+        if (effect && "error" in effect) setError(effect.error);
+        else if (effect) void recalcLists(next);
         return;
       }
       if (built.startsWith("lists:tableset:") && page?.kind === "lists") {

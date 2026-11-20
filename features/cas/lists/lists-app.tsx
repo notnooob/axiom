@@ -5,7 +5,7 @@ import { MathView } from "../math/render";
 import type { Highlight } from "../ai/highlights";
 import { FlagBadge, flagRing } from "../screen/flag";
 import type { ListsPage, ListsSel } from "../state/document";
-import { COLS, letter, rowsUsed, shownAt } from "./sheet";
+import { cellLine, COLS, displayRow, letter, rowsUsed } from "./sheet";
 
 /**
  * The spreadsheet as the handheld draws it: column letters with the list
@@ -22,7 +22,6 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
   const cell = (row: number, col: number) => {
     const on = page.sel.row === row && page.sel.col === col;
     const editing = on && page.edit;
-    const text = shownAt(page, row, col);
     const isFormula = row >= 2 && (page.cols[col]?.cells[row - 2] ?? "").startsWith("=");
     // The assistant's highlight on this cell (its row counts from the first row of values).
     const flag = highlights.find((h) => h.target.kind === "cell" && h.target.col === col && h.target.row === row - 1);
@@ -41,7 +40,8 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
           isFormula && !on && "text-[#1b4fa8]",
         )}
       >
-        {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <span className="truncate">{text}</span>}
+        {/* Each cell's contents as maths, as the handheld draws them (log typed shows as log₁₀ once entered). */}
+        {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <MathView row={displayRow(page, row, col)} className="font-casmath" />}
         {flag && (
           <>
             <FlagBadge n={flag.n} tone={flag.tone} className="absolute top-1/2 left-[0.6cqw] -translate-y-1/2" />
@@ -52,8 +52,10 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
     );
   };
 
+  const line = cellLine(page);
   return (
-    <div ref={box} className="absolute inset-0 isolate overflow-auto bg-casScreen font-casui text-[calc(4cqw*var(--axiom-text,1))] text-casInk scrollbar-thin">
+    <div className="absolute inset-0 flex flex-col bg-casScreen font-casui text-[calc(4cqw*var(--axiom-text,1))] text-casInk">
+    <div ref={box} className="relative isolate min-h-0 flex-1 overflow-auto scrollbar-thin">
       <div className="w-max">
         <div className="sticky top-0 z-10 flex bg-[#e8e8e8]">
           <div className="sticky left-0 z-10 h-[6.4cqw] w-[8cqw] shrink-0 border-b border-r border-casRule bg-[#e8e8e8]" />
@@ -90,6 +92,18 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
             {Array.from({ length: COLS }, (_, c) => cell(row, c))}
           </div>
         ))}
+      </div>
+    </div>
+      {/*
+        The cell line, as on the handheld: the selected cell's reference and what it holds in full (a formula
+        as typed, not its value), in larger maths. It grows to fit whatever is in the cell, a template's
+        subscripts included, and mirrors the cell while it's being edited.
+      */}
+      <div className="flex min-h-[8cqw] shrink-0 items-center border-t-[0.3cqw] border-casRule bg-[#f4f4f4]" aria-label={`Cell ${line.ref}`}>
+        <div className="w-[8cqw] shrink-0 self-stretch border-r border-casRule bg-[#e8e8e8] text-center font-casmath italic leading-[8cqw] text-casLabel">{line.ref}</div>
+        <div className="min-w-0 flex-1 overflow-x-auto px-[1.4cqw] py-[0.8cqw] text-[1.15em] scrollbar-none">
+          {page.edit ? <MathView row={page.edit.row} cursor={page.edit.cursor} className="font-casmath" /> : <MathView row={line.row} className="font-casmath" />}
+        </div>
       </div>
     </div>
   );

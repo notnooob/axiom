@@ -34,7 +34,8 @@ export function wizardSaid(w: WizardState): string {
   const lf = w.list ? w.wizard.fields[w.list.field] : undefined;
   if (w.list && lf?.options) return `${lf.label.replace(/:$/, "")} list, ${lf.options[w.list.sel]}, ${w.list.sel + 1} of ${lf.options.length}`;
   const f = w.wizard.fields[w.focus];
-  return f ? `${w.wizard.title}. ${f.label} ${w.values[w.focus] ?? ""}` : w.wizard.title;
+  const title = w.wizard.note ? `${w.wizard.title}. ${w.wizard.note}` : w.wizard.title;
+  return f ? `${title}. ${f.label} ${w.values[w.focus] ?? ""}` : title;
 }
 
 /** Each app's name, as the page's tab and the add-page menu give it. */

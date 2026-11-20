@@ -40,6 +40,8 @@ export type WizardField = {
   free?: boolean;
   /** A checkbox with its label beside it; the value is "Yes" or "No". */
   check?: boolean;
+  /** The label on its own line and the field across the dialog under it, for a label that's a question. */
+  stacked?: boolean;
 };
 
 export type MenuAction =
@@ -53,6 +55,8 @@ export type MenuAction =
   | {
       kind: "wizard";
       title: string;
+      /** A line of text under the title, before the fields (Conflict Detected's formula). */
+      note?: string;
       fields: WizardField[];
       build: string;
       /** false: the arrow button only on dropdown fields (Window Settings). */

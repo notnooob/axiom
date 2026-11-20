@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
 import { newPage, type ListsPage } from "../state/document";
-import { columnRefs, insertCell, listsKey, recalc, splitList, withRefs, type Evaluate } from "./sheet";
+import { rowText } from "../math/editor";
+import { cellLine, columnRefs, displayRow, editingFormula, formulaConflicts, insertCell, listsKey, resolveConflicts, recalc, splitList, withRefs, type Evaluate } from "./sheet";
 
 const page = () => newPage("lists") as ListsPage;
 const type = (p: ListsPage, s: string) => [...s].reduce((q, c) => listsKey(q, { k: "char", c }).page, p);
@@ -79,3 +80,38 @@ describe("recalc", () => {
     expect(withRefs("a1+b2", (r, c) => `${c}:${r}`)).toBe("(0:2)+(1:3)");
   });
 });
+
+describe("formulas and the cell line", () => {
+  it("keeps a formula cell's = when it's edited again", () => {
+    let p = { ...page(), cols: [{ cells: ["=a2*2", "5"] }], sel: { row: 2, col: 0 } };
+    p = listsKey(p, { k: "enter" }).page;
+    expect(rowText(p.edit!)).toBe("=a2*2");
+    p = listsKey(p, { k: "enter" }).page;
+    expect(p.cols[0]!.cells[0]).toBe("=a2*2");
+  });
+  it("writes a named column's formula row as name:=, and stores it as =formula", () => {
+    let p = { ...page(), cols: [{ name: "b", cells: [] }], sel: { row: 1, col: 0 } };
+    p = type(p, "log(x)");
+    expect(rowText(p.edit!)).toBe("b:=log(x)");
+    expect(editingFormula(p)).toBe("log(x)");
+    p = listsKey(p, { k: "enter" }).page;
+    expect(p.cols[0]!.formula).toBe("=log(x)");
+    expect(cellLine({ ...p, sel: { row: 1, col: 0 } }).ref).toBe("A");
+    expect(cellLine({ ...p, sel: { row: 4, col: 1 } }).ref).toBe("B3");
+  });
+  it("shows log typed with one argument as log base 10 once entered", () => {
+    const p = { ...page(), cols: [{ name: "b", formula: "=log(x)", cells: [] }] };
+    expect(JSON.stringify(displayRow(p, 1, 0))).toContain('"t":"logbase","base":[{"t":"ch","c":"1"},{"t":"ch","c":"0"}]');
+  });
+  it("asks about single letters that are both a column and a variable, but not bound ones", () => {
+    const vars = new Set(["x", "n", "k"]);
+    expect(formulaConflicts("log(x)", (n) => vars.has(n))).toEqual(["x"]);
+    expect(formulaConflicts("seq(n^2,n,1,5)+k", (n) => vars.has(n))).toEqual(["k"]);
+    expect(formulaConflicts("x[]*2+a1", (n) => vars.has(n))).toEqual([]);
+    expect(formulaConflicts("y*2", (n) => vars.has(n))).toEqual([]);
+  });
+  it("settles a letter as a column reference (x[]) or leaves it a variable", () => {
+    expect(resolveConflicts("log(x)+max(x,k)", { x: "column", k: "variable" })).toBe("log(x[])+max(x[],k)");
+  });
+});
+

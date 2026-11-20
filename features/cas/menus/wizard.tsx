@@ -122,6 +122,7 @@ export function WizardDialog({
         <div aria-hidden className="absolute inset-0 translate-x-[0.6cqw] translate-y-[0.6cqw] bg-casRule" />
         <div role="dialog" aria-label={state.wizard.title} className="relative flex min-h-0 w-full flex-col border border-casRule bg-casScreen">
           <div className="px-[2cqw] pb-[2.4cqw] pt-[1.6cqw] text-[4.3cqw] font-bold">{state.wizard.title}</div>
+          {state.wizard.note && <div className="-mt-[1cqw] px-[2cqw] pb-[1.8cqw] text-casLabel">{state.wizard.note}</div>}
           <div
             ref={fields}
             data-scroll
@@ -151,7 +152,7 @@ export function WizardDialog({
                 </button>
               ) : (
               <div key={f.label} className="contents">
-                <label className="whitespace-nowrap text-right text-casLabel">{f.label}</label>
+                <label className={cn("whitespace-nowrap text-casLabel", f.stacked ? "col-span-2 text-left" : "text-right")}>{f.label}</label>
                 <button
                   type="button"
                   tabIndex={-1}
@@ -162,6 +163,7 @@ export function WizardDialog({
                   onClick={() => (f.options && !f.free ? onArrow(i) : onFocus(i))}
                   className={cn(
                     "flex h-[6.6cqw] items-center justify-between text-left",
+                    f.stacked && "col-span-2",
                     i === state.focus ? "border-[0.4cqw] border-casSelect" : "border-[0.25cqw] border-casInk",
                   )}
                 >
