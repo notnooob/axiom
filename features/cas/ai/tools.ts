@@ -354,7 +354,7 @@ function findItem(items: MenuItem[], want: string): MenuItem | undefined {
 function menuText(items: MenuItem[], depth = 0, max = 4): string[] {
   return items.flatMap((it, i) => {
     const line = `${"  ".repeat(depth)}${"123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i] ?? "-"}: ${it.label.replace(/^[✓✔]\s*/, "✓ ")}${
-      it.items ? " ▸" : it.action ? "" : " (not available yet)"
+      it.items ? " ▸" : it.action ? "" : it.unavailable ? ` (greyed now: ${it.unavailable})` : " (not built in Axiom yet)"
     }`;
     return [line, ...(it.items && depth < max ? menuText(it.items, depth + 1, max) : [])];
   });
@@ -1112,7 +1112,7 @@ export const TOOLS: AgentTool[] = [
       }
       if (!item?.action) {
         h.key({ k: "esc" });
-        throw new Error(`"${item?.label}" isn't available in Axiom yet.`);
+        throw new Error(item?.unavailable ? `"${item.label}" is greyed just now: ${item.unavailable}.` : `"${item?.label}" isn't built in Axiom yet.`);
       }
       h.pick(item.action);
       await settle(h);

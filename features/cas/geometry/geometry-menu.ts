@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { app, off, rule, sub, type Menu } from "../menus/types";
+import { app, na, off, rule, sub, type Menu } from "../menus/types";
 import type { GeometryPage } from "../state/document";
 import { TOOL_NAMES, type GeoTool } from "./model";
 
@@ -12,8 +12,8 @@ export function geometryMenu(p: GeometryPage): Menu {
   return [
     sub("Actions", [
       app("Select", "geoSelect"),
-      p.sel ? app("Delete", "geoDelete") : off("Delete"),
-      measure ? app("Store…", "geoStore") : off("Store…"),
+      p.sel ? app("Delete", "geoDelete") : na("Delete", "select an object first"),
+      measure ? app("Store…", "geoStore") : na("Store…", "select a measurement first"),
       rule(app("Hide/Show", "geoHideShow")),
       app("Attributes", "geoAttrs"),
       app("Text", "geoText"),
@@ -25,7 +25,7 @@ export function geometryMenu(p: GeometryPage): Menu {
       app(tick(p.grid, "Show Grid"), "geoGrid"),
       rule(app("Zoom In", "geoZoomIn")),
       app("Zoom Out", "geoZoomOut"),
-      p.view ? app("Zoom Standard", "geoZoomReset") : off("Zoom Standard"),
+      p.view ? app("Zoom Standard", "geoZoomReset") : na("Zoom Standard", "the view is already the standard one"),
       rule(off("Show Analytic Window")),
     ]),
     sub("Points & Lines", [

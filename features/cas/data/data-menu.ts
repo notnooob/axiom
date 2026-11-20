@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { app, off, rule, sub, wiz, type Menu } from "../menus/types";
+import { app, na, off, rule, sub, wiz, type Menu } from "../menus/types";
 import type { DataStatsPage } from "../state/document";
 import { CAT_PLOTS, effectivePlot } from "./plot";
 
@@ -16,16 +16,19 @@ export function dataMenu(p: DataStatsPage, categorical = false): Menu {
   const two = Boolean(p.y) && !categorical;
   // Residuals are measured from what's been added to a scatter: a regression, the movable line or a function.
   const against = two && Boolean(p.regression || p.movable || p.functions?.length);
-  const num = (label: string, kind: DataStatsPage["plot"]) => (categorical ? off(label) : app(tick(plot === kind, label), `dsPlot:${kind}`));
-  const cat = (label: string, kind: DataStatsPage["plot"]) => (categorical && !p.y ? app(tick(plot === kind, label), `dsPlot:${kind}`) : off(label));
+  const num = (label: string, kind: DataStatsPage["plot"]) =>
+    categorical ? na(label, "the x list is categorical (text); it plots as a dot, bar or pie chart") : app(tick(plot === kind, label), `dsPlot:${kind}`);
+  const cat = (label: string, kind: DataStatsPage["plot"]) =>
+    categorical && !p.y ? app(tick(plot === kind, label), `dsPlot:${kind}`) : na(label, categorical ? "remove the y variable first" : "needs a categorical x list (text)");
+  const needY = categorical ? "needs a numeric x list and a y list" : "add a y variable first";
   return [
     sub("Plot Type", [
       num("Dot Plot", "dot"),
       num("Box Plot", "box"),
       num("Histogram", "histogram"),
       num("Normal Probability Plot", "normprob"),
-      rule(two ? app(tick(plot === "scatter", "Scatter Plot"), "dsPlot:scatter") : off("Scatter Plot")),
-      two ? app(tick(plot === "xyline", "XY Line Plot"), "dsPlot:xyline") : off("XY Line Plot"),
+      rule(two ? app(tick(plot === "scatter", "Scatter Plot"), "dsPlot:scatter") : na("Scatter Plot", needY)),
+      two ? app(tick(plot === "xyline", "XY Line Plot"), "dsPlot:xyline") : na("XY Line Plot", needY),
       rule(cat("Dot Chart", "dotchart")),
       cat("Bar Chart", "bar"),
       cat("Pie Chart", "pie"),
@@ -49,14 +52,16 @@ export function dataMenu(p: DataStatsPage, categorical = false): Menu {
       ]),
       app(tick(p.extendWhiskers, "Extend Box Plot Whiskers"), "dsWhiskers"),
       // Counts on every bar and slice.
-      plot === "bar" || plot === "pie" || plot === "histogram" ? app(tick(p.labels, "Show All Labels"), "dsLabels") : off("Show All Labels"),
+      plot === "bar" || plot === "pie" || plot === "histogram"
+        ? app(tick(p.labels, "Show All Labels"), "dsLabels")
+        : na("Show All Labels", "for bar charts, pie charts and histograms"),
       rule(app("Add X Variable", "dsAxis:x")),
       off("Add X Summary List"),
-      p.x ? app("Remove X Variable", "dsRemoveX") : off("Remove X Variable"),
+      p.x ? app("Remove X Variable", "dsRemoveX") : na("Remove X Variable", "there's no x variable"),
       app("Add Y Variable", "dsAxis:y"),
       // How many of each x value: a frequency list in place of a y variable.
-      p.x ? app("Add Y Summary List", "dsAxis:sum") : off("Add Y Summary List"),
-      p.y || p.ySummary ? app("Remove Y Variable", "dsRemoveY") : off("Remove Y Variable"),
+      p.x ? app("Add Y Summary List", "dsAxis:sum") : na("Add Y Summary List", "add an x variable first"),
+      p.y || p.ySummary ? app("Remove Y Variable", "dsRemoveY") : na("Remove Y Variable", "there's no y variable"),
       rule(off("Force Numeric X")),
       off("Force Numeric Y"),
       off("Split Categories by Variable"),
@@ -76,15 +81,17 @@ export function dataMenu(p: DataStatsPage, categorical = false): Menu {
             app(tick(p.sort === "value", "Value Order"), "dsSort:value"),
             app(tick(p.sort === "alpha", "Alphabetical"), "dsSort:alpha"),
           ])
-        : off("Sort"),
+        : na("Sort", "for categorical data (a list of text)"),
     ]),
     sub("Analyze", [
       app("Remove", "dsRemoveAnalysis"),
-      rule(two ? app(tick(Boolean(p.movable), "Add Movable Line"), "dsMovable") : off("Add Movable Line")),
-      p.movable ? app(tick(p.movable.lock, "Lock Intercept at Zero"), "dsLock") : off("Lock Intercept at Zero"),
+      rule(two ? app(tick(Boolean(p.movable), "Add Movable Line"), "dsMovable") : na("Add Movable Line", needY)),
+      p.movable ? app(tick(p.movable.lock, "Lock Intercept at Zero"), "dsLock") : na("Lock Intercept at Zero", "add a movable line first"),
       wiz("Plot Function...", "Plot Function", [{ label: "f(x)=", value: "" }], "ds:fn:{0}"),
       // Categorical plots have no numeric x to shade along.
-      p.functions?.length && !CAT_PLOTS.includes(plot) ? app("Shade Under Function", "dsShade") : off("Shade Under Function"),
+      p.functions?.length && !CAT_PLOTS.includes(plot)
+        ? app("Shade Under Function", "dsShade")
+        : na("Shade Under Function", CAT_PLOTS.includes(plot) ? "categorical plots have no x scale" : "plot a function first"),
       rule(
         two
           ? sub("Regression", [
@@ -100,16 +107,16 @@ export function dataMenu(p: DataStatsPage, categorical = false): Menu {
               app("Show Sinusoidal", "dsReg:SinReg"),
               app("Show Logistic (d=0)", "dsReg:Logistic"),
             ])
-          : off("Regression"),
+          : na("Regression", needY),
       ),
       rule(
         sub("Residuals", [
-          against ? app(tick(p.residualSquares, "Show Residual Squares"), "dsResidSquares") : off("Show Residual Squares"),
-          against ? app(tick(p.residualPlot, "Show Residual Plot"), "dsResidPlot") : off("Show Residual Plot"),
+          against ? app(tick(p.residualSquares, "Show Residual Squares"), "dsResidSquares") : na("Show Residual Squares", "show a regression, movable line or function first"),
+          against ? app(tick(p.residualPlot, "Show Residual Plot"), "dsResidPlot") : na("Show Residual Plot", "show a regression, movable line or function first"),
         ]),
       ),
       rule(wiz("Plot Value...", "Plot Value", [{ label: "Value:", value: p.x ? `mean(${p.x})` : "" }], "ds:value:{0}")),
-      plot === "histogram" ? app(tick(p.normalPdf, "Show Normal PDF"), "dsNormal") : off("Show Normal PDF"),
+      plot === "histogram" ? app(tick(p.normalPdf, "Show Normal PDF"), "dsNormal") : na("Show Normal PDF", "for histograms"),
       off("Graph Trace"),
     ]),
     sub("Window/Zoom", [

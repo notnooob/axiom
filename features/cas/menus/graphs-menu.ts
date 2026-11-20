@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { app, off, rule, sub, wiz, type Menu } from "./types";
+import { app, na, off, rule, sub, wiz, type Menu } from "./types";
 
 /**
  * The Graphs app's menu. Item positions are the contract (see types.ts):
@@ -20,7 +20,7 @@ const geo = (label: string, tool: string) => app(label, `geoTool:${tool}`);
 const tpl = (label: string, form: string) => app(label, `eqtpl:${form}`);
 
 export function graphsMenu(s: GraphsMenuState): Menu {
-  const grid = (label: string, id: string, kind: GraphsMenuState["grid"]) => (s.grid === kind ? off(label) : app(label, id));
+  const grid = (label: string, id: string, kind: GraphsMenuState["grid"]) => (s.grid === kind ? na(label, "it's the grid shown now") : app(label, id));
   return [
     sub("Actions", [
       app("Pointer", "pointer"),
@@ -125,8 +125,8 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       ),
     ]),
     sub("Table", [
-      { ...(s.table ? off("Split-screen Table") : app("Split-screen Table", "tableSplit")), hint: "Ctrl+T" },
-      { ...(s.table ? app("Remove Table", "tableSplit") : off("Remove Table")), hint: "Ctrl+T" },
+      { ...(s.table ? na("Split-screen Table", "the table is already showing") : app("Split-screen Table", "tableSplit")), hint: "Ctrl+T" },
+      { ...(s.table ? app("Remove Table", "tableSplit") : na("Remove Table", "no table is showing")), hint: "Ctrl+T" },
     ]),
     rule(
       sub("Geometry", [
