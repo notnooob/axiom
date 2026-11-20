@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { newPage, type ListsPage } from "../state/document";
 import { rowText } from "../math/editor";
-import { cellLine, columnRefs, displayRow, editingFormula, formulaConflicts, insertCell, listsKey, resolveConflicts, recalc, splitList, withRefs, type Evaluate } from "./sheet";
+import { cellLine, columnRefs, displayRow, editingFormula, formulaConflicts, insertCell, lineKey, listsKey, resolveConflicts, recalc, splitList, withRefs, type Evaluate } from "./sheet";
 
 const page = () => newPage("lists") as ListsPage;
 const type = (p: ListsPage, s: string) => [...s].reduce((q, c) => listsKey(q, { k: "char", c }).page, p);
@@ -113,5 +113,12 @@ describe("formulas and the cell line", () => {
   it("settles a letter as a column reference (x[]) or leaves it a variable", () => {
     expect(resolveConflicts("log(x)+max(x,k)", { x: "column", k: "variable" })).toBe("log(x[])+max(x[],k)");
   });
+  it("moves the cursor in the cell with the cell line's ◄ ►, opening the cell first", () => {
+    const p = { ...page(), cols: [{ cells: ["123"] }], sel: { row: 2, col: 0 } };
+    const opened = lineKey(p, "left");
+    expect(rowText(opened.edit!)).toBe("123");
+    expect(opened.edit!.cursor.index).toBe(2);
+    expect(lineKey(lineKey(opened, "left"), "right").edit!.cursor.index).toBe(2);
+    expect(p.edit).toBeNull();
+  });
 });
-

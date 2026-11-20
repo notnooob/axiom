@@ -106,6 +106,16 @@ export function cellLine(p: ListsPage): { ref: string; row: Row } {
   return { ref, row: row < 2 || !rawAt(p, row, col) ? displayRow(p, row, col) : editRow(p, row, col) };
 }
 
+/**
+ * The cell line's ◄ ► buttons: they move the cursor in the selected cell,
+ * as the arrow keys do while it's being edited. A cell not being edited is
+ * opened for editing first, with the cursor at the end, then moved.
+ */
+export function lineKey(p: ListsPage, dir: "left" | "right"): ListsPage {
+  const edit = p.edit ?? setRow(editRow(p, p.sel.row, p.sel.col));
+  return { ...p, edit: editorKey(edit, { k: dir }) ?? edit };
+}
+
 /** Names a formula binds for itself (seq's n, Σ's k): they refer to nothing outside it. */
 const BINDERS = new Set(["seq", "Σ", "Π", "∫", "d", "limit", "sum", "product", "seqGen"]);
 

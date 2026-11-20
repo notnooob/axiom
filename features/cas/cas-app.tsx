@@ -4288,7 +4288,12 @@ export function CasApp() {
               {view === "doc" && sorter === null && (
               <LayoutFrame doc={doc} renderOther={renderOther} splitting={splitting} onFocus={(id) => setDoc((d) => ({ ...d, active: Math.max(0, d.pages.findIndex((p) => p.id === id)) }))} onEmpty={askRegion}>
               {view === "doc" && page?.kind === "lists" && !page.table && (
-                <ListsApp page={page} highlights={pageHighlights} onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))} />
+                <ListsApp
+                  page={page}
+                  highlights={pageHighlights}
+                  onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))}
+                  onLineKey={(dir) => setLists((p) => sheet.lineKey(p, dir))}
+                />
               )}
               {view === "doc" && page?.kind === "lists" && page.table && (
                 <FunctionTable

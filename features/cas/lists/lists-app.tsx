@@ -2,17 +2,32 @@
 import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/shared/lib/utils";
 import { MathView } from "../math/render";
+import type { Row } from "../math/tree";
 import type { Highlight } from "../ai/highlights";
 import { FlagBadge, flagRing } from "../screen/flag";
 import type { ListsPage, ListsSel } from "../state/document";
 import { cellLine, COLS, displayRow, letter, rowsUsed } from "./sheet";
+
+/** Maths two or more lines tall (a fraction, a matrix …) is drawn smaller in a cell so it fits the row; the cell line shows it full size. */
+const tall = (row: Row) => /"t":"(frac|matrix|piecewise|system|integral|bigop|limit|deriv)"/.test(JSON.stringify(row));
 
 /**
  * The spreadsheet as the handheld draws it: column letters with the list
  * names under them, the ◆ formula row, then numbered rows, the selected cell
  * outlined (filled while it's being edited).
  */
-export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage; onSelect: (sel: ListsSel) => void; highlights?: Highlight[] }) {
+export function ListsApp({
+  page,
+  onSelect,
+  onLineKey,
+  highlights = [],
+}: {
+  page: ListsPage;
+  onSelect: (sel: ListsSel) => void;
+  /** The cell line's ◄ ► buttons: move the cursor in the selected cell. */
+  onLineKey?: (dir: "left" | "right") => void;
+  highlights?: Highlight[];
+}) {
   const box = useRef<HTMLDivElement>(null);
   const rows = Math.max(rowsUsed(page) + 12, page.sel.row + 6, 24);
   useLayoutEffect(() => {
@@ -41,7 +56,9 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
         )}
       >
         {/* Each cell's contents as maths, as the handheld draws them (log typed shows as log₁₀ once entered). */}
-        {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <MathView row={displayRow(page, row, col)} className="font-casmath" />}
+        <span className={cn(tall(editing ? page.edit!.row : displayRow(page, row, col)) && "text-[0.62em]")}>
+          {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <MathView row={displayRow(page, row, col)} className="font-casmath" />}
+        </span>
         {flag && (
           <>
             <FlagBadge n={flag.n} tone={flag.tone} className="absolute top-1/2 left-[0.6cqw] -translate-y-1/2" />
@@ -102,8 +119,23 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
       <div className="flex min-h-[8cqw] shrink-0 items-center border-t-[0.3cqw] border-casRule bg-[#f4f4f4]" aria-label={`Cell ${line.ref}`}>
         <div className="w-[8cqw] shrink-0 self-stretch border-r border-casRule bg-[#e8e8e8] text-center font-casmath italic leading-[8cqw] text-casLabel">{line.ref}</div>
         <div className="min-w-0 flex-1 overflow-x-auto px-[1.4cqw] py-[0.8cqw] text-[1.15em] scrollbar-none">
+          {/* The cursor shows only while the cell is being edited, wherever it is in the cell. */}
           {page.edit ? <MathView row={page.edit.row} cursor={page.edit.cursor} className="font-casmath" /> : <MathView row={line.row} className="font-casmath" />}
         </div>
+        {/* ◄ ► at the right end, as on the handheld: the cursor in the cell, a step at a time. */}
+        {(["left", "right"] as const).map((dir) => (
+          <button
+            key={dir}
+            type="button"
+            tabIndex={-1}
+            aria-label={dir === "left" ? "Move the cursor left in the cell" : "Move the cursor right in the cell"}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => onLineKey?.(dir)}
+            className="flex w-[6cqw] shrink-0 items-center justify-center self-stretch border-l border-casRule text-[0.8em] text-casInk hover:bg-[#e2e2e2]"
+          >
+            {dir === "left" ? "◄" : "►"}
+          </button>
+        ))}
       </div>
     </div>
   );
