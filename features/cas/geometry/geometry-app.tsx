@@ -322,6 +322,36 @@ export function GeometryApp({
               ))}
             </g>
           )}
+          {page.analytic && !overlay && (
+            // The analytic window: a frame from −6 to 6 across and −4 to 4 up (cm, so coordinates read the same
+            // as everywhere on the plane), its axes numbered at each whole unit inside it.
+            <g aria-label="Analytic window" fontSize={fs * 0.75} fill={palette.casLabel}>
+              <clipPath id={`analytic${page.id}`}>
+                <rect x={X(-6)} y={Y(4)} width={12 * k} height={8 * k} />
+              </clipPath>
+              <rect x={X(-6)} y={Y(4)} width={12 * k} height={8 * k} fill="none" stroke={palette.casInk} strokeWidth={1.2} />
+              <g clipPath={`url(#analytic${page.id})`} stroke={palette.casInk} strokeWidth={1}>
+                <line x1={X(-6)} y1={Y(0)} x2={X(6)} y2={Y(0)} />
+                <line x1={X(0)} y1={Y(-4)} x2={X(0)} y2={Y(4)} />
+                {[-5, -4, -3, -2, -1, 1, 2, 3, 4, 5].map((t) => (
+                  <line key={`ax${t}`} x1={X(t)} y1={Y(0) - 3} x2={X(t)} y2={Y(0) + 3} />
+                ))}
+                {[-3, -2, -1, 1, 2, 3].map((t) => (
+                  <line key={`ay${t}`} x1={X(0) - 3} y1={Y(t)} x2={X(0) + 3} y2={Y(t)} />
+                ))}
+              </g>
+              {[-5, -4, -3, -2, -1, 1, 2, 3, 4, 5].map((t) => (
+                <text key={`nx${t}`} x={X(t)} y={Y(0) + fs * 1.05} textAnchor="middle">
+                  {String(t).replace("-", "−")}
+                </text>
+              ))}
+              {[-3, -2, -1, 1, 2, 3].map((t) => (
+                <text key={`ny${t}`} x={X(0) - fs * 0.4} y={Y(t) + fs * 0.25} textAnchor="end">
+                  {String(t).replace("-", "−")}
+                </text>
+              ))}
+            </g>
+          )}
           {/* The assistant's highlights, under everything, so what they mark stays readable on top. */}
           {flags.map((f) => (
             <g key={`flag${f.h.n}`} aria-hidden>

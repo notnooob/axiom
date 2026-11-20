@@ -26,7 +26,7 @@ export function geometryMenu(p: GeometryPage): Menu {
       rule(app("Zoom In", "geoZoomIn")),
       app("Zoom Out", "geoZoomOut"),
       p.view ? app("Zoom Standard", "geoZoomReset") : na("Zoom Standard", "the view is already the standard one"),
-      rule(off("Show Analytic Window")),
+      rule(app(tick(p.analytic, "Show Analytic Window"), "geoAnalytic")),
     ]),
     sub("Points & Lines", [
       tool("point"),

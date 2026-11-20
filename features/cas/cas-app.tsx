@@ -2481,6 +2481,7 @@ export function CasApp() {
         else if (id === "geoDelete") setGeo((p) => (p.sel ? { ...p, objects: removeGeo(p.objects, [p.sel]), sel: null } : p));
         else if (id === "geoClear") setGeo((p) => ({ ...p, objects: [], tool: null, sel: null }));
         else if (id === "geoAxes") setGeo((p) => ({ ...p, axes: !p.axes }));
+        else if (id === "geoAnalytic") setGeo((p) => ({ ...p, analytic: !p.analytic }));
         else if (id === "geoGrid") setGeo((p) => ({ ...p, grid: !p.grid }));
         else if (id === "geoZoomIn") setGeo((p) => zoomedGeo(p, 0.8));
         else if (id === "geoZoomOut") setGeo((p) => zoomedGeo(p, 1.25));

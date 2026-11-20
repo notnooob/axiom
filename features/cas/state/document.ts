@@ -324,6 +324,8 @@ export type GeometryPage = {
   sel?: string | null;
   axes?: boolean;
   grid?: boolean;
+  /** View ▸ Show Analytic Window: a framed window around the origin with numbered axes, where coordinates are read. */
+  analytic?: boolean;
   /** What's shown: the centre (cm) and the width across; unset is (0, 0) and 20 cm. */
   view?: { x: number; y: number; w: number };
   /** Texts placed with Actions ▸ Text, at a point of the plane (cm). */
