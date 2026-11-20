@@ -221,6 +221,8 @@ export type ListsPage = {
   sel: ListsSel;
   /** The cell being edited, or null. */
   edit: EditState | null;
+  /** Table ▸ Switch to Table: the page shows the problem's functions as a table, x from start in steps of step. */
+  table?: { start: number; step: number };
 };
 
 /**

@@ -198,6 +198,7 @@ export function pageContent(doc: CasDocument, i: number): Record<string, unknown
           .map((c, n) => ({ column: letter(n), name: c.name, formula: c.formula, cells: c.cells, values: c.values }))
           .filter((c) => c.name || c.formula || c.cells.length),
         selected: { column: letter(p.sel.col), row: p.sel.row < 2 ? (p.sel.row ? "formula" : "name") : p.sel.row - 1 },
+        ...(p.table ? { showing: `the function table (Table menu), x from ${p.table.start} in steps of ${p.table.step}` } : {}),
       };
     case "datastats":
       return { ...base, ...JSON.parse(JSON.stringify(p, (k, v) => (k === "xml" || k === "id" || k === "kind" ? undefined : v))) };

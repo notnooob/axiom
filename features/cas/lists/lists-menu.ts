@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { CONFIDENCE_INTERVALS, DISTRIBUTIONS, STAT_CALCULATIONS, STAT_TESTS } from "../menus/calculator-menu";
-import { app, off, rule, sub, type Menu, type MenuItem, type WizardField } from "../menus/types";
+import { app, na, off, rule, sub, type Menu, type MenuItem, type WizardField } from "../menus/types";
 
 /** Where a dialog's list fields start: the selected column on x, the next one on y. */
 const X_FIELDS = new Set(["X List:", "X1 List:"]);
@@ -27,7 +27,7 @@ export function forLists(item: MenuItem, x: string, y: string): MenuItem {
  * (and the next one for two-variable work): its name, or a[] for an unnamed
  * column A, as the handheld writes it.
  */
-export function listsMenu(x: string, y: string): Menu {
+export function listsMenu(x: string, y: string, table?: { start: number; step: number }): Menu {
   const wiz = (label: string, title: string, fields: WizardField[], build: string) => ({
     label,
     action: { kind: "wizard" as const, title, fields, build },
@@ -41,7 +41,12 @@ export function listsMenu(x: string, y: string): Menu {
       app("Delete Column", "listsDeleteColumn"),
       rule(app("Clear Data", "listsClearColumn")),
     ]),
-    off("Insert"),
+    // A cell, a row or a column at the selection (the same row and column as Actions inserts).
+    sub("Insert", [
+      { ...app("Cell", "listsInsertCell"), unverified: true },
+      { ...app("Row", "listsInsertRow"), unverified: true },
+      { ...app("Column", "listsInsertColumn"), unverified: true },
+    ]),
     sub("Data", [
       wiz("Generate Sequence...", "Sequence", [
         { label: "Formula: u(n)=", value: "", hint: "n^2" },
@@ -57,6 +62,23 @@ export function listsMenu(x: string, y: string): Menu {
       sub("Confidence Intervals", stats(CONFIDENCE_INTERVALS)),
       sub("Stat Tests", stats(STAT_TESTS)),
     ]),
-    off("Table"),
+    // The problem's functions as a table of values, in place of the spreadsheet (Ctrl+T on a Graphs page splits the screen instead).
+    sub("Table", [
+      { ...app(table ? "Switch to Lists & Spreadsheet" : "Switch to Table", "listsTable"), unverified: true },
+      table
+        ? {
+            ...wiz(
+              "Edit Function Table Settings...",
+              "Function Table Settings",
+              [
+                { label: "Table Start:", value: String(table.start) },
+                { label: "Table Step:", value: String(table.step) },
+              ],
+              "lists:tableset:{0}:{1}",
+            ),
+            unverified: true,
+          }
+        : na("Edit Function Table Settings...", "switch to the table first"),
+    ]),
   ];
 }

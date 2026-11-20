@@ -135,6 +135,13 @@ export function insertRow(p: ListsPage): ListsPage {
   if (at < 0) return p;
   return { ...p, cols: p.cols.map((c) => (c.formula ? c : { ...c, cells: [...c.cells.slice(0, at), "", ...c.cells.slice(at)] })) };
 }
+/** Insert ▸ Cell: an empty cell at the selection, the column's cells below it moving down one. */
+export function insertCell(p: ListsPage): ListsPage {
+  const at = p.sel.row - 2;
+  const c = p.cols[p.sel.col];
+  if (at < 0 || !c || c.formula || at >= c.cells.length) return p;
+  return { ...p, cols: p.cols.map((col, i) => (i === p.sel.col ? { ...col, cells: [...col.cells.slice(0, at), "", ...col.cells.slice(at)] } : col)) };
+}
 export function deleteRow(p: ListsPage): ListsPage {
   const at = p.sel.row - 2;
   if (at < 0) return p;

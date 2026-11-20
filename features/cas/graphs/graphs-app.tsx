@@ -1098,25 +1098,70 @@ function TraceMark({ x, y, colour, fs }: { x: number; y: number; colour: string;
 
 /** Split-screen table: x from 0 in steps of 1, a column per function. */
 function GraphTable({ page, giac, ready }: { page: GraphsPage; giac: Giac | null; ready: boolean }) {
-  const [cols, setCols] = useState<{ n: number; ys: number[] }[]>([]);
-  const fns = page.functions.filter((f) => !f.hidden);
-  const key = fns.map((f) => `${f.n}:${f.text}`).join("|");
+  return (
+    <FunctionTable
+      fns={graphFunctions(page)}
+      start={0}
+      step={1}
+      giac={giac}
+      ready={ready}
+      className="w-1/2 shrink-0 border-l-[0.4cqw] border-casF6"
+    />
+  );
+}
+
+/** A function for a table: its engine name, number (f1 …), and definition as typed. */
+export type TableFn = { name: string; n: number; text: string };
+
+/** A Graphs page's shown functions, for a table. */
+export const graphFunctions = (page: GraphsPage): TableFn[] =>
+  page.functions.filter((f) => !f.hidden).map((f) => ({ name: fnName(page.id, f.n), n: f.n, text: f.text }));
+
+/**
+ * A table of function values: x from start in steps of step down the left,
+ * a column for each function, its name and definition at the top, as the
+ * handheld lays out its function table. Graphs splits the screen with it;
+ * Lists & Spreadsheet can switch to it (Table menu).
+ */
+export function FunctionTable({
+  fns,
+  start,
+  step,
+  giac,
+  ready,
+  className,
+}: {
+  fns: TableFn[];
+  start: number;
+  step: number;
+  giac: Giac | null;
+  ready: boolean;
+  className?: string;
+}) {
+  const [cols, setCols] = useState<(TableFn & { ys: number[] })[]>([]);
+  const key = `${fns.map((f) => `${f.name}:${f.text}`).join("|")}@${start}:${step}`;
   useEffect(() => {
     if (!giac || !ready) return;
     let cancelled = false;
     void (async () => {
       const out = [];
-      for (const f of fns)
-        out.push({ n: f.n, ys: parseNumbers(await giac(`evalf(seq(${fnName(page.id, f.n)}(k_),k_,0,20))`)) });
+      for (const f of fns) out.push({ ...f, ys: parseNumbers(await giac(`evalf(seq(${f.name}(${start}+k_*${step}),k_,0,20))`)) });
       if (!cancelled) setCols(out);
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- key stands for fns
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- key stands for fns, start and step
   }, [giac, ready, key]);
+  const xs = Array.from({ length: 21 }, (_, k) => Number((start + k * step).toPrecision(12)));
+  if (!fns.length)
+    return (
+      <div className={cn("flex items-center justify-center bg-casScreen px-[4cqw] text-center font-casui text-[3.6cqw] text-casLabel", className)}>
+        No functions to show. Define f1(x) on a Graphs page in this problem.
+      </div>
+    );
   return (
-    <div className="w-1/2 shrink-0 overflow-y-auto border-l-[0.4cqw] border-casF6 font-casui text-[3.6cqw] scrollbar-none">
+    <div className={cn("overflow-y-auto bg-casScreen font-casui text-[3.6cqw] scrollbar-none", className)}>
       <div className="grid" style={{ gridTemplateColumns: `repeat(${cols.length + 1}, minmax(0, 1fr))` }}>
         {/* Two header rows, as on the handheld: the column name, then its definition. */}
         <div className="row-span-2 flex items-start justify-center border-b-[0.3cqw] border-r border-casRule bg-casRowAlt pt-[1.4cqw]">
@@ -1124,7 +1169,7 @@ function GraphTable({ page, giac, ready }: { page: GraphsPage; giac: Giac | null
         </div>
         {cols.map((c) => (
           <div
-            key={c.n}
+            key={c.name}
             className="border-r border-casRule bg-casRowAlt px-[1cqw] pt-[1.2cqw]"
             style={{ color: curveColour(c.n) }}
           >
@@ -1133,18 +1178,18 @@ function GraphTable({ page, giac, ready }: { page: GraphsPage; giac: Giac | null
         ))}
         {cols.map((c) => (
           <div
-            key={c.n}
+            key={c.name}
             className="truncate border-b-[0.3cqw] border-r border-casRule bg-casRowAlt px-[1cqw] pb-[1.2cqw] pt-[0.6cqw]"
             style={{ color: curveColour(c.n) }}
           >
-            {fns.find((f) => f.n === c.n)?.text.replace(/\^\((\w+)\)/g, "^$1")}
+            {c.text.replace(/\^\((\w+)\)/g, "^$1")}
           </div>
         ))}
-        {Array.from({ length: 21 }, (_, k) => (
+        {xs.map((x, k) => (
           <div key={k} className="contents">
-            <div className="border-b border-r border-casRule bg-casTabIdle px-[1cqw] py-[0.9cqw] text-right">{k}.</div>
+            <div className="border-b border-r border-casRule bg-casTabIdle px-[1cqw] py-[0.9cqw] text-right">{formatFloat(x, 6)}</div>
             {cols.map((c) => (
-              <div key={c.n} className="border-b border-r border-casRule px-[1cqw] py-[0.9cqw] text-right">
+              <div key={c.name} className="border-b border-r border-casRule px-[1cqw] py-[0.9cqw] text-right">
                 {Number.isFinite(c.ys[k]) ? formatFloat(c.ys[k]!, 6) : "undef"}
               </div>
             ))}

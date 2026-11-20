@@ -51,7 +51,7 @@ import {
   startTool,
   type GraphEffect,
 } from "./graphs/graph-keys";
-import { GraphsApp } from "./graphs/graphs-app";
+import { FunctionTable, GraphsApp, graphFunctions, type TableFn } from "./graphs/graphs-app";
 import { deDefinition, pageDefinitions, polarXY } from "./graphs/definitions";
 import { recognise } from "./graphs/mathdraw";
 import { Graph3D, surfaceName } from "./graphs/graph3d";
@@ -1359,6 +1359,10 @@ export function CasApp() {
         const { page: next, effect } = graphKey(page, key, takenFns);
         setGraphs(() => next);
         if (effect) void runGraphEffect(next, effect);
+      } else if (page?.kind === "lists" && page.table) {
+        // The function table scrolls a step at a time with ▲ ▼; the spreadsheet under it takes no keys.
+        const t = page.table;
+        if (key.k === "up" || key.k === "down") setLists((p) => ({ ...p, table: { ...t, start: t.start + (key.k === "down" ? t.step : -t.step) } }));
       } else if (page?.kind === "lists") {
         const { page: next, effect } = sheet.listsKey(page, key);
         setLists(() => next);
@@ -2450,6 +2454,7 @@ export function CasApp() {
         else if (action.id === "browseSortSize") setBrowse((b) => ({ ...b, sort: "size" }));
       } else if (action.id.startsWith("lists") && page?.kind === "lists") {
         const fn = {
+          listsInsertCell: sheet.insertCell,
           listsInsertRow: sheet.insertRow,
           listsDeleteRow: sheet.deleteRow,
           listsInsertColumn: sheet.insertColumn,
@@ -2462,7 +2467,7 @@ export function CasApp() {
           const next = fn(page);
           setLists(() => next);
           void recalcLists(next);
-        }
+        } else if (action.id === "listsTable") setLists((p) => ({ ...p, table: p.table ? undefined : { start: 0, step: 1 }, edit: null }));
       } else if (action.id === "geoCoords") {
         setWizard(openWizard({ kind: "wizard", title: "Point by Coordinates", arrows: false, fields: [{ label: "x:", value: "0" }, { label: "y:", value: "0" }], build: "geocoords:{0}:{1}" }));
       } else if (action.id.startsWith("geoTool:") && page?.kind === "graphs") {
@@ -3016,6 +3021,12 @@ export function CasApp() {
         })();
         return;
       }
+      if (built.startsWith("lists:tableset:") && page?.kind === "lists") {
+        const [start, step] = built.slice("lists:tableset:".length).split(":").map((v) => Number(v.replace(/−/g, "-")));
+        if (!Number.isFinite(start) || !(step! > 0)) setError("Error: Invalid table settings");
+        else setLists((p) => ({ ...p, table: { start: start!, step: step! } }));
+        return;
+      }
       if (built.startsWith("lists:") && page?.kind === "lists") {
         const parts = built.split(":");
         if (parts[1] === "seq") {
@@ -3297,7 +3308,7 @@ export function CasApp() {
         if (page?.kind === "lists") {
           // An unnamed column is a[] (column A), as the handheld writes it in the dialogs.
           const name = (i: number) => page.cols[i]?.name ?? `${sheet.letter(i).toLowerCase()}[]`;
-          setMenu({ items: listsMenu(name(page.sel.col), name(page.sel.col + 1)), state: openMenu() });
+          setMenu({ items: listsMenu(name(page.sel.col), name(page.sel.col + 1), page.table), state: openMenu() });
           return;
         }
         if (page?.kind === "datastats") {
@@ -4242,7 +4253,19 @@ export function CasApp() {
               )}
               {view === "doc" && sorter === null && (
               <LayoutFrame doc={doc} renderOther={renderOther} splitting={splitting} onFocus={(id) => setDoc((d) => ({ ...d, active: Math.max(0, d.pages.findIndex((p) => p.id === id)) }))} onEmpty={askRegion}>
-              {view === "doc" && page?.kind === "lists" && <ListsApp page={page} highlights={pageHighlights} onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))} />}
+              {view === "doc" && page?.kind === "lists" && !page.table && (
+                <ListsApp page={page} highlights={pageHighlights} onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))} />
+              )}
+              {view === "doc" && page?.kind === "lists" && page.table && (
+                <FunctionTable
+                  fns={problemFunctions(doc, problemOf(page))}
+                  start={page.table.start}
+                  step={page.table.step}
+                  giac={engine.current?.giac ?? null}
+                  ready={status === "ready" || status === "busy"}
+                  className="absolute inset-0"
+                />
+              )}
               {view === "doc" && page?.kind === "notes" && (
                 <NotesApp
                   page={page}
@@ -4494,6 +4517,11 @@ export function CasApp() {
 }
 
 /** Whether Esc has something to cancel on the page (a selection, a tool, an entry line, a cell, a running program). */
+/** The functions of a problem's Graphs pages, for a Lists & Spreadsheet function table. */
+function problemFunctions(doc: CasDocument, problem: number): TableFn[] {
+  return doc.pages.flatMap((p) => (p.kind === "graphs" && problemOf(p) === problem ? graphFunctions(p) : []));
+}
+
 function pageTakesEsc(page: Page | undefined, py: { status: PyStatus; canvas: DrawOp[] | null }): boolean {
   switch (page?.kind) {
     case "calculator":
