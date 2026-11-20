@@ -4292,7 +4292,6 @@ export function CasApp() {
                   page={page}
                   highlights={pageHighlights}
                   onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))}
-                  onLineKey={(dir) => setLists((p) => sheet.lineKey(p, dir))}
                 />
               )}
               {view === "doc" && page?.kind === "lists" && page.table && (

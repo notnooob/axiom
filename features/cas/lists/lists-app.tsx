@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/shared/lib/utils";
 import { MathView } from "../math/render";
 import type { Row } from "../math/tree";
@@ -19,17 +19,35 @@ const tall = (row: Row) => /"t":"(frac|matrix|piecewise|system|integral|bigop|li
 export function ListsApp({
   page,
   onSelect,
-  onLineKey,
   highlights = [],
 }: {
   page: ListsPage;
   onSelect: (sel: ListsSel) => void;
-  /** The cell line's ◄ ► buttons: move the cursor in the selected cell. */
-  onLineKey?: (dir: "left" | "right") => void;
   highlights?: Highlight[];
 }) {
   const box = useRef<HTMLDivElement>(null);
   const rows = Math.max(rowsUsed(page) + 12, page.sel.row + 6, 24);
+  // How far the spreadsheet can still scroll each way, for the cell line's ◄ ► (greyed at either end).
+  const [ends, setEnds] = useState({ left: true, right: false });
+  // Where a ◄ ► scroll is heading, so presses in quick succession each move a further column.
+  const heading = useRef<number | null>(null);
+  const measure = () => {
+    const el = box.current;
+    if (!el) return;
+    if (heading.current !== null && Math.abs(el.scrollLeft - heading.current) < 2) heading.current = null;
+    setEnds({ left: el.scrollLeft <= 1, right: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 });
+  };
+  useLayoutEffect(measure, []);
+  /** ◄ ►: the spreadsheet a column to the left or right, landing on a column's edge; the selection stays where it is. */
+  const scrollColumns = (dir: -1 | 1) => {
+    const el = box.current;
+    const width = el?.querySelector<HTMLElement>("[data-colhead]")?.offsetWidth;
+    if (!el || !width) return;
+    const from = heading.current ?? el.scrollLeft;
+    const to = Math.min(el.scrollWidth - el.clientWidth, Math.max(0, (Math.round(from / width) + dir) * width));
+    heading.current = to;
+    el.scrollTo({ left: to, behavior: "smooth" });
+  };
   useLayoutEffect(() => {
     box.current?.querySelector("[data-sel]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [page.sel.row, page.sel.col]);
@@ -72,7 +90,7 @@ export function ListsApp({
   const line = cellLine(page);
   return (
     <div className="absolute inset-0 flex flex-col bg-casScreen font-casui text-[calc(4cqw*var(--axiom-text,1))] text-casInk">
-    <div ref={box} className="relative isolate min-h-0 flex-1 overflow-auto scrollbar-thin">
+    <div ref={box} onScroll={measure} onWheel={() => (heading.current = null)} className="relative isolate min-h-0 flex-1 overflow-auto scrollbar-thin">
       <div className="w-max">
         <div className="sticky top-0 z-10 flex bg-[#e8e8e8]">
           <div className="sticky left-0 z-10 h-[6.4cqw] w-[8cqw] shrink-0 border-b border-r border-casRule bg-[#e8e8e8]" />
@@ -82,6 +100,7 @@ export function ListsApp({
             return (
               <div
                 key={c}
+                data-colhead
                 {...(on ? { "data-sel": true } : {})}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onSelect({ row: 0, col: c })}
@@ -122,16 +141,17 @@ export function ListsApp({
           {/* The cursor shows only while the cell is being edited, wherever it is in the cell. */}
           {page.edit ? <MathView row={page.edit.row} cursor={page.edit.cursor} className="font-casmath" /> : <MathView row={line.row} className="font-casmath" />}
         </div>
-        {/* ◄ ► at the right end, as on the handheld: the cursor in the cell, a step at a time. */}
+        {/* ◄ ► at the right end, as on the handheld: they scroll the spreadsheet a column left or right, to reach more columns. */}
         {(["left", "right"] as const).map((dir) => (
           <button
             key={dir}
             type="button"
             tabIndex={-1}
-            aria-label={dir === "left" ? "Move the cursor left in the cell" : "Move the cursor right in the cell"}
+            disabled={ends[dir]}
+            aria-label={dir === "left" ? "Scroll the columns left" : "Scroll the columns right"}
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => onLineKey?.(dir)}
-            className="flex w-[6cqw] shrink-0 items-center justify-center self-stretch border-l border-casRule text-[0.8em] text-casInk hover:bg-[#e2e2e2]"
+            onClick={() => scrollColumns(dir === "left" ? -1 : 1)}
+            className="flex w-[6cqw] shrink-0 items-center justify-center self-stretch border-l border-casRule text-[0.8em] text-casInk hover:bg-[#e2e2e2] disabled:text-casDim disabled:hover:bg-transparent"
           >
             {dir === "left" ? "◄" : "►"}
           </button>
