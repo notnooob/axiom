@@ -1,25 +1,34 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { app, off, rule, sub, wiz, type Menu } from "../menus/types";
 import type { DataStatsPage } from "../state/document";
+import { CAT_PLOTS, effectivePlot } from "./plot";
 
 const tick = (on: boolean | undefined, label: string) => `${on ? "✓ " : ""}${label}`;
 
-/** The menu key on a Data & Statistics page, laid out as the handheld's (greyed: not built yet). */
-export function dataMenu(p: DataStatsPage): Menu {
-  const two = Boolean(p.y);
+/**
+ * The menu key on a Data & Statistics page, laid out as the handheld's
+ * (greyed: not built yet, or not for this data). A categorical x list (text)
+ * offers the dot, bar and pie charts in place of the numeric plots.
+ */
+export function dataMenu(p: DataStatsPage, categorical = false): Menu {
+  const plot = effectivePlot(p, categorical);
+  // Two numeric lists: the scatter plots and everything fitted to them.
+  const two = Boolean(p.y) && !categorical;
   // Residuals are measured from what's been added to a scatter: a regression, the movable line or a function.
   const against = two && Boolean(p.regression || p.movable || p.functions?.length);
+  const num = (label: string, kind: DataStatsPage["plot"]) => (categorical ? off(label) : app(tick(plot === kind, label), `dsPlot:${kind}`));
+  const cat = (label: string, kind: DataStatsPage["plot"]) => (categorical && !p.y ? app(tick(plot === kind, label), `dsPlot:${kind}`) : off(label));
   return [
     sub("Plot Type", [
-      app(tick(p.plot === "dot", "Dot Plot"), "dsPlot:dot"),
-      app(tick(p.plot === "box", "Box Plot"), "dsPlot:box"),
-      app(tick(p.plot === "histogram", "Histogram"), "dsPlot:histogram"),
-      app(tick(p.plot === "normprob", "Normal Probability Plot"), "dsPlot:normprob"),
-      rule(two ? app(tick(p.plot === "scatter", "Scatter Plot"), "dsPlot:scatter") : off("Scatter Plot")),
-      two ? app(tick(p.plot === "xyline", "XY Line Plot"), "dsPlot:xyline") : off("XY Line Plot"),
-      rule(off("Dot Chart")),
-      off("Bar Chart"),
-      off("Pie Chart"),
+      num("Dot Plot", "dot"),
+      num("Box Plot", "box"),
+      num("Histogram", "histogram"),
+      num("Normal Probability Plot", "normprob"),
+      rule(two ? app(tick(plot === "scatter", "Scatter Plot"), "dsPlot:scatter") : off("Scatter Plot")),
+      two ? app(tick(plot === "xyline", "XY Line Plot"), "dsPlot:xyline") : off("XY Line Plot"),
+      rule(cat("Dot Chart", "dotchart")),
+      cat("Bar Chart", "bar"),
+      cat("Pie Chart", "pie"),
     ]),
     sub("Plot Properties", [
       app(tick(p.connect, "Connect Data Points"), "dsConnect"),
@@ -39,13 +48,15 @@ export function dataMenu(p: DataStatsPage): Menu {
         ]),
       ]),
       app(tick(p.extendWhiskers, "Extend Box Plot Whiskers"), "dsWhiskers"),
-      off("Show All Labels"),
+      // Counts on every bar and slice.
+      plot === "bar" || plot === "pie" || plot === "histogram" ? app(tick(p.labels, "Show All Labels"), "dsLabels") : off("Show All Labels"),
       rule(app("Add X Variable", "dsAxis:x")),
       off("Add X Summary List"),
       p.x ? app("Remove X Variable", "dsRemoveX") : off("Remove X Variable"),
       app("Add Y Variable", "dsAxis:y"),
-      off("Add Y Summary List"),
-      p.y ? app("Remove Y Variable", "dsRemoveY") : off("Remove Y Variable"),
+      // How many of each x value: a frequency list in place of a y variable.
+      p.x ? app("Add Y Summary List", "dsAxis:sum") : off("Add Y Summary List"),
+      p.y || p.ySummary ? app("Remove Y Variable", "dsRemoveY") : off("Remove Y Variable"),
       rule(off("Force Numeric X")),
       off("Force Numeric Y"),
       off("Split Categories by Variable"),
@@ -59,14 +70,21 @@ export function dataMenu(p: DataStatsPage): Menu {
       off("Insert Slider"),
       rule(off("Select All Points")),
       off("Select Image"),
-      off("Sort"),
+      categorical && !p.y
+        ? sub("Sort", [
+            app(tick(!p.sort || p.sort === "list", "List Order"), "dsSort:list"),
+            app(tick(p.sort === "value", "Value Order"), "dsSort:value"),
+            app(tick(p.sort === "alpha", "Alphabetical"), "dsSort:alpha"),
+          ])
+        : off("Sort"),
     ]),
     sub("Analyze", [
       app("Remove", "dsRemoveAnalysis"),
       rule(two ? app(tick(Boolean(p.movable), "Add Movable Line"), "dsMovable") : off("Add Movable Line")),
       p.movable ? app(tick(p.movable.lock, "Lock Intercept at Zero"), "dsLock") : off("Lock Intercept at Zero"),
       wiz("Plot Function...", "Plot Function", [{ label: "f(x)=", value: "" }], "ds:fn:{0}"),
-      off("Shade Under Function"),
+      // Categorical plots have no numeric x to shade along.
+      p.functions?.length && !CAT_PLOTS.includes(plot) ? app("Shade Under Function", "dsShade") : off("Shade Under Function"),
       rule(
         two
           ? sub("Regression", [
@@ -91,7 +109,7 @@ export function dataMenu(p: DataStatsPage): Menu {
         ]),
       ),
       rule(wiz("Plot Value...", "Plot Value", [{ label: "Value:", value: p.x ? `mean(${p.x})` : "" }], "ds:value:{0}")),
-      p.plot === "histogram" ? app(tick(p.normalPdf, "Show Normal PDF"), "dsNormal") : off("Show Normal PDF"),
+      plot === "histogram" ? app(tick(p.normalPdf, "Show Normal PDF"), "dsNormal") : off("Show Normal PDF"),
       off("Graph Trace"),
     ]),
     sub("Window/Zoom", [

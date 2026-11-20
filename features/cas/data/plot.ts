@@ -5,7 +5,7 @@
  * and the window that fits the data. Pure, so they're tested on their own.
  */
 import type { GraphWindow } from "../graphs/model";
-import type { DataPlot, DataStatsPage, HistScale } from "../state/document";
+import type { CategoryOrder, DataPlot, DataStatsPage, HistScale } from "../state/document";
 
 /** Quartiles as the handheld works them out: medians of the lower and upper halves (the median left out when n is odd). */
 export function fiveNumber(values: number[]) {
@@ -64,6 +64,7 @@ export function normalCurve(x: number, mean: number, sd: number, n: number, widt
  * Dot and box plots have none: their y-axis still offers to add a variable.
  */
 export function yAxisTitle(page: Pick<DataStatsPage, "plot" | "histScale">): string | undefined {
+  if (page.plot === "bar") return "Frequency";
   if (page.plot === "histogram") return page.histScale === "percent" ? "Percent" : page.histScale === "density" ? "Density" : "Frequency";
   if (page.plot === "normprob") return "z-Quantile";
   return undefined;
@@ -109,6 +110,118 @@ const pad = (lo: number, hi: number, k = 0.08): [number, number] => {
 
 /** Which plots take one list and which take two. */
 export const ONE_VAR: DataPlot[] = ["dot", "box", "histogram", "normprob"];
+/** The plots for categorical data (a list of text). */
+export const CAT_PLOTS: DataPlot[] = ["dotchart", "bar", "pie"];
+
+/**
+ * A list's values as the engine prints them: numbers, or, when the list
+ * holds any text, categories, as the handheld treats a column of strings.
+ * In a categorical list a number is a category too, and undef (an empty
+ * cell) is "", kept so the values still line up with a summary list.
+ */
+export function parseValues(raw: string): { nums: number[]; cats?: string[] } {
+  const body = raw.trim().replace(/^\[|\]$/g, "");
+  if (!body) return { nums: [] };
+  const items: string[] = [];
+  let cur = "";
+  let quoted = false;
+  for (let i = 0; i < body.length; i++) {
+    const ch = body[i]!;
+    if (ch === '"' && body[i - 1] !== "\\") quoted = !quoted;
+    if (ch === "," && !quoted) {
+      items.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  items.push(cur.trim());
+  const text = (s: string) => /^".*"$/s.test(s);
+  if (!items.some(text)) return { nums: toNumbers(items) };
+  const cats = items.map((s) => {
+    if (!s || s === "undef") return "";
+    if (text(s)) return s.slice(1, -1).replace(/\\"/g, '"');
+    const n = toNumbers([s])[0]!;
+    return Number.isNaN(n) ? s : String(n);
+  });
+  return { nums: [], cats };
+}
+
+function toNumbers(items: string[]): number[] {
+  return items.map((s) => {
+    // Giac prints a negative zero as "0.-000000000000000".
+    if (/^0\.-0+$/.test(s)) return 0;
+    const v = s.replace(/e\+?/, "e");
+    return /^-?[\d.]+(e-?\d+)?$/.test(v) ? Number(v) : NaN;
+  });
+}
+
+/**
+ * Each category and how many there are, in the order asked for (Sort):
+ * as they first appear in the list, most first, or A–Z. With a summary
+ * list, each category counts its summary value instead of 1.
+ */
+export function categoryCounts(cats: string[], summary?: number[], order: CategoryOrder = "list"): { name: string; n: number }[] {
+  const counts = new Map<string, number>();
+  cats.forEach((c, i) => {
+    if (!c) return;
+    const k = summary ? summary[i] : 1;
+    if (k === undefined || !Number.isFinite(k)) return;
+    counts.set(c, (counts.get(c) ?? 0) + k);
+  });
+  const out = [...counts].map(([name, n]) => ({ name, n }));
+  // Value Order puts the biggest first, so a bar chart reads as a Pareto chart.
+  if (order === "value") out.sort((a, b) => b.n - a.n);
+  else if (order === "alpha") out.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  return out;
+}
+
+/** A pie chart's slices, clockwise from the top: each one's share and its start and end angles (radians). */
+export function pieSlices(counts: { name: string; n: number }[]) {
+  const total = counts.reduce((s, c) => s + Math.max(0, c.n), 0) || 1;
+  let at = -Math.PI / 2;
+  return counts.map((c) => {
+    const share = Math.max(0, c.n) / total;
+    const slice = { ...c, share, from: at, to: at + share * Math.PI * 2 };
+    at = slice.to;
+    return slice;
+  });
+}
+
+/**
+ * Each value repeated as often as its summary (frequency) list says, for the
+ * one-list plots. Frequencies must be whole numbers, 0 or more; returns
+ * null when one isn't.
+ */
+export function expandSummary(values: number[], freq: number[]): number[] | null {
+  const out: number[] = [];
+  for (let i = 0; i < Math.min(values.length, freq.length); i++) {
+    const k = freq[i]!;
+    if (!Number.isInteger(k) || k < 0) return null;
+    for (let j = 0; j < k; j++) out.push(values[i]!);
+  }
+  return out;
+}
+
+/**
+ * The plot drawn for the data: a page keeps the plot it was given, but a
+ * categorical list can't make a dot plot and numbers can't make a pie chart,
+ * so each falls back to the handheld's default for its kind of data (a dot
+ * chart, or a bar chart from a summary list; a dot plot, or a histogram from one).
+ */
+export function effectivePlot(page: Pick<DataStatsPage, "plot" | "y" | "ySummary">, categorical: boolean): DataPlot {
+  if (categorical) {
+    // A numeric y against categories plots each category's values in its own column.
+    if (page.y) return "scatter";
+    return CAT_PLOTS.includes(page.plot) ? page.plot : page.ySummary ? "bar" : "dotchart";
+  }
+  if (CAT_PLOTS.includes(page.plot)) return page.ySummary ? "histogram" : page.y ? "scatter" : "dot";
+  return page.plot;
+}
+
+/** A dot or bar chart's window: a column for each category, and room above the tallest. */
+export function categoryWindow(counts: { n: number }[], plot: DataPlot): GraphWindow {
+  const top = Math.max(1, ...counts.map((c) => c.n));
+  return { xmin: -0.6, xmax: counts.length - 0.4, ymin: 0, ymax: plot === "dotchart" ? top + 1 : top * 1.15, xscl: 1, yscl: 1 };
+}
 
 /** The window that fits the data for the page's plot (Zoom – Data). */
 export function fitWindow(page: DataStatsPage, xs: number[], ys: number[]): GraphWindow {

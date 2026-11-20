@@ -1,6 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { autoBins, boxPlot, dotStacks, equationFn, fitWindow, fiveNumber, histogram, histogramBars, invNorm, normalCurve, residuals, ticks, yAxisTitle } from "./plot";
+import {
+  autoBins,
+  boxPlot,
+  categoryCounts,
+  categoryWindow,
+  dotStacks,
+  effectivePlot,
+  equationFn,
+  expandSummary,
+  fitWindow,
+  fiveNumber,
+  histogram,
+  histogramBars,
+  invNorm,
+  normalCurve,
+  parseValues,
+  pieSlices,
+  residuals,
+  ticks,
+  yAxisTitle,
+} from "./plot";
 
 describe("data & statistics numbers", () => {
   it("five-number summary as the handheld works it out", () => {
@@ -68,5 +88,51 @@ describe("histogram scale", () => {
     expect(win.xmax).toBeGreaterThanOrEqual(4.5);
     expect(normalCurve(0, 0, 1, 10, 2, "count")).toBeCloseTo(normalCurve(0, 0, 1, 10, 2, "density") * 20);
     expect(normalCurve(0, 0, 1, 10, 2, "percent")).toBeCloseTo(normalCurve(0, 0, 1, 10, 2, "density") * 200);
+  });
+
+  it("reads a list of text as categories, and numbers as numbers", () => {
+    expect(parseValues("[1.0,2.5,-3]")).toEqual({ nums: [1, 2.5, -3] });
+    expect(parseValues('["red","blue, green",2.0,undef]')).toEqual({ nums: [], cats: ["red", "blue, green", "2", ""] });
+    expect(parseValues("")).toEqual({ nums: [] });
+  });
+  it("counts categories in list, value or A–Z order, with a summary list's totals", () => {
+    const cats = ["b", "a", "b", "", "c", "b", "a"];
+    expect(categoryCounts(cats)).toEqual([
+      { name: "b", n: 3 },
+      { name: "a", n: 2 },
+      { name: "c", n: 1 },
+    ]);
+    expect(categoryCounts(cats, undefined, "alpha").map((c) => c.name)).toEqual(["a", "b", "c"]);
+    expect(categoryCounts(["x", "y", "x"], [2, 5, 1], "value")).toEqual([
+      { name: "y", n: 5 },
+      { name: "x", n: 3 },
+    ]);
+  });
+  it("pie slices share the circle, clockwise from the top", () => {
+    const s = pieSlices([
+      { name: "a", n: 1 },
+      { name: "b", n: 3 },
+    ]);
+    expect(s[0]!.share).toBe(0.25);
+    expect(s[0]!.from).toBeCloseTo(-Math.PI / 2);
+    expect(s[1]!.to).toBeCloseTo((3 * Math.PI) / 2);
+  });
+  it("repeats values by a summary list of whole numbers", () => {
+    expect(expandSummary([1, 2, 3], [2, 0, 1])).toEqual([1, 1, 3]);
+    expect(expandSummary([1, 2], [1.5, 1])).toBeNull();
+  });
+  it("falls back to a plot that suits the data", () => {
+    expect(effectivePlot({ plot: "dot" }, true)).toBe("dotchart");
+    expect(effectivePlot({ plot: "histogram", ySummary: "f" }, true)).toBe("bar");
+    expect(effectivePlot({ plot: "pie" }, true)).toBe("pie");
+    expect(effectivePlot({ plot: "pie" }, false)).toBe("dot");
+    expect(effectivePlot({ plot: "bar", ySummary: "f" }, false)).toBe("histogram");
+    expect(effectivePlot({ plot: "box" }, false)).toBe("box");
+  });
+  it("a bar chart's window has a column for each category", () => {
+    const w = categoryWindow([{ n: 4 }, { n: 10 }], "bar");
+    expect([w.xmin, w.xmax, w.ymin]).toEqual([-0.6, 1.6, 0]);
+    expect(w.ymax).toBeCloseTo(11.5);
+    expect(yAxisTitle({ plot: "bar" })).toBe("Frequency");
   });
 });

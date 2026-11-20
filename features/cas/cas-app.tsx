@@ -577,6 +577,8 @@ export function CasApp() {
   }, []);
   /** The window a Data & Statistics page is drawn in (its own, or the one fitting the data): what zoom works from. */
   const dataWindow = useRef<GraphWindow | null>(null);
+  /** Whether the Data & Statistics page's x list is text (categories), for its menu. */
+  const dataCats = useRef(false);
   /** The Notes editor's commands, for the keypad, its menu and the assistant. */
   const notesApi = useRef<NotesApi | null>(null);
   /** A Notes maths box worked out with the problem's variables; what it defines is defined for the problem. */
@@ -2460,6 +2462,29 @@ export function CasApp() {
         else if (id === "dsNormal") setData((p) => ({ ...p, normalPdf: !p.normalPdf }));
         else if (id === "dsResidSquares") setData((p) => ({ ...p, residualSquares: !p.residualSquares }));
         else if (id === "dsResidPlot") setData((p) => ({ ...p, residualPlot: !p.residualPlot }));
+        else if (id === "dsLabels") setData((p) => ({ ...p, labels: !p.labels }));
+        else if (id.startsWith("dsSort:")) {
+          // List order is the default, so it's stored as unset.
+          const order = id.slice(7) as NonNullable<DataStatsPage["sort"]>;
+          setData((p) => ({ ...p, sort: order === "list" ? undefined : order }));
+        } else if (id === "dsShade") {
+          // Which function (when there's more than one) and the bounds to shade between.
+          const fns = page.functions ?? [];
+          const s = page.shade;
+          const bounds = [
+            { label: "Lower Bound:", value: s?.from ?? (shownWin ? fmt(shownWin.xmin) : "") },
+            { label: "Upper Bound:", value: s?.to ?? (shownWin ? fmt(shownWin.xmax) : "") },
+          ];
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Shade Under Function",
+              arrows: false,
+              fields: fns.length > 1 ? [{ label: "Function:", value: `${(s?.fn ?? 0) + 1}: ${fns[s?.fn ?? 0]}`, options: fns.map((f, i) => `${i + 1}: ${f}`) }, ...bounds] : bounds,
+              build: fns.length > 1 ? "ds:shade:{0}:{1}:{2}" : "ds:shade:1:{0}:{1}",
+            }),
+          );
+        }
         else if (id.startsWith("dsScale:")) {
           // Count is the default, so it's stored as unset; the window refits to the new heights.
           const scale = id.slice(8) as NonNullable<DataStatsPage["histScale"]>;
@@ -2470,24 +2495,40 @@ export function CasApp() {
           const names = listNames();
           setMenu({
             items: names.length
-              ? names.map((n) => menuApp(n, `dsVar:${axis}:${n}`))
+              ? names.map((n) => menuApp(n, axis === "sum" ? `dsSum:${n}` : `dsVar:${axis}:${n}`))
               : [{ label: "No lists in this problem" }],
             state: openMenu(),
           });
+        } else if (id.startsWith("dsSum:")) {
+          // A summary list takes the y variable's place; numbers summarised make a histogram, as on the handheld
+          // (categories make a bar chart, which the page picks for them).
+          const name = id.slice(6);
+          setData((p) => ({ ...p, ySummary: name, y: undefined, regression: undefined, movable: undefined, plot: p.plot === "box" || p.plot === "pie" || p.plot === "bar" ? p.plot : "histogram", window: undefined }));
         } else if (id.startsWith("dsVar:")) {
           const [, axis, name] = id.split(":");
           setData((p) => {
-            const next = { ...p, [axis === "x" ? "x" : "y"]: name, window: undefined };
+            const next = { ...p, [axis === "x" ? "x" : "y"]: name, ...(axis === "y" ? { ySummary: undefined } : {}), window: undefined };
             // Two lists make a scatter plot, one a dot plot, as on the handheld.
             if (next.x && next.y && ONE_VAR.includes(next.plot)) next.plot = "scatter";
             if (!next.y && !ONE_VAR.includes(next.plot)) next.plot = "dot";
             return next;
           });
         } else if (id === "dsRemoveX") setData((p) => ({ ...p, x: undefined, window: undefined }));
-        else if (id === "dsRemoveY") setData((p) => ({ ...p, y: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
+        else if (id === "dsRemoveY")
+          setData((p) => ({ ...p, y: undefined, ySummary: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
         else if (id === "dsClearAll") setData((p) => ({ kind: "datastats", id: p.id, problem: p.problem, plot: "dot" }));
         else if (id === "dsRemoveAnalysis")
-          setData((p) => ({ ...p, regression: undefined, movable: undefined, functions: undefined, values: undefined, normalPdf: undefined, residualSquares: undefined, residualPlot: undefined }));
+          setData((p) => ({
+            ...p,
+            regression: undefined,
+            movable: undefined,
+            functions: undefined,
+            values: undefined,
+            shade: undefined,
+            normalPdf: undefined,
+            residualSquares: undefined,
+            residualPlot: undefined,
+          }));
         else if (id.startsWith("dsReg:")) {
           const kind = id.slice(6);
           setData((p) => ({ ...p, regression: p.regression === kind ? undefined : kind }));
@@ -2872,6 +2913,12 @@ export function CasApp() {
           if (![xmin, xmax, ymin, ymax].every(Number.isFinite) || xmin! >= xmax! || ymin! >= ymax!) setError("Error: Invalid window settings");
           else setData((p) => ({ ...p, window: { xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax!, xscl: 1, yscl: 1 } }));
         } else if (what === "settings") setData((p) => ({ ...p, digits: args[0], diagnostics: args[1] === "Yes" }));
+        else if (what === "shade") {
+          const fn = parseInt(args[0] ?? "1", 10) - 1;
+          const [from, to] = [args[1]?.trim(), args[2]?.trim()];
+          if (!from || !to) setError("Error: Enter both bounds");
+          else setData((p) => (p.functions?.[fn] ? { ...p, shade: { fn, from, to } } : p));
+        }
         return;
       }
       if (built.startsWith("lists:run:") && page?.kind === "lists") {
@@ -3166,7 +3213,7 @@ export function CasApp() {
           return;
         }
         if (page?.kind === "datastats") {
-          setMenu({ items: dataMenu(page), state: openMenu() });
+          setMenu({ items: dataMenu(page, dataCats.current), state: openMenu() });
           return;
         }
         if (page?.kind === "geometry") {
@@ -4124,6 +4171,7 @@ export function CasApp() {
                   onAxis={(axis) => runAction({ kind: "app", id: `dsAxis:${axis}` })}
                   onMovable={(m, b) => setData((p) => (p.movable ? { ...p, movable: { ...p.movable, m, b } } : p))}
                   onWindow={(w) => (dataWindow.current = w)}
+                  onCategorical={(c) => (dataCats.current = c)}
                 />
               )}
               {view === "doc" && page?.kind === "geometry" && <GeometryApp page={page} highlights={pageHighlights} onChange={setGeo} onError={setError} onAsk={askGeoAmount} />}

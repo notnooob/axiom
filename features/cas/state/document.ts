@@ -228,7 +228,10 @@ export type ListsPage = {
  * variable name, with what's been added to it from Analyze. `window` unset
  * fits the data.
  */
-export type DataPlot = "dot" | "box" | "histogram" | "normprob" | "scatter" | "xyline";
+/** dotchart, bar and pie draw categorical data: a list of text ("red", "blue" …). */
+export type DataPlot = "dot" | "box" | "histogram" | "normprob" | "scatter" | "xyline" | "dotchart" | "bar" | "pie";
+/** Actions ▸ Sort for categorical plots: the order the categories first appear in, by count, or A–Z. */
+export type CategoryOrder = "list" | "value" | "alpha";
 /** Histogram Scale: what a bar's height counts (Frequency, Percent or Density on the y-axis). */
 export type HistScale = "count" | "percent" | "density";
 export type DataStatsPage = {
@@ -254,7 +257,18 @@ export type DataStatsPage = {
   functions?: string[];
   /** Plot Value: expressions (mean(a) …) drawn as vertical lines. */
   values?: string[];
+  /** Shade Under Function: which plotted function (its index in functions) and the bounds, as typed. */
+  shade?: { fn: number; from: string; to: string };
   normalPdf?: boolean;
+  /**
+   * Add Y Summary List: how many of each x value (or category), in place of
+   * a y variable. The plot counts each x that many times.
+   */
+  ySummary?: string;
+  /** Show All Labels: counts on every bar and slice. */
+  labels?: boolean;
+  /** Unset is list order. */
+  sort?: CategoryOrder;
   digits?: string;
   diagnostics?: boolean;
   xml?: string;

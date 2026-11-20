@@ -313,7 +313,9 @@ export function describeScreen(s: AgentSnapshot): string {
         out.push(`Text: ${p.paras.map((runs) => runs.map(runText).join("")).join("\n").slice(0, 400) || "(empty)"}`);
         break;
       case "datastats":
-        out.push(`Plot: ${p.plot}${p.x ? ` of ${p.x}` : " (no list chosen)"}${p.y ? ` against ${p.y}` : ""}${p.regression ? `, with ${p.regression}` : ""}.`);
+        out.push(
+          `Plot: ${p.plot}${p.x ? ` of ${p.x}` : " (no list chosen)"}${p.y ? ` against ${p.y}` : ""}${p.ySummary ? ` with summary list ${p.ySummary}` : ""}${p.regression ? `, with ${p.regression}` : ""}${p.shade ? `, shaded under f(x) = ${p.functions?.[p.shade.fn]} from ${p.shade.from} to ${p.shade.to}` : ""}.`,
+        );
         break;
       case "python":
         out.push(`Program ${p.file}: ${p.source.slice(0, 300) || "(empty)"}`);
@@ -740,13 +742,14 @@ export const TOOLS: AgentTool[] = [
     name: "configure_data_stats",
     title: "Set up Data & Statistics",
     description:
-      "On the active Data & Statistics page: choose the x and y lists (named list columns or list variables), the plot type, a regression shown on a scatter plot, and diagnostics (r², shown with the regression). The page draws it; compute the numbers with calculate (e.g. LinRegMx x,y then stat.results) to report them.",
+      "On the active Data & Statistics page: choose the x and y lists (named list columns or list variables), or a summary list (frequencies of each x value) in place of y, the plot type, a regression shown on a scatter plot, and diagnostics (r², shown with the regression). A list of text (\"red\", \"blue\" …) is categorical: it takes dotchart, bar or pie, and numbers take the other plots. The page draws it; compute the numbers with calculate (e.g. LinRegMx x,y then stat.results) to report them.",
     inputSchema: {
       type: "object",
       properties: {
         x: { type: "string" },
         y: { type: "string" },
-        plot: { type: "string", enum: ["dot", "box", "histogram", "normprob", "scatter", "xyline"] },
+        summary: { type: "string", description: "A frequency list for x, in place of y" },
+        plot: { type: "string", enum: ["dot", "box", "histogram", "normprob", "scatter", "xyline", "dotchart", "bar", "pie"] },
         regression: { type: "string", enum: ["none", "LinRegMx", "LinRegBx", "QuadReg", "PowerReg", "ExpReg", "LnReg", "SinReg", "Logistic"] },
         diagnostics: { type: "boolean" },
       },
@@ -757,6 +760,7 @@ export const TOOLS: AgentTool[] = [
       if (a.x) app(`dsVar:x:${String(a.x).toLowerCase()}`);
       await tick();
       if (a.y) app(`dsVar:y:${String(a.y).toLowerCase()}`);
+      else if (a.summary) app(`dsSum:${String(a.summary).toLowerCase()}`);
       await tick();
       if (a.plot) app(`dsPlot:${String(a.plot)}`);
       await tick();
