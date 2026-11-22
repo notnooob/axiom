@@ -233,18 +233,41 @@ const MAIN: Row[] = [
   },
 ];
 
+/** The letter block's function keys, shared by both layouts. */
+const EE = key("EE", "EE", { k: "char", c: "E" });
+const PUNCT = key("?!▸", "Punctuation", { panel: punctuationPanel });
+const PI = key("π▸", "π", { panel: constantsPanel }, { kbd: "π is typed pi" });
+const FLAG = key(<FlagIcon />, "Flag", null);
+const COMMA = ch(",", ",");
+const RETURN = key("↵", "Return", { k: "enter" });
+
 /** The letter block: a function key, seven letters, a function key; space ends the last row. */
 const ALPHA: (Spec | null)[][] = [
-  [
-    key("EE", "EE", { k: "char", c: "E" }),
-    ..."abcdefg".split("").map(letter),
-    key("?!▸", "Punctuation", { panel: punctuationPanel }),
-  ],
-  [key("π▸", "π", { panel: constantsPanel }, { kbd: "π is typed pi" }), ..."hijklmn".split("").map(letter), key(<FlagIcon />, "Flag", null)],
-  [ch(",", ","), ..."opqrstu".split("").map(letter), key("↵", "Return", { k: "enter" })],
+  [EE, ..."abcdefg".split("").map(letter), PUNCT],
+  [PI, ..."hijklmn".split("").map(letter), FLAG],
+  [COMMA, ..."opqrstu".split("").map(letter), RETURN],
   [null, ..."vwxyz".split("").map(letter)],
 ];
 const SPACE = key(<SpaceIcon />, "Space", { k: "char", c: " " });
+
+/**
+ * Handheld Setup's Keypad Layout: QWERTY puts the letters where a computer
+ * keyboard has them, for students who type faster that way. The handheld
+ * itself only has A–Z order; the same keys move, nothing is added or lost.
+ */
+const QWERTY_ALPHA: (Spec | null)[][] = [
+  "qwertyuiop".split("").map(letter),
+  [..."asdfghjkl".split("").map(letter), RETURN],
+  [EE, ..."zxcvbnm".split("").map(letter), COMMA, PUNCT],
+  [PI, FLAG],
+];
+
+export type KeypadLayout = "ABC" | "QWERTY";
+
+/** The letter block for a layout: its columns, its rows, and how many columns the space bar takes after the last row. */
+export function letterRows(layout: KeypadLayout): { cols: number; rows: (Spec | null)[][]; space: number } {
+  return layout === "QWERTY" ? { cols: 10, rows: QWERTY_ALPHA, space: 8 } : { cols: 9, rows: ALPHA, space: 2 };
+}
 
 const GRID = "grid grid-cols-[1.55fr_1fr_1fr_1fr_1.55fr] gap-x-[2.6cqw] gap-y-[0.6cqw]";
 const SMALL = "h-[max(6.2cqw,32px)] text-[max(3.4cqw,14px)]";
@@ -254,16 +277,19 @@ export function Keypad({
   onKeys,
   onPanel,
   onOpen,
+  layout = "ABC",
 }: {
   onKey: (k: Key) => void;
   /** Several keys from one press (":=", "10^"), applied in order. */
   onKeys: (ks: Key[]) => void;
   onPanel: (p: Panel) => void;
   onOpen: (o: Opener) => void;
+  layout?: KeypadLayout;
 }) {
   const [ctrl, setCtrl] = useState(false);
   const [shift, setShift] = useState(false);
   const [caps, setCaps] = useState(false);
+  const alpha = letterRows(layout);
 
   const press = (s: Spec) => {
     if (s.act === "ctrl") {
@@ -323,9 +349,9 @@ export function Keypad({
           ))}
         </div>
 
-        <div className="mt-[5cqw] grid grid-cols-9 gap-x-[1.8cqw] gap-y-[2cqw]">
-          {ALPHA.flatMap((row, r) => row.map((s, c) => <div key={`${r}-${c}`}>{s && k(s, SMALL)}</div>))}
-          <div className="col-span-2">{k(SPACE, SMALL)}</div>
+        <div className={cn("mt-[5cqw] grid gap-y-[2cqw]", alpha.cols === 10 ? "grid-cols-10 gap-x-[1.2cqw]" : "grid-cols-9 gap-x-[1.8cqw]")}>
+          {alpha.rows.flatMap((row, r) => row.map((s, c) => <div key={`${r}-${c}`}>{s && k(s, SMALL)}</div>))}
+          <div style={{ gridColumn: `span ${alpha.space} / span ${alpha.space}` }}>{k(SPACE, SMALL)}</div>
         </div>
       </div>
     </div>

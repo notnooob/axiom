@@ -7,7 +7,7 @@
 import * as React from "react";
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import { Popover } from "@base-ui/react/popover";
-import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotionConfig } from "framer-motion";
 import { HistoryIcon, PencilIcon, SquarePenIcon, Trash2Icon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -206,7 +206,7 @@ function useWide() {
 /** AI mode's sidebar: beside the chat on a wide screen (it folds away), a sheet from the left on a narrow one. */
 export function ThreadSidebar({ assistant, open, onOpenChange }: { assistant: Assistant; open: boolean; onOpenChange: (o: boolean) => void }) {
   const wide = useWide();
-  const reduce = useReducedMotion();
+  const reduce = useReducedMotionConfig();
   const [ask, dialog] = useDeleteThread(assistant);
   const body = (
     <>

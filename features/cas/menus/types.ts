@@ -40,6 +40,8 @@ export type WizardField = {
   free?: boolean;
   /** A checkbox with its label beside it; the value is "Yes" or "No". */
   check?: boolean;
+  /** The label on its own line and the field across the dialog under it, for a label that's a question. */
+  stacked?: boolean;
 };
 
 export type MenuAction =
@@ -53,6 +55,8 @@ export type MenuAction =
   | {
       kind: "wizard";
       title: string;
+      /** A line of text under the title, before the fields (Conflict Detected's formula). */
+      note?: string;
       fields: WizardField[];
       build: string;
       /** false: the arrow button only on dropdown fields (Window Settings). */
@@ -73,6 +77,12 @@ export type MenuItem = {
   hint?: string;
   /** An app's icon before the row (the add-page menu), by app name. */
   icon?: string;
+  /**
+   * Why the item is greyed just now ("select an object first"): it's built,
+   * but the page isn't in a state to use it. Unset on a greyed item means
+   * not built yet. Not shown on screen; the assistant reads it.
+   */
+  unavailable?: string;
 };
 
 export type Menu = MenuItem[];
@@ -131,5 +141,7 @@ export const MATRIX_WIZARD: Extract<MenuAction, { kind: "wizard" }> = {
 export const sub = (label: string, items: MenuItem[]): MenuItem => ({ label, items });
 /** Present on the handheld, not built here yet: shown greyed. */
 export const off = (label: string): MenuItem => ({ label });
+/** Built, but greyed for now, and why (the handheld greys it the same way). */
+export const na = (label: string, why: string): MenuItem => ({ label, unavailable: why });
 /** Starts a new group: a rule above it. */
 export const rule = (item: MenuItem): MenuItem => ({ ...item, rule: true });

@@ -198,6 +198,7 @@ export function pageContent(doc: CasDocument, i: number): Record<string, unknown
           .map((c, n) => ({ column: letter(n), name: c.name, formula: c.formula, cells: c.cells, values: c.values }))
           .filter((c) => c.name || c.formula || c.cells.length),
         selected: { column: letter(p.sel.col), row: p.sel.row < 2 ? (p.sel.row ? "formula" : "name") : p.sel.row - 1 },
+        ...(p.table ? { showing: `the function table (Table menu), x from ${p.table.start} in steps of ${p.table.step}` } : {}),
       };
     case "datastats":
       return { ...base, ...JSON.parse(JSON.stringify(p, (k, v) => (k === "xml" || k === "id" || k === "kind" ? undefined : v))) };
@@ -215,6 +216,7 @@ export function pageContent(doc: CasDocument, i: number): Record<string, unknown
         ...base,
         units: `lengths in cm, angles in degrees; the page shows x from ${num((p.view?.x ?? 0) - (p.view?.w ?? 20) / 2)} to ${num((p.view?.x ?? 0) + (p.view?.w ?? 20) / 2)}, centred on y = ${num(p.view?.y ?? 0)}`,
         objects: describeGeometry(p.objects),
+        ...(p.texts?.length ? { texts: p.texts } : {}),
         ...(p.tool ? { tool: p.tool } : {}),
         ...(p.axes ? { axes: true } : {}),
       };
@@ -286,7 +288,7 @@ export function describeScreen(s: AgentSnapshot): string {
         if (hidden.length) out.push(`Hidden: ${hidden.map((f) => `f${f.n}`).join(", ")}.`);
         if (p.relations?.length) out.push(`Relations: ${p.relations.map((r) => r.text).join("; ")}.`);
         if (p.marks.length)
-          out.push(`Marked: ${p.marks.map((m) => (m.kind === "area" ? `area ${said(m.value)} under f${m.fn} on [${said(m.a)}, ${said(m.b)}]` : `${m.title ?? "point"} (${said(m.x)}, ${said(m.y)})`)).join("; ")}.`);
+          out.push(`Marked: ${p.marks.map((m) => (m.kind === "area" ? `area ${said(m.value)} under f${m.fn} on [${said(m.a)}, ${said(m.b)}]` : m.kind === "line" ? `${m.title} ${said(m.a)}x+${said(m.b)}y=${said(m.c)}` : m.kind === "value" ? `${m.title} ${said(m.value)}` : `${m.title ?? "point"} (${said(m.x)}, ${said(m.y)})`)).join("; ")}.`);
         if (p.sliders?.length) out.push(`Sliders: ${p.sliders.map((x) => `${x.name} = ${x.value}`).join(", ")}.`);
         break;
       }
@@ -305,13 +307,16 @@ export function describeScreen(s: AgentSnapshot): string {
         out.push(`Showing x from ${said(v.x - v.w / 2)} to ${said(v.x + v.w / 2)} cm.${p.axes ? " Axes on." : ""}`);
         const objs = describeGeometry(p.objects);
         out.push(objs.length ? `Objects: ${objs.slice(0, 20).map((o) => JSON.stringify(o)).join("; ")}${objs.length > 20 ? "; …" : ""}` : "The page is empty.");
+        if (p.texts?.length) out.push(`Texts: ${p.texts.map((t) => `"${t.text}" at (${said(t.x)}, ${said(t.y)})`).join("; ")}`);
         break;
       }
       case "notes":
         out.push(`Text: ${p.paras.map((runs) => runs.map(runText).join("")).join("\n").slice(0, 400) || "(empty)"}`);
         break;
       case "datastats":
-        out.push(`Plot: ${p.plot}${p.x ? ` of ${p.x}` : " (no list chosen)"}${p.y ? ` against ${p.y}` : ""}${p.regression ? `, with ${p.regression}` : ""}.`);
+        out.push(
+          `Plot: ${p.plot}${p.x ? ` of ${p.x}` : " (no list chosen)"}${p.y ? ` against ${p.y}` : ""}${p.ySummary ? ` with summary list ${p.ySummary}` : ""}${p.regression ? `, with ${p.regression}` : ""}${p.shade ? `, shaded under f(x) = ${p.functions?.[p.shade.fn]} from ${p.shade.from} to ${p.shade.to}` : ""}.`,
+        );
         break;
       case "python":
         out.push(`Program ${p.file}: ${p.source.slice(0, 300) || "(empty)"}`);
@@ -350,7 +355,7 @@ function findItem(items: MenuItem[], want: string): MenuItem | undefined {
 function menuText(items: MenuItem[], depth = 0, max = 4): string[] {
   return items.flatMap((it, i) => {
     const line = `${"  ".repeat(depth)}${"123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i] ?? "-"}: ${it.label.replace(/^[✓✔]\s*/, "✓ ")}${
-      it.items ? " ▸" : it.action ? "" : " (not available yet)"
+      it.items ? " ▸" : it.action ? "" : it.unavailable ? ` (greyed now: ${it.unavailable})` : " (not built in Axiom yet)"
     }`;
     return [line, ...(it.items && depth < max ? menuText(it.items, depth + 1, max) : [])];
   });
@@ -673,6 +678,7 @@ export const TOOLS: AgentTool[] = [
       const mark = q?.kind === "graphs" && q.marks.length > before ? q.marks[q.marks.length - 1] : undefined;
       if (!mark) throw new Error("No result came back; try again.");
       const between = { lower: lo, upper: hi };
+      if (mark.kind === "line" || mark.kind === "value") throw new Error("No result came back; try again.");
       return mark.kind === "area"
         ? { fn: `f${fn}(x)`, integral: sig(mark.value), ...between, shown: "shaded on the graph" }
         : { fn: `f${fn}(x)`, [mark.title ?? kind]: { x: sig(mark.x), y: sig(mark.y) }, ...(other !== undefined ? { with: `f${other}(x)` } : {}), ...between, shown: "marked on the graph" };
@@ -737,14 +743,15 @@ export const TOOLS: AgentTool[] = [
     name: "configure_data_stats",
     title: "Set up Data & Statistics",
     description:
-      "On the active Data & Statistics page: choose the x and y lists (named list columns or list variables), the plot type, a regression shown on a scatter plot, and diagnostics (r², shown with the regression). The page draws it; compute the numbers with calculate (e.g. LinRegMx x,y then stat.results) to report them.",
+      "On the active Data & Statistics page: choose the x and y lists (named list columns or list variables), or a summary list (frequencies of each x value) in place of y, the plot type, a regression shown on a scatter plot, and diagnostics (r², shown with the regression). A list of text (\"red\", \"blue\" …) is categorical: it takes dotchart, bar or pie, and numbers take the other plots. The page draws it; compute the numbers with calculate (e.g. LinRegMx x,y then stat.results) to report them.",
     inputSchema: {
       type: "object",
       properties: {
         x: { type: "string" },
         y: { type: "string" },
-        plot: { type: "string", enum: ["dot", "box", "histogram", "normprob", "scatter", "xyline"] },
-        regression: { type: "string", enum: ["none", "LinRegMx", "LinRegBx", "QuadReg", "PowerReg", "ExpReg", "LnReg"] },
+        summary: { type: "string", description: "A frequency list for x, in place of y" },
+        plot: { type: "string", enum: ["dot", "box", "histogram", "normprob", "scatter", "xyline", "dotchart", "bar", "pie"] },
+        regression: { type: "string", enum: ["none", "LinRegMx", "LinRegBx", "QuadReg", "PowerReg", "ExpReg", "LnReg", "SinReg", "Logistic"] },
         diagnostics: { type: "boolean" },
       },
     },
@@ -754,6 +761,7 @@ export const TOOLS: AgentTool[] = [
       if (a.x) app(`dsVar:x:${String(a.x).toLowerCase()}`);
       await tick();
       if (a.y) app(`dsVar:y:${String(a.y).toLowerCase()}`);
+      else if (a.summary) app(`dsSum:${String(a.summary).toLowerCase()}`);
       await tick();
       if (a.plot) app(`dsPlot:${String(a.plot)}`);
       await tick();
@@ -1105,7 +1113,7 @@ export const TOOLS: AgentTool[] = [
       }
       if (!item?.action) {
         h.key({ k: "esc" });
-        throw new Error(`"${item?.label}" isn't available in Axiom yet.`);
+        throw new Error(item?.unavailable ? `"${item.label}" is greyed just now: ${item.unavailable}.` : `"${item?.label}" isn't built in Axiom yet.`);
       }
       h.pick(item.action);
       await settle(h);
@@ -1132,8 +1140,10 @@ export const TOOLS: AgentTool[] = [
       const d = h.snapshot().dialog;
       if (!d) throw new Error("No dialog is open.");
       const button = String(a.button ?? "OK");
-      if (d.kind === "dialog" && Array.isArray(a.fields)) {
-        const err = h.fillDialog(Object.fromEntries((a.fields as { label: string; value: string }[]).map((f) => [f.label, String(f.value)])));
+      // Always through fillDialog: it also shuts an open dropdown list, which would take OK's Enter as a pick.
+      if (d.kind === "dialog") {
+        const fields = Array.isArray(a.fields) ? (a.fields as { label: string; value: string }[]) : [];
+        const err = h.fillDialog(Object.fromEntries(fields.map((f) => [f.label, String(f.value)])));
         if (err) throw new Error(err);
         await tick();
       }

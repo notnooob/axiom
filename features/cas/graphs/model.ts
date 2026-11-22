@@ -10,7 +10,7 @@ export type GraphWindow = { xmin: number; xmax: number; ymin: number; ymax: numb
 /** The handheld's standard window (the screen is wider than it is tall). */
 export const STANDARD: GraphWindow = { xmin: -10, xmax: 10, ymin: -20 / 3, ymax: 20 / 3, xscl: 1, yscl: 1 };
 
-export type AnalyzeKind = "zero" | "min" | "max" | "inflection" | "integral" | "intersection";
+export type AnalyzeKind = "zero" | "min" | "max" | "inflection" | "integral" | "intersection" | "bounded";
 
 export type Tool =
   /**
@@ -18,7 +18,7 @@ export type Tool =
    * `at` is the distance along the relation's curve, or t. NaN until the page
    * puts it at the curve's starting point.
    */
-  | { kind: "trace"; fn: number; x: number; curve?: { kind: "rel" | "par"; n: number; at: number } }
+  | { kind: "trace"; fn: number; x: number; curve?: { kind: "rel" | "par"; n: number; at: number }; all?: boolean }
   /**
    * An Analyze Graph tool. With two or more graphs it starts at "graph": the
    * student clicks the graph to search (or picks it with ↑/↓ and Enter), then
@@ -28,8 +28,13 @@ export type Tool =
   | { kind: "dydx"; fn: number; x: number };
 
 export type Mark =
-  | { kind: "point"; fn: number; x: number; y: number; title?: string }
-  | { kind: "area"; fn: number; a: number; b: number; value: number };
+  /** rel: the point is on a relation (Analyze Conics), not a function. */
+  | { kind: "point"; fn: number; x: number; y: number; title?: string; rel?: number }
+  /** other: Bounded Area's second function; without it the area is under fn (∫). */
+  | { kind: "area"; fn: number; a: number; b: number; value: number; other?: number }
+  /** Analyze Conics: a line a·x + b·y = c (an axis, a directrix, an asymptote), and a value (e, r, latus rectum) of relation rel. */
+  | { kind: "line"; rel: number; a: number; b: number; c: number; title: string }
+  | { kind: "value"; rel: number; title: string; value: number };
 
 /** Plotted values for one function across the window. */
 export type Samples = { n: number; xs: number[]; ys: number[] };
@@ -72,8 +77,6 @@ export function zoomed(id: string, w: GraphWindow, samples: Samples[], aspect: n
       return { ...w, ymin: lo, ymax: hi };
     }
     case "zoomStandard":
-    case "zoomUser":
-    case "zoomData":
       return STANDARD;
     default:
       return w;
@@ -81,13 +84,16 @@ export function zoomed(id: string, w: GraphWindow, samples: Samples[], aspect: n
 }
 
 /** Coordinates on graph labels: three significant figures, like the handheld's graph labels. */
-export function fmt3(v: number): string {
+export function fmt3(v: number, digits = 3): string {
   if (!Number.isFinite(v)) return "undef";
   if (Math.abs(v) < 1e-10) return "0";
-  const s = Number(v.toPrecision(3));
+  const s = Number(v.toPrecision(digits));
   if (Math.abs(s) >= 1e6 || Math.abs(s) < 1e-3) return s.toExponential(2).replace("e", "E").replace("+", "");
   return String(s);
 }
+
+/** A page's Display Digits (Graphs ▸ Settings): Float3 unless chosen. */
+export const pageDigits = (p: { gsettings?: { digits?: string } }) => Number(p.gsettings?.digits?.replace("Float", "")) || 3;
 
 /** Window Settings' "Auto" tick spacing: a power of ten giving 10 to 99 ticks, so 1 for −10…10. */
 export function autoScale(lo: number, hi: number): number {

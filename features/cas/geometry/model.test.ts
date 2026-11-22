@@ -153,3 +153,45 @@ describe("geometry", () => {
     expect(addSpec(tri, { type: "area", of: ["p1"], store: "2x" })).toMatchObject({ error: expect.stringContaining("variable") });
   });
 });
+
+describe("hide/show, attributes, coordinates and equations", () => {
+  const base: GeoObj[] = [
+    { id: "A", kind: "point", x: 1, y: 2 },
+    { id: "B", kind: "point", x: 3, y: 6 },
+    { id: "C", kind: "point", x: 0, y: -1 },
+    { id: "l1", kind: "line", a: "A", b: "B" },
+    { id: "c1", kind: "circle", centre: "A", r: 2 },
+    { id: "l2", kind: "line", a: "C", b: "A" },
+  ];
+  const text = (objs: GeoObj[], id: string) => {
+    const s = resolve(objs).get(id);
+    return s?.t === "value" ? s.text : undefined;
+  };
+
+  it("labels a point, a line and a circle, and follows them", () => {
+    const objs: GeoObj[] = [...base, { id: "e1", kind: "coords", of: "A" }, { id: "e2", kind: "coords", of: "l1" }, { id: "e3", kind: "coords", of: "c1" }];
+    expect(text(objs, "e1")).toBe("(1, 2)");
+    expect(text(objs, "e2")).toBe("y=2·x");
+    expect(text(objs, "e3")).toBe("(x−1)²+(y−2)²=4");
+    const moved = objs.map((o) => (o.id === "A" ? { ...o, x: -1, y: 0 } : o));
+    expect(text(moved, "e1")).toBe("(−1, 0)");
+    expect(text(moved, "e2")).toBe("y=1.5·x+1.5");
+    expect(text(moved, "e3")).toBe("(x+1)²+y²=4");
+    expect(text([...base, { id: "e4", kind: "coords", of: "l2" }], "e4")).toBe("y=3·x−1");
+  });
+
+  it("goes with its object, and isn't a measurement", () => {
+    const objs: GeoObj[] = [...base, { id: "e1", kind: "coords", of: "l1" }];
+    expect(remove(objs, ["B"]).some((o) => o.id === "e1")).toBe(false);
+    // Measurement Transfer takes a measurement first: the label isn't one.
+    expect(click(objs, "transfer", [], "e1", { x: 0, y: 0 })).toBeNull();
+  });
+
+  it("still works out hidden objects, and tells the agent", () => {
+    const objs = base.map((o) => (o.id === "A" ? { ...o, hidden: true } : o.id === "l1" ? { ...o, attrs: { colour: "Red", style: "Dashed" as const } } : o));
+    expect(resolve(objs).get("l1")).toBeDefined();
+    const seen = read(objs);
+    expect(seen.find((o) => o.id === "A")).toMatchObject({ hidden: true });
+    expect(seen.find((o) => o.id === "l1")).toMatchObject({ attrs: { colour: "Red", style: "Dashed" } });
+  });
+});

@@ -32,6 +32,7 @@ export type Node =
   | { t: "exp"; exp: Row };
 
 export const chars = (s: string): Row => Array.from(s).map((c) => ({ t: "ch", c }));
+const angleRow = (a: Ast): Row => (a.k === "bin" && a.op === "∠" ? [...angleRow(a.a), ...chars("∠"), ...astToRow(a.b)] : astToRow(a));
 const group = (open: "(" | "{" | "[" | "|", arg: Row): Node => ({ t: "group", open, arg });
 
 /** Comma-joined rows, as inside a call's brackets. */
@@ -60,7 +61,8 @@ export function astToRow(a: Ast): Row {
     case "list":
       return [group("{", joined(a.items.map(r)))];
     case "mat":
-      return [{ t: "matrix", cells: a.rows.map((row) => row.map(r)) }];
+      // A vector's r∠θ (or ρ∠θ∠φ) entries are written without brackets: [√2∠π/4 1].
+      return [{ t: "matrix", cells: a.rows.map((row) => row.map((x) => (x.k === "bin" && x.op === "∠" ? angleRow(x) : r(x)))) }];
     case "neg":
       // −(a·b) and −a/b need no brackets; −(a+b) does.
       return [...chars("-"), ...wrapped(a.a, precOf(a.a) < 8 || a.a.k === "neg")];
@@ -110,6 +112,8 @@ function callToRow(f: string, args: Ast[]): Row {
   if (f === "abs" && args.length === 1 && a0) return [group("|", r(a0))];
   if (f === "exp" && args.length === 1 && a0) return [{ t: "exp", exp: r(a0) }];
   if (f === "log" && args.length === 2 && a0 && a1) return [{ t: "logbase", base: r(a1), arg: r(a0) }];
+  // log typed with one argument is base 10: once the entry is locked in, the handheld shows it as log₁₀( ), the template.
+  if (f === "log" && args.length === 1 && a0) return [{ t: "logbase", base: chars("10"), arg: r(a0) }];
   if (f === "d" && a0 && a1) return [{ t: "deriv", body: r(a0), v: r(a1), ...(a2 ? { n: r(a2) } : {}) }];
   if (f === "∫" && a0 && a1 && (args.length === 2 || args.length === 4))
     return [{ t: "integral", body: r(a0), v: r(a1), ...(a2 && a3 ? { lo: r(a2), hi: r(a3) } : {}) }];

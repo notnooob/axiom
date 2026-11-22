@@ -1,20 +1,53 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/shared/lib/utils";
 import { MathView } from "../math/render";
+import type { Row } from "../math/tree";
 import type { Highlight } from "../ai/highlights";
 import { FlagBadge, flagRing } from "../screen/flag";
 import type { ListsPage, ListsSel } from "../state/document";
-import { COLS, letter, rowsUsed, shownAt } from "./sheet";
+import { cellLine, COLS, displayRow, letter, rowsUsed } from "./sheet";
+
+/** Maths two or more lines tall (a fraction, a matrix …) is drawn smaller in a cell so it fits the row; the cell line shows it full size. */
+const tall = (row: Row) => /"t":"(frac|matrix|piecewise|system|integral|bigop|limit|deriv)"/.test(JSON.stringify(row));
 
 /**
  * The spreadsheet as the handheld draws it: column letters with the list
  * names under them, the ◆ formula row, then numbered rows, the selected cell
  * outlined (filled while it's being edited).
  */
-export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage; onSelect: (sel: ListsSel) => void; highlights?: Highlight[] }) {
+export function ListsApp({
+  page,
+  onSelect,
+  highlights = [],
+}: {
+  page: ListsPage;
+  onSelect: (sel: ListsSel) => void;
+  highlights?: Highlight[];
+}) {
   const box = useRef<HTMLDivElement>(null);
   const rows = Math.max(rowsUsed(page) + 12, page.sel.row + 6, 24);
+  // How far the spreadsheet can still scroll each way, for the cell line's ◄ ► (greyed at either end).
+  const [ends, setEnds] = useState({ left: true, right: false });
+  // Where a ◄ ► scroll is heading, so presses in quick succession each move a further column.
+  const heading = useRef<number | null>(null);
+  const measure = () => {
+    const el = box.current;
+    if (!el) return;
+    if (heading.current !== null && Math.abs(el.scrollLeft - heading.current) < 2) heading.current = null;
+    setEnds({ left: el.scrollLeft <= 1, right: el.scrollLeft + el.clientWidth >= el.scrollWidth - 1 });
+  };
+  useLayoutEffect(measure, []);
+  /** ◄ ►: the spreadsheet a column to the left or right, landing on a column's edge; the selection stays where it is. */
+  const scrollColumns = (dir: -1 | 1) => {
+    const el = box.current;
+    const width = el?.querySelector<HTMLElement>("[data-colhead]")?.offsetWidth;
+    if (!el || !width) return;
+    const from = heading.current ?? el.scrollLeft;
+    const to = Math.min(el.scrollWidth - el.clientWidth, Math.max(0, (Math.round(from / width) + dir) * width));
+    heading.current = to;
+    el.scrollTo({ left: to, behavior: "smooth" });
+  };
   useLayoutEffect(() => {
     box.current?.querySelector("[data-sel]")?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [page.sel.row, page.sel.col]);
@@ -22,7 +55,6 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
   const cell = (row: number, col: number) => {
     const on = page.sel.row === row && page.sel.col === col;
     const editing = on && page.edit;
-    const text = shownAt(page, row, col);
     const isFormula = row >= 2 && (page.cols[col]?.cells[row - 2] ?? "").startsWith("=");
     // The assistant's highlight on this cell (its row counts from the first row of values).
     const flag = highlights.find((h) => h.target.kind === "cell" && h.target.col === col && h.target.row === row - 1);
@@ -41,7 +73,10 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
           isFormula && !on && "text-[#1b4fa8]",
         )}
       >
-        {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <span className="truncate">{text}</span>}
+        {/* Each cell's contents as maths, as the handheld draws them (log typed shows as log₁₀ once entered). */}
+        <span className={cn(tall(editing ? page.edit!.row : displayRow(page, row, col)) && "text-[0.62em]")}>
+          {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <MathView row={displayRow(page, row, col)} className="font-casmath" />}
+        </span>
         {flag && (
           <>
             <FlagBadge n={flag.n} tone={flag.tone} className="absolute top-1/2 left-[0.6cqw] -translate-y-1/2" />
@@ -52,8 +87,10 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
     );
   };
 
+  const line = cellLine(page);
   return (
-    <div ref={box} className="absolute inset-0 isolate overflow-auto bg-casScreen font-casui text-[calc(4cqw*var(--axiom-text,1))] text-casInk scrollbar-thin">
+    <div className="absolute inset-0 flex flex-col bg-casScreen font-casui text-[calc(4cqw*var(--axiom-text,1))] text-casInk">
+    <div ref={box} onScroll={measure} onWheel={() => (heading.current = null)} className="relative isolate min-h-0 flex-1 overflow-auto scrollbar-thin">
       <div className="w-max">
         <div className="sticky top-0 z-10 flex bg-[#e8e8e8]">
           <div className="sticky left-0 z-10 h-[6.4cqw] w-[8cqw] shrink-0 border-b border-r border-casRule bg-[#e8e8e8]" />
@@ -63,6 +100,7 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
             return (
               <div
                 key={c}
+                data-colhead
                 {...(on ? { "data-sel": true } : {})}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onSelect({ row: 0, col: c })}
@@ -89,6 +127,34 @@ export function ListsApp({ page, onSelect, highlights = [] }: { page: ListsPage;
             </div>
             {Array.from({ length: COLS }, (_, c) => cell(row, c))}
           </div>
+        ))}
+      </div>
+    </div>
+      {/*
+        The cell line, as on the handheld: the selected cell's reference and what it holds in full (a formula
+        as typed, not its value), in larger maths. It grows to fit whatever is in the cell, a template's
+        subscripts included, and mirrors the cell while it's being edited.
+      */}
+      <div className="flex min-h-[8cqw] shrink-0 items-center border-t-[0.3cqw] border-casRule bg-[#f4f4f4]" aria-label={`Cell ${line.ref}`}>
+        <div className="w-[8cqw] shrink-0 self-stretch border-r border-casRule bg-[#e8e8e8] text-center font-casmath italic leading-[8cqw] text-casLabel">{line.ref}</div>
+        <div className="min-w-0 flex-1 overflow-x-auto px-[1.4cqw] py-[0.8cqw] text-[1.15em] scrollbar-none">
+          {/* The cursor shows only while the cell is being edited, wherever it is in the cell. */}
+          {page.edit ? <MathView row={page.edit.row} cursor={page.edit.cursor} className="font-casmath" /> : <MathView row={line.row} className="font-casmath" />}
+        </div>
+        {/* ◄ ► at the right end, as on the handheld: they scroll the spreadsheet a column left or right, to reach more columns. */}
+        {(["left", "right"] as const).map((dir) => (
+          <button
+            key={dir}
+            type="button"
+            tabIndex={-1}
+            disabled={ends[dir]}
+            aria-label={dir === "left" ? "Scroll the columns left" : "Scroll the columns right"}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => scrollColumns(dir === "left" ? -1 : 1)}
+            className="flex w-[6cqw] shrink-0 items-center justify-center self-stretch border-l border-casRule text-[0.8em] text-casInk hover:bg-[#e2e2e2] disabled:text-casDim disabled:hover:bg-transparent"
+          >
+            {dir === "left" ? "◄" : "►"}
+          </button>
         ))}
       </div>
     </div>

@@ -793,6 +793,11 @@ function postToGiac(op: string, a: Ast, s: Ctx): string {
       return `(${x})/100`;
     case "°":
       return s.angle === "deg" ? `(${x})` : `(${x})*${DEG}`;
+    // The radian and gradian marks: the angle in that unit, whatever the mode.
+    case "ʳ":
+      return s.angle === "deg" ? `(${x})*180/pi` : `(${x})`;
+    case "ᵍ":
+      return s.angle === "deg" ? `(${x})*9/10` : `(${x})*pi/200`;
     case "ᵀ":
       return g("transpose", x);
     case "'":

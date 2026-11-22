@@ -29,12 +29,15 @@ export function load(): Saved | null {
   }
 }
 
-export function save(s: Saved): void {
+/** Keep the Scratchpad; false when the browser wouldn't (storage full or unavailable). */
+export function save(s: Saved): boolean {
   try {
     window.localStorage.setItem(KEY, JSON.stringify(s));
     window.localStorage.removeItem(OLD_KEY);
+    return true;
   } catch {
-    // Storage unavailable: carry on without it.
+    // Storage unavailable: carry on without it, and let the caller say so.
+    return false;
   }
 }
 

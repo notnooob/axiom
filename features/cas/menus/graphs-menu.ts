@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { app, off, rule, sub, wiz, type Menu } from "./types";
+import { app, na, off, rule, sub, wiz, type Menu } from "./types";
 
 /**
  * The Graphs app's menu. Item positions are the contract (see types.ts):
@@ -11,30 +11,36 @@ import { app, off, rule, sub, wiz, type Menu } from "./types";
  */
 
 /** The page state the menu's labels depend on. */
-export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean };
+export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean; hideAnalytic?: boolean; hideEndValues?: boolean; hideGuides?: boolean };
+
+/** A Geometry tool on the graph. */
+const geo = (label: string, tool: string) => app(label, `geoTool:${tool}`);
+
+/** An equation template: the relation entry opened with this form in it. */
+const tpl = (label: string, form: string) => app(label, `eqtpl:${form}`);
 
 export function graphsMenu(s: GraphsMenuState): Menu {
-  const grid = (label: string, id: string, kind: GraphsMenuState["grid"]) => (s.grid === kind ? off(label) : app(label, id));
+  const grid = (label: string, id: string, kind: GraphsMenuState["grid"]) => (s.grid === kind ? na(label, "it's the grid shown now") : app(label, id));
   return [
     sub("Actions", [
-      off("Pointer"),
-      sub("Select", [off("Region"), off("Image"), off("Grid")]),
-      off("Hide/Show"),
-      rule(off("Attributes")),
-      off("Set Conditions"),
+      app("Pointer", "pointer"),
+      sub("Select", [app("Region", "selectRegion"), app("Image", "selectImage"), app("Grid", "selectGrid")]),
+      app("Hide/Show", "hideShow"),
+      rule(app("Attributes", "attributes")),
+      app("Set Conditions", "setConditions"),
       app("Delete all", "deleteAll"),
-      rule(off("Text")),
-      off("Coordinates and Equations"),
-      off("Calculate"),
-      off("Redefine"),
+      rule(app("Text", "graphText")),
+      app("Coordinates and Equations", "coordinates"),
+      app("Calculate", "graphCalculate"),
+      app("Redefine", "redefine"),
       app("Insert Slider", "insertSlider"),
-      rule(off("MathDraw")),
+      rule(app("MathDraw", "mathDraw")),
     ]),
     sub("View", [
-      off("Graphing"),
-      off("Plane Geometry"),
-      off("3D Graphing"),
-      rule(off("Hide Analytic Window")),
+      app("Graphing", "viewGraphing"),
+      app("Plane Geometry", "viewPlane"),
+      app("3D Graphing", "view3d"),
+      rule(app(s.hideAnalytic ? "Show Analytic Window" : "Hide Analytic Window", "viewAnalytic")),
       app(s.axes ? "Hide Axes" : "Show Axes", "viewHideAxes"),
       sub("Grid", [
         grid("No Grid", "viewNoGrid", "none"),
@@ -42,49 +48,55 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         grid("Lined Grid", "viewLinedGrid", "line"),
       ]),
       { ...app(s.entryLine ? "Hide Entry Line" : "Show Entry Line", "viewEntryLine"), hint: "Ctrl+G" },
-      off("Hide Axes End Values"),
-      rule(off("Hide Object Selection Guides")),
+      app(s.hideEndValues ? "Show Axes End Values" : "Hide Axes End Values", "viewEndValues"),
+      rule(app(s.hideGuides ? "Show Object Selection Guides" : "Hide Object Selection Guides", "viewGuides")),
     ]),
     rule(
       sub("Graph Entry/Edit", [
         app("Function", "entryFunction"),
         app("Relation", "entryRelation"),
         sub("Equation Templates", [
-          sub("Line", [off("Line Slope Intercept"), off("Vertical Line"), off("Line Standard")]),
-          sub("Parabola", [off("Vertex form"), off("Standard form"), off("Vertex form"), off("Standard form")]),
-          sub("Circle", [off("Center form"), off("Standard form")]),
-          sub("Ellipse", [off("Center form")]),
-          sub("Hyperbola", [off("East-West"), off("South-North")]),
-          sub("Conic", [off("General")]),
+          // Each opens the relation entry with the form filled in; the letters left in it become sliders when it's plotted.
+          sub("Line", [tpl("Line Slope Intercept", "y=m*x+b"), tpl("Vertical Line", "x=a"), tpl("Line Standard", "a*x+b*y=c")]),
+          sub("Parabola", [
+            tpl("Vertex form", "y=a*(x-h)^2+k"),
+            tpl("Standard form", "y=a*x^2+b*x+c"),
+            tpl("Vertex form", "x=a*(y-k)^2+h"),
+            tpl("Standard form", "x=a*y^2+b*y+c"),
+          ]),
+          sub("Circle", [tpl("Center form", "(x-h)^2+(y-k)^2=r^2"), tpl("Standard form", "a*x^2+a*y^2+b*x+c*y+d=0")]),
+          sub("Ellipse", [tpl("Center form", "(x-h)^2/a^2+(y-k)^2/b^2=1")]),
+          sub("Hyperbola", [tpl("East-West", "(x-h)^2/a^2-(y-k)^2/b^2=1"), tpl("South-North", "(y-k)^2/b^2-(x-h)^2/a^2=1")]),
+          sub("Conic", [tpl("General", "a*x^2+b*x*y+c*y^2+d*x+e*y+f=0")]),
         ]),
         app("Parametric", "entryParametric"),
-        off("Polar"),
+        app("Polar", "entryPolar"),
         wiz("Scatter Plot...", "Scatter Plot", [{ label: "x:", value: "" }, { label: "y:", value: "" }], "scatter:{0}:{1}"),
-        sub("Sequence", [off("Sequence"), off("Custom")]),
+        sub("Sequence", [app("Sequence", "entrySequence"), app("Custom", "entryCustom")]),
         app("Diff Eq", "entryDiffEq"),
       ]),
     ),
     sub("Window / Zoom", [
       app("Window Settings...", "windowSettings"),
-      rule(off("Zoom – Box")),
+      rule(app("Zoom – Box", "zoomBox")),
       app("Zoom – In", "zoomIn"),
       app("Zoom – Out", "zoomOut"),
       rule(app("Zoom – Standard", "zoomStandard")),
       app("Zoom – Quadrant 1", "zoomQuadrant1"),
-      off("Zoom – User"),
+      app("Zoom – User", "zoomUser"),
       app("Zoom – Trig", "zoomTrig"),
-      off("Zoom – Data"),
+      app("Zoom – Data", "zoomData"),
       app("Zoom – Fit", "zoomFit"),
       rule(app("Zoom – Square", "zoomSquare")),
       app("Zoom – Decimal", "zoomDecimal"),
     ]),
     sub("Trace", [
       app("Graph Trace", "graphTrace"),
-      off("Trace All"),
-      off("Trace Step..."),
-      sub("Path Plot", [off("Function"), off("Parametric"), off("Polar"), off("Path Setup...")]),
-      off("Geometry Trace"),
-      off("Erase Geometry Trace"),
+      app("Trace All", "traceAll"),
+      app("Trace Step...", "traceStep"),
+      sub("Path Plot", [app("Function", "pathFn"), app("Parametric", "pathPar"), app("Polar", "pathPolar"), app("Path Setup...", "pathSetup")]),
+      app("Geometry Trace", "geoTrace"),
+      app("Erase Geometry Trace", "geoTraceErase"),
     ]),
     sub("Analyze Graph", [
       app("Zero", "analyzeZero"),
@@ -94,48 +106,68 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       app("Inflection", "analyzeInflection"),
       app("dy/dx", "analyzeDydx"),
       app("Integral", "analyzeIntegral"),
-      off("Bounded Area"),
+      app("Bounded Area", "analyzeBounded"),
       sub(
         "Analyze Conics",
-        ["Center", "Vertices", "Foci", "Axes of Symmetry", "Directrix", "Asymptotes", "Radius", "Eccentricity", "Latus Rectum"].map(off),
+        (
+          [
+            ["Center", "center"],
+            ["Vertices", "vertices"],
+            ["Foci", "foci"],
+            ["Axes of Symmetry", "axes"],
+            ["Directrix", "directrix"],
+            ["Asymptotes", "asymptotes"],
+            ["Radius", "radius"],
+            ["Eccentricity", "eccentricity"],
+            ["Latus Rectum", "latus"],
+          ] as const
+        ).map(([label, id]) => app(label, `conic:${id}`)),
       ),
     ]),
     sub("Table", [
-      { ...(s.table ? off("Split-screen Table") : app("Split-screen Table", "tableSplit")), hint: "Ctrl+T" },
-      { ...(s.table ? app("Remove Table", "tableSplit") : off("Remove Table")), hint: "Ctrl+T" },
+      { ...(s.table ? na("Split-screen Table", "the table is already showing") : app("Split-screen Table", "tableSplit")), hint: "Ctrl+T" },
+      { ...(s.table ? app("Remove Table", "tableSplit") : na("Remove Table", "no table is showing")), hint: "Ctrl+T" },
     ]),
     rule(
       sub("Geometry", [
+        // The Geometry app's tools, drawn over the graph in its coordinates.
         sub("Points & Lines", [
-          off("Point"),
-          off("Point On"),
-          off("Point by Coordinates"),
-          off("Intersection Point(s)"),
-          rule(off("Line")),
-          off("Segment"),
-          off("Ray"),
-          off("Tangent"),
-          off("Vector"),
-          off("Circle arc"),
+          geo("Point", "point"),
+          geo("Point On", "pointon"),
+          app("Point by Coordinates", "geoCoords"),
+          geo("Intersection Point(s)", "intersection"),
+          rule(geo("Line", "line")),
+          geo("Segment", "segment"),
+          geo("Ray", "ray"),
+          geo("Tangent", "tangent"),
+          geo("Vector", "vector"),
+          geo("Circle arc", "arc"),
         ]),
-        sub(
-          "Shapes",
-          ["Circle", "Triangle", "Rectangle", "Polygon", "Regular Polygon", "Ellipse", "Parabola", "Hyperbola", "Conic by Five Points"].map(off),
-        ),
-        rule(sub("Measurement", ["Length", "Area", "Slope", "Angle", "Directed Angle"].map(off))),
+        sub("Shapes", [
+          geo("Circle", "circle"),
+          geo("Triangle", "triangle"),
+          geo("Rectangle", "rectangle"),
+          geo("Polygon", "polygon"),
+          geo("Regular Polygon", "regpoly"),
+          geo("Ellipse", "ellipse"),
+          geo("Parabola", "parabola"),
+          geo("Hyperbola", "hyperbola"),
+          geo("Conic by Five Points", "conic5"),
+        ]),
+        rule(sub("Measurement", [geo("Length", "length"), geo("Area", "area"), geo("Slope", "slope"), geo("Angle", "angle"), geo("Directed Angle", "dangle")])),
         sub("Construction", [
-          off("Perpendicular"),
-          off("Parallel"),
-          off("Perpendicular Bisector"),
-          off("Angle Bisector"),
-          off("Midpoint"),
-          rule(off("Locus")),
-          off("Compass"),
-          off("Measurement transfer"),
+          geo("Perpendicular", "perpendicular"),
+          geo("Parallel", "parallel"),
+          geo("Perpendicular Bisector", "bisector"),
+          geo("Angle Bisector", "anglebisector"),
+          geo("Midpoint", "midpoint"),
+          rule(geo("Locus", "locus")),
+          geo("Compass", "compass"),
+          geo("Measurement transfer", "transfer"),
         ]),
-        sub("Transformation", ["Symmetry", "Reflection", "Translation", "Rotation", "Dilation"].map(off)),
+        sub("Transformation", [geo("Symmetry", "symmetry"), geo("Reflection", "reflection"), geo("Translation", "translation"), geo("Rotation", "rotation"), geo("Dilation", "dilation")]),
       ]),
     ),
-    rule(off("Settings...")),
+    rule(app("Settings...", "graphSettings")),
   ];
 }

@@ -226,6 +226,7 @@ export async function analyze(
   other: string | undefined,
   a: number,
   b: number,
+  otherN?: number,
 ): Promise<Mark | null> {
   const point = async (x: number, title: string): Promise<Mark | null> => {
     if (!Number.isFinite(x)) return null;
@@ -247,6 +248,12 @@ export async function analyze(
       return Number.isFinite(e.y)
         ? { kind: "point", fn, x: e.x, y: e.y, title: type === "min" ? "minimum" : "maximum" }
         : null;
+    }
+    case "bounded": {
+      // The area between the two graphs: ∫|f − g| over the bounds, always positive.
+      if (other === undefined || otherN === undefined) return null;
+      const v = parseNumbers(await giac(`evalf(romberg(abs(${name}(x_)-${other}(x_)),x_,${num(a)},${num(b)}))`))[0] ?? NaN;
+      return Number.isFinite(v) ? { kind: "area", fn, other: otherN, a, b, value: v } : null;
     }
     case "integral": {
       const v = parseNumbers(await giac(`evalf(integrate(${name}(x_),x_,${num(a)},${num(b)}))`))[0] ?? NaN;

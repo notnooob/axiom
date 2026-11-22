@@ -62,7 +62,13 @@ export async function financeCalls(input: Ast, a: Ast, giac: Giac, settings: Set
     return settings.mode === "exact" ? { k: "call", f: "approx", args: [n] } : n;
   };
   const asAst = (v: FinanceValue): Ast =>
-    typeof v === "number" ? decimal(v) : { k: "mat", rows: v.table.map(([n, ...money]) => [{ k: "num", v: String(n) }, ...money.map(decimal)]) };
+    typeof v === "number"
+      ? decimal(v)
+      : "days" in v
+        ? days(v.days)
+        : { k: "mat", rows: v.table.map(([n, ...money]) => [{ k: "num", v: String(n) }, ...money.map(decimal)]) };
+  // dbd answers a whole number of days.
+  const days = (n: number): Ast => (n < 0 ? { k: "neg", a: { k: "num", v: String(-n) } } : { k: "num", v: String(n) });
   const inner = async (x: Ast): Promise<Ast> => {
     switch (x.k) {
       case "call": {
@@ -111,7 +117,9 @@ export async function financeCalls(input: Ast, a: Ast, giac: Giac, settings: Set
   const shown = (v: FinanceValue): Ast =>
     typeof v === "number"
       ? shownDecimal(v, settings.digits)
-      : { k: "mat", rows: v.table.map(([n, ...money]) => [paymentNumber(n!), ...money.map((m) => shownDecimal(m, settings.digits))]) };
+      : "days" in v
+        ? days(v.days)
+        : { k: "mat", rows: v.table.map(([n, ...money]) => [paymentNumber(n!), ...money.map((m) => shownDecimal(m, settings.digits))]) };
   const isFinance = (x: Ast): x is Extract<Ast, { k: "call" }> => x.k === "call" && FINANCE.has(x.f);
   const [call, name] =
     a.k === "bin" && a.op === "→" && isFinance(a.a) && a.b.k === "sym"

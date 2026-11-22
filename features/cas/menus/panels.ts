@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { ins, off, type Menu } from "./types";
+import { ins, type Menu } from "./types";
 
 /**
  * The keypad's panels, with the column count of the grid the handheld shows
@@ -20,12 +20,9 @@ export const trigPanel: Panel = {
 /** ctrl =: the inequalities and the with operator. */
 export const relationsPanel: Panel = { items: [">", "<", "≠", "≥", "≤", "|"].map((c) => ins(c, c)), cols: 3 };
 
-/**
- * π▸: the constants over the angle marks. Radian (ʳ) and gradian (ᵍ) marks
- * aren't understood here yet, so they're greyed.
- */
+/** π▸: the constants over the angle marks: degrees, radians (ʳ) and gradians (ᵍ). */
 export const constantsPanel: Panel = {
-  items: [ins("π", "π"), ins("𝑖", "i"), ins("∞", "∞"), ins("ℯ", "ℯ"), ins("θ", "θ"), ins("°", "°"), off("r"), off("g"), ins("'", "'")],
+  items: [ins("π", "π"), ins("𝑖", "i"), ins("∞", "∞"), ins("ℯ", "ℯ"), ins("θ", "θ"), ins("°", "°"), ins("r", "ʳ"), ins("g", "ᵍ"), ins("'", "'")],
   cols: 5,
 };
 

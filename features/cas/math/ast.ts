@@ -74,7 +74,7 @@ type Tok =
 const SYMBOL_CHARS = new Set(["π", "ℯ", "∞", "𝑖", "θ", "?"]);
 /** Prefix operators that take a parenthesised argument: √(x), ∫(…), Σ(…). */
 const PREFIX_FUNCS = new Set(["√", "∫", "Σ", "Π", "∂"]);
-const POSTFIX = new Set(["!", "%", "°", "'", "ᵀ", "⁻¹", "²", "³"]);
+const POSTFIX = new Set(["!", "%", "°", "ʳ", "ᵍ", "'", "ᵀ", "⁻¹", "²", "³"]);
 const WORD_OPS = new Set(["and", "or", "xor", "not"]);
 /** Commands written without parentheses: "DelVar a,b", "Define f(x)=…". */
 export const COMMAND_WORDS = new Set([
@@ -103,6 +103,25 @@ export const COMMAND_WORDS = new Set([
   "tTest",
   "zTest_1Prop",
   "MedMed",
+  "zInterval_2Samp",
+  "tInterval_2Samp",
+  "zInterval_2Prop",
+  "LinRegtIntervals",
+  "MultRegIntervals",
+  "zTest_2Samp",
+  "tTest_2Samp",
+  "zTest_2Prop",
+  "χ²GOF",
+  "χ²2way",
+  "FTest_2Samp",
+  "LinRegtTest",
+  "MultRegTests",
+  "ANOVA",
+  "ANOVA2way",
+  "SinReg",
+  "Logistic",
+  "LogisticD",
+  "MultReg",
   "Disp",
 ]);
 
@@ -134,10 +153,15 @@ for (const n of [
 const canonicalName = (v: string) => COMMANDS.get(v.toLowerCase()) ?? v.toLowerCase();
 /** One of the handheld's own commands or functions, not a user's name. */
 export const isCommand = (name: string) => COMMANDS.get(name.toLowerCase()) === name;
+/**
+ * A name a variable can't take because one of the handheld's commands has
+ * it, in any case (count, Mean, LINREGMX), as the handheld refuses them.
+ */
+export const isReservedName = (name: string) => COMMANDS.has(name.toLowerCase());
 
 const isDigit = (c: string) => c >= "0" && c <= "9";
 const isIdStart = (c: string) =>
-  /\p{L}/u.test(c) && !SYMBOL_CHARS.has(c) && !PREFIX_FUNCS.has(c) && c !== "ᵀ" && c !== "ᴇ";
+  /\p{L}/u.test(c) && !SYMBOL_CHARS.has(c) && !PREFIX_FUNCS.has(c) && c !== "ᵀ" && c !== "ʳ" && c !== "ᵍ" && c !== "ᴇ";
 const isIdPart = (c: string) => isIdStart(c) || isDigit(c) || c === "_";
 
 /**

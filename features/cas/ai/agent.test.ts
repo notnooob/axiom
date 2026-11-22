@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG, modelName, modelsFor } from "./agent";
+import { DEFAULT_CONFIG, MAX_STEPS, modelName, modelsFor, preferencesOf, stepsOf } from "./agent";
 import { typeKeys, type AgentHost } from "./tools";
 import type { Key } from "../keys";
 
@@ -32,5 +32,29 @@ describe("typeKeys", () => {
     await typeKeys(host, "x^2{enter}{approx}");
     expect(got).toEqual([{ k: "paste", text: "x^2" }, { k: "enter" }, { k: "approx" }]);
     await expect(typeKeys(host, "{nope}")).rejects.toThrow(/Unknown key/);
+  });
+});
+
+describe("stepsOf", () => {
+  it("is 40 unless a limit is chosen", () => {
+    expect(stepsOf(DEFAULT_CONFIG)).toBe(40);
+    expect(MAX_STEPS).toBe(40);
+    expect(stepsOf({ ...DEFAULT_CONFIG, steps: 80 })).toBe(80);
+    expect(stepsOf({ ...DEFAULT_CONFIG, steps: 7 as never })).toBe(40);
+  });
+});
+
+describe("preferencesOf", () => {
+  it("is nothing by default", () => {
+    expect(preferencesOf(DEFAULT_CONFIG)).toBeUndefined();
+    expect(preferencesOf({ ...DEFAULT_CONFIG, language: "  ", length: "normal", about: "" })).toBeUndefined();
+  });
+
+  it("sends what's set, About me cut to 500 characters", () => {
+    expect(preferencesOf({ ...DEFAULT_CONFIG, language: " French ", length: "brief", about: "x".repeat(600) })).toEqual({
+      replyLanguage: "French",
+      replyLength: "brief",
+      aboutStudent: "x".repeat(500),
+    });
   });
 });

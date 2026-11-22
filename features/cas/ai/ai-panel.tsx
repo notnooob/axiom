@@ -72,7 +72,7 @@ export function AiPanel({
             <HeaderAction label="AI mode" onClick={onImmersive}>
               <Maximize2Icon />
             </HeaderAction>
-            <HeaderAction label="Keys and services" onClick={onSettings}>
+            <HeaderAction label="Assistant settings" onClick={onSettings}>
               <Settings2Icon />
             </HeaderAction>
             <HeaderAction label="Close assistant" onClick={onClose}>

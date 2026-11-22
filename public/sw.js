@@ -78,8 +78,11 @@ self.addEventListener("fetch", (e) => {
   e.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
-      // The app is one page: any navigation gets index.html when it's kept.
-      const hit = await cache.match(req.mode === "navigate" ? new URL("index.html", scope()).href : req, ANY);
+      // The app is one page: a navigation to anything that isn't a kept file
+      // (the start URL, a query) gets index.html. Kept files such as Giac's
+      // COPYING, which the GPL line links to, open as themselves.
+      let hit = await cache.match(req, ANY);
+      if (!hit && req.mode === "navigate") hit = await cache.match(new URL("index.html", scope()).href, ANY);
       return isolated(hit ?? (await fetch(req)));
     })(),
   );

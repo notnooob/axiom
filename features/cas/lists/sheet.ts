@@ -5,10 +5,12 @@
  * Rows of the selection: 0 is the name row (a name makes the column a list
  * variable for the whole problem), 1 the ◆ column-formula row, 2… the cells.
  * A cell or column formula starts with "="; cell references are a column
- * letter and a row number (a1, b12), as on the handheld.
+ * letter and a row number (a1, b12), and a whole unnamed column is its
+ * letter with empty brackets (a[]), as on the handheld. The statistics
+ * dialogs take a[] too.
  */
 import type { Key } from "../keys";
-import { parse } from "../math/ast";
+import { isReservedName, parse } from "../math/ast";
 import { editorKey, emptyEdit, rowText, setRow } from "../math/editor";
 import { astToRow, chars, type Row } from "../math/tree";
 import type { ListsColumn, ListsPage } from "../state/document";
@@ -62,6 +64,97 @@ const toRow = (t: string): Row => {
   }
 };
 
+/**
+ * What the formula row starts with, as the handheld writes it: the column's
+ * name and := for a named column (b:=log(x)), else =.
+ */
+export const formulaPrefix = (p: ListsPage, col: number) => {
+  const name = p.cols[col]?.name;
+  return name ? `${name}:=` : "=";
+};
+
+/** A cell's text as maths: a formula keeps its = (or name:=) in front, so editing it doesn't lose it. */
+function formulaRow(prefix: string, body: string): Row {
+  return [...chars(prefix), ...toRow(body)];
+}
+
+/** The row an edit starts from: what the cell holds, with a formula's = or name:= in front. */
+export function editRow(p: ListsPage, row: number, col: number): Row {
+  const raw = rawAt(p, row, col);
+  if (row === 0) return chars(raw);
+  if (row === 1) return raw ? formulaRow(formulaPrefix(p, col), raw.replace(/^=/, "")) : chars(formulaPrefix(p, col));
+  return raw.startsWith("=") ? formulaRow("=", raw.slice(1)) : toRow(raw);
+}
+
+/** What a cell shows when it isn't being edited: the formula row's formula, else the worked-out value. */
+export function displayRow(p: ListsPage, row: number, col: number): Row {
+  if (row === 0) return chars(rawAt(p, 0, col));
+  if (row === 1) return rawAt(p, 1, col) ? editRow(p, 1, col) : [];
+  const shown = shownAt(p, row, col);
+  return shown.startsWith("=") ? formulaRow("=", shown.slice(1)) : shown ? toRow(shown) : [];
+}
+
+/**
+ * The line under the spreadsheet: the selected cell's reference (B for the
+ * formula row, B3 for a cell) and what it holds in full, a formula as
+ * typed rather than its value, as the handheld shows it.
+ */
+export function cellLine(p: ListsPage): { ref: string; row: Row } {
+  const { row, col } = p.sel;
+  const ref = row < 2 ? letter(col) : `${letter(col)}${row - 1}`;
+  // A cell filled by its column's formula has nothing typed in it: the line shows its value.
+  return { ref, row: row < 2 || !rawAt(p, row, col) ? displayRow(p, row, col) : editRow(p, row, col) };
+}
+
+/** Names a formula binds for itself (seq's n, Σ's k): they refer to nothing outside it. */
+const BINDERS = new Set(["seq", "Σ", "Π", "∫", "d", "limit", "sum", "product", "seqGen"]);
+
+/**
+ * The single letters a formula uses that are both a column's letter and a
+ * defined variable (a column named x makes the variable x, and x is also
+ * column X): the handheld asks which is meant (Conflict Detected).
+ */
+export function formulaConflicts(formula: string, isVariable: (name: string) => boolean): string[] {
+  let ast: unknown;
+  try {
+    // Column references written out (x[]) are settled already.
+    ast = parse(formula.replace(/^=/, "").replace(/\b[a-z]\[\]/gi, "0"));
+  } catch {
+    return [];
+  }
+  const found = new Set<string>();
+  const bound = new Set<string>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) return n.forEach(walk);
+    const node = n as { k?: string; name?: string; f?: string; args?: { k?: string; name?: string }[] };
+    if (node.k === "call" && node.f && BINDERS.has(node.f) && node.args?.[1]?.k === "sym" && node.args[1].name) bound.add(node.args[1].name);
+    if (node.k === "sym" && node.name && /^[a-z]$/.test(node.name)) found.add(node.name);
+    Object.values(node).forEach(walk);
+  };
+  walk(ast);
+  return [...found].filter((name) => !bound.has(name) && isVariable(name)).sort();
+}
+
+/** The formula with each conflicting letter settled: a column reference becomes x[], a variable stays x. */
+export function resolveConflicts(formula: string, choices: Record<string, "column" | "variable">): string {
+  return formula.replace(/(?<![\w.])([a-z])(?![\w[(])/g, (m, name: string) => (choices[name] === "column" ? `${name}[]` : m));
+}
+
+/** The formula an edit is about to commit, without its = or name:=, or null when it isn't a formula. */
+export function editingFormula(p: ListsPage): string | null {
+  if (!p.edit || p.sel.row === 0) return null;
+  const text = rowText(p.edit);
+  if (p.sel.row === 1) return text.startsWith(formulaPrefix(p, p.sel.col)) ? text.slice(formulaPrefix(p, p.sel.col).length) : text.replace(/^=/, "");
+  return text.startsWith("=") ? text.slice(1) : null;
+}
+
+/** The edit with its formula replaced (after Conflict Detected), its = or name:= kept. */
+export function withFormula(p: ListsPage, formula: string): ListsPage {
+  const prefix = p.sel.row === 1 ? formulaPrefix(p, p.sel.col) : "=";
+  return { ...p, edit: setRow(chars(`${prefix}${formula}`)) };
+}
+
 export type ListsEffect = { recalc: true } | { error: string } | null;
 
 export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: ListsEffect } {
@@ -72,8 +165,15 @@ export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: Lis
   if (p.edit) {
     const commit = (then: ListsPage["sel"]) => {
       let text = rowText(p.edit!);
-      if (row === 1 && text) text = `=${text.replace(/^=/, "")}`;
+      // The formula row is stored as =formula, without the column's name:= in front of it.
+      if (row === 1) {
+        const prefix = formulaPrefix(p, col);
+        const body = text.startsWith(prefix) ? text.slice(prefix.length) : text.replace(/^=/, "");
+        text = body.trim() ? `=${body}` : "";
+      }
       if (row === 0 && text && !/^[a-zA-Z]\w*$/.test(text)) return done({ ...p, edit: null }, { error: "Error: Invalid name" });
+      // A command's name (count, mean …) can't hold a list: the engine would refuse it without a word.
+      if (row === 0 && text && isReservedName(text)) return done({ ...p, edit: null }, { error: "Error: Reserved name" });
       return done({ ...setRaw(p, row, col, text), edit: null, sel: then }, { recalc: true });
     };
     switch (key.k) {
@@ -106,7 +206,7 @@ export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: Lis
     case "end":
       return done({ ...p, sel: { row: rowsUsed(p) + 2, col } });
     case "enter":
-      return done({ ...p, edit: setRow(toRow(rawAt(p, row, col))) });
+      return done({ ...p, edit: setRow(editRow(p, row, col)) });
     case "backspace":
     case "delete":
     case "clear":
@@ -115,9 +215,10 @@ export function listsKey(p: ListsPage, key: Key): { page: ListsPage; effect: Lis
     case "text":
     case "paste":
     case "template": {
-      // Typing on a cell starts editing it afresh.
-      const next = editorKey(emptyEdit(), key);
-      return done({ ...p, edit: next ?? emptyEdit() });
+      // Typing on a cell starts editing it afresh; on the formula row, after the column's name:= (or =).
+      const start = row === 1 ? setRow(chars(formulaPrefix(p, col))) : emptyEdit();
+      const next = editorKey(start, key);
+      return done({ ...p, edit: next ?? start });
     }
     default:
       return done(p);
@@ -130,6 +231,13 @@ export function insertRow(p: ListsPage): ListsPage {
   const at = p.sel.row - 2;
   if (at < 0) return p;
   return { ...p, cols: p.cols.map((c) => (c.formula ? c : { ...c, cells: [...c.cells.slice(0, at), "", ...c.cells.slice(at)] })) };
+}
+/** Insert ▸ Cell: an empty cell at the selection, the column's cells below it moving down one. */
+export function insertCell(p: ListsPage): ListsPage {
+  const at = p.sel.row - 2;
+  const c = p.cols[p.sel.col];
+  if (at < 0 || !c || c.formula || at >= c.cells.length) return p;
+  return { ...p, cols: p.cols.map((col, i) => (i === p.sel.col ? { ...col, cells: [...col.cells.slice(0, at), "", ...col.cells.slice(at)] } : col)) };
 }
 export function deleteRow(p: ListsPage): ListsPage {
   const at = p.sel.row - 2;
@@ -209,36 +317,67 @@ export function withRefs(formula: string, value: (row: number, col: number) => s
 export type Evaluate = (text: string) => Promise<{ ok: boolean; text: string; definitions: string[] }>;
 
 /**
- * Work every formula out again, in column order, then define each named
- * column as a list. Returns the new values and the engine definitions made.
- * shortcut: no dependency graph; fine for handheld-sized sheets, add one if recalcs get slow.
+ * Whole-column references (a[], b[]) as list literals of the columns'
+ * numbers, as the handheld lets formulas and the statistics dialogs name an
+ * unnamed column.
+ */
+export function columnRefs(text: string, cols: ListsColumn[]): string {
+  return text.replace(/\b([a-z])\[\]/gi, (_, l: string) => `{${columnNumbers(cols[l.toLowerCase().charCodeAt(0) - 97]).join(",")}}`);
+}
+
+/**
+ * Work every formula out again, then define each named column as a list.
+ * A formula can read a column worked out after it (to its right, or through
+ * a name), so the formulas are worked out again until nothing changes; cells
+ * still changing after one pass more than there are columns go round in a
+ * circle, and show Error. Returns the new values and the engine definitions made.
  */
 export async function recalc(p: ListsPage, run: Evaluate): Promise<{ page: ListsPage; definitions: string[] }> {
-  const cols = p.cols.map((c) => ({ ...c, values: c.cells.slice() }));
-  const definitions: string[] = [];
+  const isFormula = (c: ListsColumn) => Boolean(c.formula) || c.cells.some((x) => x.startsWith("="));
+  // Formula cells start blank, so a reference to one not worked out yet isn't its formula text.
+  const cols = p.cols.map((c) => ({ ...c, values: c.cells.map((x) => (x.startsWith("=") ? "" : x)) }));
+  const plain: string[] = [];
+  const latest = new Map<string, string[]>();
   const valueAt = (row: number, col: number) => cols[col]?.values[row - 2] ?? "";
   const define = async (c: (typeof cols)[number]) => {
-    if (!c.name) return;
+    if (!c.name) return [];
     let vals = c.values.slice();
     while (vals.length && !vals.at(-1)) vals.pop();
     vals = vals.map((v) => v || "undef");
     const r = await run(`${c.name}:={${vals.join(",")}}`);
-    if (r.ok) definitions.push(...r.definitions);
+    return r.ok ? r.definitions : [];
   };
+  const formula = (text: string) => run(columnRefs(withRefs(text.slice(1), valueAt), cols));
   // Plain columns first, so formulas elsewhere can use their names.
-  for (const c of cols) if (!c.formula && !c.cells.some((x) => x.startsWith("="))) await define(c);
-  for (const c of cols) {
-    if (c.formula) {
-      const r = await run(withRefs(c.formula.slice(1), valueAt));
-      c.values = r.ok ? splitList(r.text) : ["Error"];
+  for (const c of cols) if (!isFormula(c)) plain.push(...(await define(c)));
+  const passes = cols.length + 1;
+  let moving = new Set<string>();
+  for (let pass = 0; pass <= passes; pass++) {
+    moving = new Set();
+    for (const [ci, c] of cols.entries()) {
+      if (!isFormula(c)) continue;
+      const before = c.values.slice();
+      if (c.formula) {
+        const r = await formula(c.formula);
+        c.values = r.ok ? splitList(r.text) : ["Error"];
+      }
+      for (let i = 0; i < c.cells.length; i++) {
+        const cell = c.cells[i]!;
+        if (!cell.startsWith("=")) continue;
+        const r = await formula(cell);
+        c.values[i] = r.ok ? r.text : "Error";
+      }
+      const n = Math.max(before.length, c.values.length);
+      for (let i = 0; i < n; i++) if ((before[i] ?? "") !== (c.values[i] ?? "")) moving.add(`${ci}:${i}`);
+      if (c.name) latest.set(c.name, await define(c));
     }
-    for (let i = 0; i < c.cells.length; i++) {
-      const cell = c.cells[i]!;
-      if (!cell.startsWith("=")) continue;
-      const r = await run(withRefs(cell.slice(1), valueAt));
-      c.values[i] = r.ok ? r.text : "Error";
-    }
-    if (c.formula || c.cells.some((x) => x.startsWith("="))) await define(c);
+    if (!moving.size) break;
   }
-  return { page: { ...p, cols: cols.map((c) => ({ ...c })) }, definitions };
+  // Still changing after every pass: a circular reference.
+  for (const key of moving) {
+    const [ci, i] = key.split(":").map(Number) as [number, number];
+    cols[ci]!.values[i] = "Error";
+  }
+  for (const c of cols) if (moving.size && c.name && isFormula(c)) latest.set(c.name, await define(c));
+  return { page: { ...p, cols: cols.map((c) => ({ ...c })) }, definitions: [...plain, ...[...latest.values()].flat()] };
 }

@@ -6,6 +6,7 @@
 - Downloaded: 2026-11-02 from https://www-fourier.univ-grenoble-alpes.fr/~parisse/giac/giacwasm.js (server Last-Modified 2024-08-22)
 - SHA-256: 96cbb37bfe1060ffd9a56f72ab1cc61cf2400577ca9bb13e0992e03f603da378
 - Unmodified.
+- Mirrored by us for the build: https://github.com/notnooob/axiom/releases/tag/giac-1.9.0-996 (the same file, same SHA-256). `scripts/fetch-giac.mjs` tries it first and the authors' site second, since that server is sometimes slow to answer build machines.
 
 ## Corresponding source
 

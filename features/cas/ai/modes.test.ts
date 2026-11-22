@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { allowedTools, modeOf, MODE_IDS } from "./modes";
+import { allowedTools, modeOf, MODE_IDS, restrictToReadOnly } from "./modes";
 import { TOOLS } from "./tools";
 
 const ALL = [...TOOLS, { name: "ask_user", readOnly: true }];
@@ -35,5 +35,23 @@ describe("modeOf", () => {
     expect(modeOf({})).toBe("solve");
     expect(modeOf({ mode: "nonsense" })).toBe("solve");
     expect(MODE_IDS).toEqual(["solve", "exam", "guide", "check"]);
+  });
+});
+
+describe("restrictToReadOnly", () => {
+  it("keeps only looking, highlight and ask_user, in every mode", () => {
+    for (const mode of MODE_IDS) {
+      const kept = restrictToReadOnly(allowedTools(mode, ALL), ALL);
+      for (const n of kept) expect(CHANGES.has(n)).toBe(false);
+      expect(kept).toContain("ask_user");
+      expect(kept.length).toBeGreaterThan(1);
+    }
+  });
+
+  it("never adds a tool the mode doesn't allow", () => {
+    for (const mode of MODE_IDS) {
+      const byMode = new Set(allowedTools(mode, ALL));
+      for (const n of restrictToReadOnly([...byMode], ALL)) expect(byMode.has(n)).toBe(true);
+    }
   });
 });

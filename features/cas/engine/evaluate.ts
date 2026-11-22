@@ -5,11 +5,14 @@ import { print } from "../math/print";
 import { decimalArithmetic } from "./decimal";
 import { EngineError, format, formatFloat, numericValue, shownDecimal, unrounded } from "./format";
 import { STAT_COMMANDS } from "./stats";
+import { TEST_COMMANDS } from "./stats-tests";
 import { BUILTINS } from "../math/builtins";
 import { rootIn, rootsIn } from "../graphs/analyze";
 import { defineParts, handheldForms, heavy, lineAt, RENAME_IN, toGiac, translate, UnsupportedError } from "./translate";
 import { inputWarning, warning, type Warning } from "./warnings";
-import { statistics, statResults, statVariables } from "./eval-stats";
+import { programEntry, type ProgramIO } from "./eval-program";
+import { factorCommand, vectorConversion } from "./eval-matrix";
+import { correlationMatrix, statistics, statResults, statVariables } from "./eval-stats";
 import { copyVar, financeCalls, numericFinance, OMITTED } from "./eval-finance";
 
 /**
@@ -63,6 +66,10 @@ export type EvalResult =
       regEqn?: { n: number; text: string };
       /** The handheld's ⚠ beside the entry: the answer stands, with this message. */
       warning?: Warning;
+      /** Lines a program showed (Disp), each its parts, above its "Done". */
+      display?: string[][];
+      /** Document settings the entry changed (setMode). */
+      settings?: Settings;
     }
   | { ok: false; input?: Ast; error: string };
 
@@ -78,6 +85,8 @@ export async function evaluate(
      * sign method's breaks): no conditions are added to what Giac solves.
      */
     values?: boolean;
+    /** How a running program asks the student for input (Request) or shows a message (Text). */
+    io?: ProgramIO;
   },
 ): Promise<EvalResult> {
   // Whatever goes wrong inside, the entry answers with an error rather than throwing.
@@ -254,8 +263,14 @@ async function formOnParts(
 async function evaluateText(
   typedText: string,
   giac: Giac,
-  opts: { settings: Settings; ans?: Ast; approx?: boolean; seen?: Set<string>; values?: boolean },
+  opts: { settings: Settings; ans?: Ast; approx?: boolean; seen?: Set<string>; values?: boolean; io?: ProgramIO },
 ): Promise<EvalResult> {
+  // A library object, lib\obj, is kept as the group name lib.obj (files/library.ts).
+  typedText = typedText.replace(/(^|[^\w.\\])([A-Za-z][A-Za-z0-9]*)\\([A-Za-z]\w*)/g, "$1$2.$3");
+  const program = await programEntry(typedText, giac, opts, evaluate);
+  if (program) return program;
+  const factors = await factorCommand(typedText, giac, opts, evaluate);
+  if (factors) return factors;
   const text = onAns(typedText);
   let input: Ast;
   try {
@@ -266,6 +281,8 @@ async function evaluateText(
   }
   const refused = inputError(input);
   if (refused) return { ok: false, input, error: refused };
+  const vector = await vectorConversion(input, giac, opts, evaluate);
+  if (vector) return vector;
   if (input.k === "bin" && input.op === ":") return statements(input, giac, opts);
   // With no answer before it (a new document), ans is an error,
   // never whatever Giac last worked out.
@@ -273,7 +290,8 @@ async function evaluateText(
   if (input.k === "call" && input.f === "CopyVar") return copyVar(input, giac, opts.settings);
   const parts = await formOnParts(input, giac, opts);
   if (parts) return parts;
-  if (input.k === "call" && STAT_COMMANDS.has(input.f)) return statistics(withAnswer(input, opts.ans) as typeof input, giac, opts.settings);
+  if (input.k === "call" && (STAT_COMMANDS.has(input.f) || TEST_COMMANDS.has(input.f))) return statistics(withAnswer(input, opts.ans) as typeof input, giac, opts.settings);
+  if (input.k === "call" && input.f === "corrMat") return correlationMatrix(withAnswer(input, opts.ans) as typeof input, giac, opts.settings);
   const results = await statResults(input, giac, opts.settings);
   if (results) return results;
   if (opts.settings.complex === "polar") {

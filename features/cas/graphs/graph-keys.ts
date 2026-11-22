@@ -5,7 +5,7 @@ import { parse } from "../math/ast";
 import * as E from "../math/editor";
 import { astToRow, chars, rowToLinear } from "../math/tree";
 import type { GraphsPage } from "../state/document";
-import type { AnalyzeKind } from "./model";
+import { autoScale, type AnalyzeKind } from "./model";
 
 /**
  * The Graphs page's response to a key. Defining a function and finishing an
@@ -14,8 +14,10 @@ import type { AnalyzeKind } from "./model";
 export type GraphEffect =
   | { define: { n: number; text: string } }
   | { relation: { n: number; text: string } }
-  | { parametric: { n: number; texts: string[] } }
+  | { parametric: { n: number; texts: string[]; polar?: boolean } }
   | { de: { n: number; texts: string[] } }
+  | { sequence: { n: number; texts: string[] } }
+  | { surface: { n: number; text: string } }
   /** other: the second function for an intersection (the assistant names it); otherwise the first other one shown. */
   | { analyze: { type: AnalyzeKind; fn: number; other?: number; a: number; b: number } }
   | null;
@@ -65,6 +67,35 @@ export function openParametric(p: GraphsPage, degrees = false, n = nextPar(p)): 
   return { ...p, editing: n, entryKind: "par", parDraft: { field: 0, rows }, edit: E.setRow(rows[0]!), tool: null };
 }
 
+/**
+ * Open the polar entry line on r(n): r(θ), then θmin, θmax and θstep,
+ * defaulting to 0 ≤ θ ≤ 6.28 in steps of 0.13 (0 to 360 in steps of 7.5 in
+ * degrees), as on the handheld. Polar curves are numbered with the
+ * parametric ones.
+ */
+export function openPolar(p: GraphsPage, degrees = false, n = nextPar(p)): GraphsPage {
+  const c = (p.parametrics ?? []).find((x) => x.n === n && x.polar);
+  const num = (v: number) => chars(String(Number(v.toPrecision(6))));
+  const rows = c ? [c.xRow, num(c.tmin), num(c.tmax), num(c.tstep)] : [[], chars("0"), chars(degrees ? "360" : "6.28"), chars(degrees ? "7.5" : "0.13")];
+  return { ...p, editing: n, entryKind: "par", parDraft: { field: 0, rows, polar: true }, edit: E.setRow(rows[0]!), tool: null };
+}
+
+/** Open the z entry line on z(n): the next new surface, or one to edit. */
+export function openSurface(p: GraphsPage, n = Math.max(0, ...(p.surfaces ?? []).map((s) => s.n)) + 1): GraphsPage {
+  const s = (p.surfaces ?? []).find((x) => x.n === n);
+  return { ...p, editing: n, entryKind: "z", parDraft: undefined, edit: E.setRow(s?.row ?? []), tool: null };
+}
+
+const nextSeq = (p: GraphsPage) => Math.max(0, ...(p.sequences ?? []).map((s) => s.n)) + 1;
+
+/** Open the sequence entry line on u(n): the term, the initial terms, then nmin ≤ n ≤ nmax and nstep (1 to 99 in steps of 1, as on the handheld). */
+export function openSequence(p: GraphsPage, n = nextSeq(p)): GraphsPage {
+  const s = (p.sequences ?? []).find((x) => x.n === n);
+  const num = (v: number) => chars(String(v));
+  const rows = s ? [s.row, chars(s.init), num(s.nmin), num(s.nmax), num(s.nstep)] : [[], [], chars("1"), chars("99"), chars("1")];
+  return { ...p, editing: n, entryKind: "seq", parDraft: { field: 0, rows }, edit: E.setRow(rows[0]!), tool: null };
+}
+
 const nextDE = (p: GraphsPage) => Math.max(0, ...(p.des ?? []).map((d) => d.n)) + 1;
 
 /** A Diff Eq's y: its own, or the lowest the page's parametric curves and other Diff Eqs leave free (y-names are shared). */
@@ -91,7 +122,7 @@ function parField(p: GraphsPage, field: number): GraphsPage {
   const rows = d.rows.map((r, i) => (i === d.field ? p.edit.row : r));
   const f = (field + rows.length) % rows.length;
   // The field's contents are selected on arrival, so typing replaces them.
-  return { ...p, parDraft: { field: f, rows, fresh: true }, edit: E.setRow(rows[f]!) };
+  return { ...p, parDraft: { field: f, rows, fresh: true, polar: d.polar }, edit: E.setRow(rows[f]!) };
 }
 
 /** Open the entry line on rel(n), loaded with its current relation. */
@@ -105,11 +136,25 @@ export function graphKey(
   key: Key,
   taken: ReadonlySet<number> = new Set(),
 ): { page: GraphsPage; effect: GraphEffect } {
-  const done = (q: Partial<GraphsPage>, effect: GraphEffect = null) => ({ page: { ...p, ...q }, effect });
+  // A key that changes nothing keeps the same page, so it isn't an edit (or an undo step).
+  const done = (q: Partial<GraphsPage>, effect: GraphEffect = null) => ({
+    page: (Object.keys(q) as (keyof GraphsPage)[]).every((k) => p[k] === q[k]) ? p : { ...p, ...q },
+    effect,
+  });
   const visible = p.functions.filter((f) => !f.hidden).map((f) => f.n);
-  const step = (p.window.xmax - p.window.xmin) / 100;
+  const step = p.traceStep ?? (p.window.xmax - p.window.xmin) / 100;
 
   if (key.k === "table") return done({ table: !p.table });
+
+  if (p.zoomBox) return { page: zoomBoxKey(p, key), effect: null };
+  if (p.mathDraw && key.k === "esc") return done({ mathDraw: undefined });
+  if (p.pathPlot && key.k === "esc") return done({ pathPlot: undefined });
+  // What Select ▸ Region picked: del deletes it, esc lets it go.
+  if (p.selected && (key.k === "delete" || key.k === "backspace")) {
+    const s = p.selected;
+    return done({ marks: p.marks.filter((_, i) => !s.marks.includes(i)), texts: (p.texts ?? []).filter((_, i) => !s.texts.includes(i)), selected: undefined });
+  }
+  if (p.selected && key.k === "esc") return done({ selected: undefined });
 
   if (p.tool) {
     const tool = p.tool;
@@ -166,7 +211,7 @@ export function graphKey(
     }
   }
 
-  if (p.editing !== null && (p.entryKind === "par" || p.entryKind === "de") && p.parDraft) {
+  if (p.editing !== null && (p.entryKind === "par" || p.entryKind === "de" || p.entryKind === "seq") && p.parDraft) {
     const field = p.parDraft.field;
     // ↑ from a Diff Eq's first field and ↓ from its last go to the one before or after, as ↑ and ↓ step through functions.
     if (p.entryKind === "de" && ((key.k === "up" && field === 0) || (key.k === "down" && field === p.parDraft.rows.length - 1))) {
@@ -189,8 +234,12 @@ export function graphKey(
           if (!texts[0]) return done({ editing: null, parDraft: undefined });
           return done({ editing: null, parDraft: undefined }, { de: { n: p.editing, texts } });
         }
+        if (p.entryKind === "seq") {
+          if (!texts[0]) return done({ editing: null, parDraft: undefined });
+          return done({ editing: null, parDraft: undefined }, { sequence: { n: p.editing, texts } });
+        }
         if (!texts[0] || !texts[1]) return done({ editing: null, parDraft: undefined });
-        return done({ editing: null, parDraft: undefined }, { parametric: { n: p.editing, texts } });
+        return done({ editing: null, parDraft: undefined }, { parametric: { n: p.editing, texts, polar: p.parDraft.polar } });
       }
       case "esc":
         return done({ editing: null, parDraft: undefined });
@@ -223,6 +272,7 @@ export function graphKey(
       case "enter": {
         const text = p.edit.row.length ? E.rowText(p.edit) : "";
         if (!text) return done({ editing: null });
+        if (p.entryKind === "z") return done({ editing: null }, { surface: { n: p.editing, text } });
         if (p.entryKind === "rel") return done({ editing: null }, { relation: { n: p.editing, text } });
         return done({ editing: null }, { define: { n: p.editing, text } });
       }
@@ -230,6 +280,7 @@ export function graphKey(
         return done({ editing: null });
       case "up":
       case "down": {
+        if (p.entryKind === "z") return done({});
         // Up and down step through the defined functions (or relations) in the entry line.
         const rel = p.entryKind === "rel";
         const ns = (rel ? (p.relations ?? []) : p.functions).map((f) => f.n).sort((a, b) => a - b);
@@ -264,6 +315,26 @@ export function graphKey(
     }
   }
 
+  // 3D Graphing: the arrows turn the view; Enter, Tab or typing opens the z entry line.
+  if (p.view === "3d") {
+    const v = { yaw: -0.7, pitch: 0.55, ...p.view3d };
+    switch (key.k) {
+      case "left":
+      case "right":
+        return done({ view3d: { ...v, yaw: v.yaw + (key.k === "left" ? -0.12 : 0.12) } });
+      case "up":
+      case "down":
+        return done({ view3d: { ...v, pitch: Math.max(-1.5, Math.min(1.5, v.pitch + (key.k === "up" ? 0.12 : -0.12))) } });
+      case "tab":
+      case "enter":
+        return { page: openSurface(p), effect: null };
+      case "char":
+        return graphKey(openSurface(p), key, taken);
+      default:
+        return done({});
+    }
+  }
+
   switch (key.k) {
     case "tab":
     case "enter":
@@ -275,6 +346,55 @@ export function graphKey(
       return graphKey(openEntry(p, nextFree(p, taken)), key, taken);
     default:
       return done({});
+  }
+}
+
+/** Zoom – Box: the crosshair starts in the middle of the window. */
+export function startZoomBox(p: GraphsPage): GraphsPage {
+  const w = p.window;
+  return { ...p, tool: null, editing: null, zoomBox: { x: (w.xmin + w.xmax) / 2, y: (w.ymin + w.ymax) / 2 } };
+}
+
+/** A corner of the box set at (x, y): the first, or the second, which zooms to the box. */
+export function zoomBoxAt(p: GraphsPage, x: number, y: number): GraphsPage {
+  const b = p.zoomBox;
+  if (!b) return p;
+  if (!b.first) return { ...p, zoomBox: { ...b, x, y, first: { x, y } } };
+  const [xmin, xmax] = [Math.min(b.first.x, x), Math.max(b.first.x, x)];
+  const [ymin, ymax] = [Math.min(b.first.y, y), Math.max(b.first.y, y)];
+  if (b.select) {
+    // Select ▸ Region: the marked points and texts inside the box.
+    const inside = (px: number, py: number) => px >= xmin && px <= xmax && py >= ymin && py <= ymax;
+    const marks = p.marks.flatMap((m, i) => (m.kind === "point" && inside(m.x, m.y) ? [i] : []));
+    const texts = (p.texts ?? []).flatMap((t, i) => (inside(t.x, t.y) ? [i] : []));
+    return { ...p, zoomBox: undefined, selected: marks.length || texts.length ? { marks, texts } : undefined };
+  }
+  // A box with no width or height leaves the window as it was.
+  if (xmax - xmin < 1e-9 || ymax - ymin < 1e-9) return { ...p, zoomBox: undefined };
+  return { ...p, zoomBox: undefined, window: { xmin, xmax, ymin, ymax, xscl: autoScale(xmin, xmax), yscl: autoScale(ymin, ymax) } };
+}
+
+/** Zoom – Box's keys: the arrows move the crosshair a fiftieth of the window, Enter sets a corner, esc cancels. */
+function zoomBoxKey(p: GraphsPage, key: Key): GraphsPage {
+  const b = p.zoomBox!;
+  const w = p.window;
+  const dx = (w.xmax - w.xmin) / 50;
+  const dy = (w.ymax - w.ymin) / 50;
+  switch (key.k) {
+    case "left":
+      return { ...p, zoomBox: { ...b, x: b.x - dx } };
+    case "right":
+      return { ...p, zoomBox: { ...b, x: b.x + dx } };
+    case "up":
+      return { ...p, zoomBox: { ...b, y: b.y + dy } };
+    case "down":
+      return { ...p, zoomBox: { ...b, y: b.y - dy } };
+    case "enter":
+      return zoomBoxAt(p, b.x, b.y);
+    case "esc":
+      return { ...p, zoomBox: undefined };
+    default:
+      return p;
   }
 }
 
@@ -317,8 +437,11 @@ export function startTool(p: GraphsPage, id: string): GraphsPage {
     analyzeInflection: "inflection",
     analyzeIntegral: "integral",
     analyzeIntersection: "intersection",
+    analyzeBounded: "bounded",
   };
   if (id === "graphTrace") return { ...p, editing: null, tool: { kind: "trace", fn, x } };
+  // Trace All: every function at the same x, each with its point.
+  if (id === "traceAll") return { ...p, editing: null, tool: { kind: "trace", fn, x, all: true } };
   if (id === "analyzeDydx") return { ...p, editing: null, tool: { kind: "dydx", fn, x } };
   const type = kinds[id];
   if (!type) return p;

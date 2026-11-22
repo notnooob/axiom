@@ -11,9 +11,10 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence } from "framer-motion";
+import { AnimatePresence, MotionConfig } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { ScaleIn } from "@/src/components/amicro/scale-in";
@@ -24,7 +25,14 @@ import { historySaid, markSaid, menuSaid, pageSaid, toolSaid, wizardSaid } from 
 import { calcKey, isTemplateWizard, wizardInsert, wizardLinear } from "./calculator/calc-keys";
 import { CalculatorApp } from "./calculator/calculator-app";
 import { CasEngine, definedFunctions, definedNames, type EngineStatus } from "./engine/client";
+import { definedSources } from "./engine/program";
+import { fillRegion, groupIndex, groupWithNext, moveSplit, nextRegion, selectLayout, swapApp, ungroup, unitOf, units } from "./state/layout";
+import { deletePage, deleteProblem, movePage, renameProblem } from "./state/pages";
+import { LayoutFrame } from "./screen/layout-frame";
+import { PageSorter } from "./screen/page-sorter";
+import { libraryDefinition, loadLibraries } from "./files/library";
 import { DEFAULT_SETTINGS, evaluate, type Settings } from "./engine/evaluate";
+import type { ProgramIO } from "./engine/eval-program";
 import { unrounded } from "./engine/format";
 import { analyze } from "./graphs/analyze";
 import {
@@ -34,20 +42,29 @@ import {
   openDE,
   openEntry,
   openParametric,
+  openPolar,
+  openSequence,
+  openSurface,
+  startZoomBox,
+  zoomBoxAt,
   openRelation,
   startTool,
   type GraphEffect,
 } from "./graphs/graph-keys";
-import { GraphsApp } from "./graphs/graphs-app";
-import { deDefinition, pageDefinitions } from "./graphs/definitions";
-import { autoScale, fnName, parNames, relName, zoomed, type Samples } from "./graphs/model";
+import { FunctionTable, GraphsApp, graphFunctions, type TableFn } from "./graphs/graphs-app";
+import { deDefinition, pageDefinitions, polarXY } from "./graphs/definitions";
+import { recognise } from "./graphs/mathdraw";
+import { Graph3D, surfaceName } from "./graphs/graph3d";
+import { classify as classifyConic, feature as conicFeature, type ConicFeature } from "./graphs/conics";
+import { parseTerms, SEQ_TERMS, seqDefinition, seqName, seqTermsCommand } from "./graphs/sequence";
+import { autoScale, fnName, parNames, relName, STANDARD, zoomed, type Mark, type Samples } from "./graphs/model";
 import { Keypad } from "./keypad/keypad";
 import { keyFromEvent, type Key } from "./keys";
-import { parse, type Ast } from "./math/ast";
+import { isReservedName, parse, type Ast } from "./math/ast";
 import { print } from "./math/print";
 import { RENAME_IN, translate } from "./engine/translate";
 import { DE_DEFAULTS, type RelationOp, type Slider } from "./state/document";
-import { emptyEdit, selectBetween, selection, selectionText, templateNode } from "./math/editor";
+import { CARET, emptyEdit, insertText, selectBetween, selection, selectionText, templateNode } from "./math/editor";
 import { DefinedNames } from "./math/render";
 import { astToRow, chars, rowToLinear, type Row } from "./math/tree";
 import { calculatorMenu } from "./menus/calculator-menu";
@@ -63,8 +80,8 @@ import {
   type CatalogState,
 } from "./catalog/catalog";
 import { PALETTE, paletteKeyPress, pickCell, TemplatePalette } from "./menus/palette";
-import { FinanceSolver, financeKeyPress, newFinance, type FinanceState } from "./finance/finance-solver";
-import { openWizard, WizardDialog, wizardKeyPress, type WizardState } from "./menus/wizard";
+import { FinanceSolver, financeKeyPress, financePick, newFinance, PMT_AT, type FinanceState } from "./finance/finance-solver";
+import { openWizard, WizardDialog, wizardKeyPress, wizardPick, type WizardState } from "./menus/wizard";
 import { download, screenPng } from "./screen/capture";
 import { ADD_PAGE, BROWSE_MENU, DOC_MENU, SETTINGS_MENU } from "./menus/doc-menus";
 import { app as menuApp } from "./menus/types";
@@ -73,7 +90,7 @@ import { HOME_START, HomeScreen, homeKeyPress, type HomeAction, type HomeSel } f
 import * as files from "./files/store";
 import { addFiles } from "./files/upload";
 import { classify, decodeTns } from "./tns/decode";
-import { exportTns } from "./tns/export";
+import { droppedMessage, exportTns } from "./tns/export";
 import { importTns } from "./tns/import";
 import { ListsApp } from "./lists/lists-app";
 import { listsMenu } from "./lists/lists-menu";
@@ -82,14 +99,17 @@ import { NotesApp, UnsupportedApp, type NotesApi } from "./notes/notes-app";
 import { NOTES_MENU } from "./notes/notes-menu";
 import { DataStatsApp } from "./data/data-app";
 import { dataMenu } from "./data/data-menu";
-import { GeometryApp, geometryKey, zoomed as zoomedGeo } from "./geometry/geometry-app";
+import { dataKey, dataTakesEsc } from "./data/keys";
+import { GeometryApp, geometryKey, VIEW as GEO_VIEW, zoomed as zoomedGeo } from "./geometry/geometry-app";
+import { COLOUR_OPTIONS } from "./graphs/colours";
 import { geometryMenu } from "./geometry/geometry-menu";
-import { ASKS, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
-import { ONE_VAR } from "./data/plot";
+import { ASKS, nextId as nextGeoId, nextLabel as nextGeoLabel, remove as removeGeo, resolve as resolveGeo, transformWith, TOOL_NAMES as GEO_TOOLS, VAR_NAME, type GeoTool } from "./geometry/model";
+import { NO_INFO, ONE_VAR, type DataInfo } from "./data/plot";
 import type { GraphWindow } from "./graphs/model";
 import { PythonCanvas, PythonEditor, PythonShell, type DrawOp } from "./python/python-app";
 import { python, type PyStatus } from "./python/runner";
-import { oneVar, regression, twoVar, type StatResult } from "./engine/stats";
+import type { StatResult } from "./engine/stats";
+import { loadStats } from "./engine/eval-stats";
 import { freeVariables, SLIDER_DIGITS, sliderStep, snap } from "./graphs/sliders";
 import { Screen } from "./screen/screen";
 import { EnginePill, ErrorDialog, Legal, MessageDialog, Notice, ScreenBar, SliderPrompt, type Choice, type SliderAsk } from "./screen/dialogs";
@@ -101,9 +121,11 @@ import { ownsOpenDoc, restoreOf } from "./ai/threads";
 import type { AgentDialog, AgentHost } from "./ai/tools";
 import { registerWebMcp } from "./ai/webmcp";
 import { clearPrefs, load, pref, save, setPref, type Saved } from "./state/persist";
+import { docDefaults, loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Setup } from "./state/setup";
 import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
   bumpIds,
+  editsContent,
   insertProblem,
   newDocument,
   newId,
@@ -187,9 +209,9 @@ const DIGIT_OPTIONS = ["Float", ...Array.from({ length: 12 }, (_, i) => `Float${
 type View = "home" | "browse" | "doc" | "new";
 /** The open document, kept in this browser between Saves (and while the Scratchpad is shown). */
 type Cached = { saved: Saved; path: string | null; dirty: boolean };
-type Setup = { text: "Small" | "Medium" | "Large"; haptics: boolean };
-const TEXT_SCALE: Record<Setup["text"], number> = { Small: 0.88, Medium: 1, Large: 1.18 };
 const RECENT_MAX = 5;
+/** Handheld Setup's Animations, for framer-motion; index.css does the same for CSS through data-motion. */
+const MOTION = { System: "user", On: "never", Off: "always" } as const;
 
 /** The Scratchpad always has a Calculator page and a Graphs page (A Calculate, B Graph). */
 function withScratchPages(doc: CasDocument): CasDocument {
@@ -198,7 +220,7 @@ function withScratchPages(doc: CasDocument): CasDocument {
   if (!pages.some((p) => p.kind === "graphs")) pages.push(newPage("graphs"));
   return { ...doc, title: "Scratchpad", pages };
 }
-const freshScratch = (): Saved => ({ doc: withScratchPages(newDocument()), settings: DEFAULT_SETTINGS, definitions: [] });
+const freshScratch = (): Saved => ({ doc: withScratchPages(newDocument()), settings: docDefaults(), definitions: [] });
 
 const stem = (name: string) => name.replace(/\.tns$/i, "");
 
@@ -262,8 +284,19 @@ export function CasApp() {
   }, []);
   /** What to do once a Save As (asked for by "save changes?") is done. */
   const afterSave = useRef<(() => void) | null>(null);
-  const [setup, setSetupState] = useState<Setup>(() => pref<Setup>("setup", { text: "Medium", haptics: true }));
+  const scratchWarned = useRef(false);
+  const [setup, setSetupState] = useState<Setup>(loadSetup);
   const [recent, setRecent] = useState<string[]>(() => pref<string[]>("recent", []));
+  /** The Page Sorter's chosen page, while it's open. */
+  const [sorter, setSorter] = useState<number | null>(null);
+  /** Custom Split is moving a layout's divider. */
+  const [splitting, setSplitting] = useState(false);
+  /** An empty layout region waiting for the app chosen in the add-page menu. */
+  const fillTarget = useRef<{ group: number; slot: number } | null>(null);
+  /** Edit ▸ Copy and Cut: the latest render's (they read the selection). */
+  const editOps = useRef({ copy: () => {}, cut: () => {} });
+  /** A Notes page in another region gets its own handle, so the active one's isn't replaced. */
+  const otherNotes = useRef<NotesApi | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; lines: string[]; ok: () => void; buttons?: Choice[] } | null>(null);
   const [dragging, setDragging] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
@@ -274,6 +307,11 @@ export function CasApp() {
   const rows = useMemo(() => visibleRows(fileList, browse), [fileList, browse]);
   const refreshFiles = useCallback(async () => setFileList(await files.all()), []);
   const hap = useCallback((t: Parameters<typeof haptic>[0]) => setup.haptics && haptic(t), [setup.haptics, haptic]);
+  useEffect(() => {
+    const root = document.documentElement;
+    if (setup.motion === "System") delete root.dataset.motion;
+    else root.dataset.motion = setup.motion.toLowerCase();
+  }, [setup.motion]);
 
   // Python: the worker's state, the input() prompt waiting for an answer, and what a program has drawn.
   const [py, setPy] = useState<{ status: PyStatus; prompt: string | null; canvas: DrawOp[] | null }>({
@@ -286,6 +324,8 @@ export function CasApp() {
   const pyShell = useRef<number | null>(null);
 
   const restored = useRef(false);
+  /** The Scratchpad's definitions are back in the engine (Start Up In waits for it before opening another document). */
+  const startupReady = useRef<Promise<void>>(Promise.resolve());
   /** The problem whose definitions the engine holds now. */
   const shownProblem = useRef(1);
   /** The saved document's problem until that document is on screen (the first render still shows the default one). */
@@ -294,7 +334,8 @@ export function CasApp() {
     // Pick up the document from this browser's last visit, if there is one.
     const loaded = load();
     const saved = loaded ? { ...loaded, doc: withScratchPages(loaded.doc) } : null;
-    const e = new CasEngine(saved?.settings ?? DEFAULT_SETTINGS);
+    const fresh = saved ? null : freshScratch();
+    const e = new CasEngine(saved?.settings ?? fresh!.settings);
     engine.current = e;
     if (saved) {
       // The engine is given the active problem's definitions below: no swap on opening.
@@ -302,7 +343,7 @@ export function CasApp() {
       opening.current = shownProblem.current;
       setDoc(saved.doc);
       setSettings(saved.settings);
-      void e.restore(saved.definitions).then(async () => {
+      startupReady.current = e.restore(saved.definitions).then(async () => {
         // Each Graphs page's own names, for documents saved before pages had them.
         for (const pg of saved.doc.pages)
           if (pg.kind === "graphs")
@@ -313,7 +354,10 @@ export function CasApp() {
       });
       setDefined(definedNames(saved.definitions));
     }
-    else setDoc(freshScratch().doc);
+    else {
+      setDoc(fresh!.doc);
+      setSettings(fresh!.settings);
+    }
     restored.current = true;
     skipSave.current = true;
     void refreshFiles();
@@ -335,7 +379,13 @@ export function CasApp() {
   }, []);
   const writeNow = useCallback(async () => {
     const c = current.current;
-    if (c.isScratch) save(snapshot());
+    if (c.isScratch) {
+      // Told once a session: the Scratchpad keeps working, it just isn't kept.
+      if (!save(snapshot()) && !scratchWarned.current) {
+        scratchWarned.current = true;
+        toast.error("The Scratchpad couldn't be saved: browser storage is full");
+      }
+    }
     else setPref("current", { saved: snapshot(), path: c.openPath, dirty: c.dirty } satisfies Cached);
   }, [snapshot]);
   useEffect(() => {
@@ -481,8 +531,9 @@ export function CasApp() {
         if (!p || p.kind !== kind) return d;
         const pages = d.pages.slice();
         let next = fn(p as Extract<Page, { kind: K }>);
-        // An imported Graphs page's original XML no longer matches once it's edited.
-        if ((next.kind === "graphs" || next.kind === "datastats" || next.kind === "notes") && next.xml && next !== p) next = { ...next, xml: undefined };
+        // An imported page's original XML no longer matches once what it holds is edited
+        // (not when only its tool, selection or entry line changes).
+        if ((next.kind === "graphs" || next.kind === "datastats" || next.kind === "notes") && next.xml && editsContent(p, next)) next = { ...next, xml: undefined };
         recordUndo(p, next);
         pages[d.active] = next;
         return { ...d, pages };
@@ -508,16 +559,29 @@ export function CasApp() {
   const setPython = useCallback((fn: (p: PythonPage) => PythonPage) => update("python", fn), [update]);
   const setData = useCallback((fn: (p: DataStatsPage) => DataStatsPage) => update("datastats", fn), [update]);
   const setGeo = useCallback((fn: (p: GeometryPage) => GeometryPage) => update("geometry", fn), [update]);
+  /** A Graphs page's construction (Geometry ▸ tools on the graph), changed as a Geometry page would be. */
+  const setGraphGeo = useCallback(
+    (fn: (p: GeometryPage) => GeometryPage) =>
+      update("graphs", (g) => {
+        const r = fn(geoOfGraph(g));
+        return { ...g, geo: { objects: r.objects, tool: r.tool ?? null, sel: r.sel ?? null } };
+      }),
+    [update],
+  );
   /** Rotation and Dilation, once their object and centre are picked: the angle or scale factor. */
   const askGeoAmount = useCallback((tool: GeoTool, picked: string[]) => {
     const label = ASKS[tool];
     if (label)
       setWizard(
-        openWizard({ kind: "wizard", title: GEO_TOOLS[tool], arrows: false, fields: [{ label, value: tool === "rotation" ? "90" : "2" }], build: `geoamount:${tool}:${picked[0]}:${picked[1]}:{0}` }),
+        openWizard({ kind: "wizard", title: GEO_TOOLS[tool], arrows: false, fields: [{ label, value: tool === "rotation" ? "90" : tool === "regpoly" ? "6" : "2" }], build: `geoamount:${tool}:${picked[0]}:${picked[1]}:{0}` }),
       );
   }, []);
   /** The window a Data & Statistics page is drawn in (its own, or the one fitting the data): what zoom works from. */
   const dataWindow = useRef<GraphWindow | null>(null);
+  /** What the Data & Statistics page's lists turned out to be (text or numbers, which one is plotted), for its menu. */
+  const dataInfo = useRef<DataInfo>(NO_INFO);
+  /** A Lists formula waiting on Conflict Detected: the key that was entering it, and the letters asked about. */
+  const listsConflict = useRef<{ key: Key; formula: string; names: string[] } | null>(null);
   /** The Notes editor's commands, for the keypad, its menu and the assistant. */
   const notesApi = useRef<NotesApi | null>(null);
   /** A Notes maths box worked out with the problem's variables; what it defines is defined for the problem. */
@@ -554,6 +618,118 @@ export function CasApp() {
     [updatePage],
   );
 
+  /**
+   * A running program's Request and Text: the dialog waits for the student,
+   * and closing it any other way than OK is a Break, as on the handheld.
+   */
+  const asking = useRef<((v: string | null) => void) | null>(null);
+  const telling = useRef<(() => void) | null>(null);
+  const programIO = useMemo<ProgramIO>(
+    () => ({
+      request: (prompt, text) =>
+        new Promise<string | null>((resolve) => {
+          asking.current = resolve;
+          setWizard(openWizard({ kind: "wizard", title: text ? "Request String" : "Request", arrows: false, fields: [{ label: prompt || "Value:", value: "" }], build: "request:{0}" }));
+        }),
+      message: (text) =>
+        new Promise<void>((resolve) => {
+          telling.current = resolve;
+          setWarning([text]);
+        }),
+    }),
+    [],
+  );
+  useEffect(() => {
+    if (wizard || !asking.current) return;
+    const answer = asking.current;
+    asking.current = null;
+    answer(null);
+  }, [wizard]);
+  useEffect(() => {
+    if (warning || !telling.current) return;
+    const done = telling.current;
+    telling.current = null;
+    done();
+  }, [warning]);
+
+  /** Put a line in the Calculator's entry line, replacing what's there, with the cursor at CARET if it has one. */
+  const setEntry = useCallback((text: string) => setCalc((p) => ({ ...p, edit: insertText(emptyEdit(), text), sel: null })), [setCalc]);
+
+  /** Refresh Libraries: every LibPub and LibPriv object in MyLib, defined here as lib\obj. */
+  const refreshLibraries = useCallback(async () => {
+    const e = engine.current;
+    if (!e) return;
+    const objs = await loadLibraries();
+    let n = 0;
+    for (const o of objs) {
+      const siblings = objs.filter((x) => x.lib === o.lib).map((x) => x.def.name);
+      const r = await evaluate(libraryDefinition(o, siblings), e.giac, { settings: current.current.settings });
+      if (!r.ok) continue;
+      for (const d of [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])]) e.remember(d);
+      n++;
+    }
+    setDefined(definedNames(e.saved));
+    toast(n ? `${n} library object${n === 1 ? "" : "s"} ready to use as library\\name.` : "No library objects found in My Documents/MyLib.");
+  }, []);
+
+  /** The Program Editor's dialogs, Recall Definition and Create Library Shortcut, once filled in. */
+  const programWizard = useCallback(
+    async (built: string) => {
+      const e = engine.current;
+      if (!e) return;
+      const [kind, ...rest] = built.split(":");
+      const arg = rest.join(":").trim();
+      if (kind === "prgmnew") {
+        const [name = "", type, access] = rest.map((s) => s.trim());
+        if (!/^[A-Za-z][\w]*$/.test(name)) return setError("Error: A name is letters, digits and _, starting with a letter");
+        const block = type === "Function" ? "Func" : "Prgm";
+        setEntry(`Define ${access && access !== "None" ? `${access} ` : ""}${name.toLowerCase()}()=${block}:${CARET}:End${block}`);
+        return;
+      }
+      if (kind === "prgmopen" || kind === "prgmview") {
+        const def = definedSources(e.saved).get(arg);
+        if (!def) return setError("Error: Not defined");
+        if (kind === "prgmopen") return setEntry(def.source);
+        setWarning([`${def.name}(${def.params.join(",")})  ${def.kind === "Func" ? "Function" : "Program"}`, "", ...def.lines.map((l) => `  ${l}`)]);
+        return;
+      }
+      if (kind === "recalldef") {
+        const def = definedSources(e.saved).get(arg);
+        if (def) return setEntry(def.source);
+        const fn = definedFunctions(e.saved).get(arg);
+        const shown = fn ? `${arg}(${fn.params.join(",")})` : arg;
+        const r = await evaluate(shown, e.giac, { settings: current.current.settings });
+        if (!r.ok) return setError(r.error);
+        setEntry(`Define ${shown}=${r.outputText}`);
+        return;
+      }
+      const objs = await loadLibraries();
+      if (kind === "libimport") {
+        const [lib, name] = arg.split("\\");
+        const o = objs.find((x) => x.lib === lib && x.def.name === name);
+        if (!o) return setError("Error: Not found in the libraries");
+        setEntry(libraryDefinition(o, []).replace(`Define ${o.lib}.`, "Define "));
+        return;
+      }
+      if (kind === "libshortcut") {
+        const [lib = "", prefix = "", priv] = rest.map((s) => s.trim().toLowerCase());
+        if (!/^[a-z][a-z0-9]*$/.test(prefix)) return setError("Error: A shortcut is letters and digits, starting with a letter");
+        const mine = objs.filter((o) => o.lib === lib && (o.def.access === "LibPub" || priv === "yes"));
+        const siblings = objs.filter((o) => o.lib === lib).map((o) => o.def.name);
+        let n = 0;
+        for (const o of mine) {
+          const r = await evaluate(libraryDefinition(o, siblings, prefix), e.giac, { settings: current.current.settings });
+          if (!r.ok) continue;
+          for (const d of [...(r.definitions ?? []), ...(r.definition ? [r.definition] : [])]) e.remember(d);
+          n++;
+        }
+        setDefined(definedNames(e.saved));
+        toast(`${n} shortcut${n === 1 ? "" : "s"}: ${prefix}.name`);
+      }
+    },
+    [setEntry],
+  );
+
   const runEvaluate = useCallback(
     async (p: CalculatorPage, approx: boolean) => {
       const e = engine.current;
@@ -561,10 +737,14 @@ export function CasApp() {
       busy.current = true;
       const text = rowToLinear(p.edit.row);
       try {
-        const res = await evaluate(text, e.giac, { settings, ans: lastAns.current ?? shownAnswer(p), approx });
+        const res = await evaluate(text, e.giac, { settings, ans: lastAns.current ?? shownAnswer(p), approx, io: programIO });
         if (!res.ok) {
           setError(res.error);
           return;
+        }
+        if (res.settings) {
+          setSettings(res.settings);
+          void e.applySettings(res.settings);
         }
         // A recursive function's helper (in definitions) comes before the function itself.
         const defs = [...(res.definitions ?? []), ...(res.definition ? [res.definition] : [])];
@@ -582,6 +762,7 @@ export function CasApp() {
           outputText: res.outputText,
           ...(full !== print(res.output) ? { ansText: full } : {}),
           ...(res.warning && { warning: res.warning.text }),
+          ...(res.display && { display: res.display }),
         };
         setCalc((cur) => ({ ...cur, edit: emptyEdit(), history: [...cur.history, entry] }));
         say(historySaid(entry));
@@ -665,6 +846,41 @@ export function CasApp() {
         }),
       })),
     [setGraphs],
+  );
+
+  const setDataSlider = useCallback(
+    (name: string, change: (sl: Slider) => Slider | null) =>
+      setData((p) => ({
+        ...p,
+        sliders: (p.sliders ?? []).flatMap((sl) => {
+          if (sl.name !== name) return [sl];
+          const next = change(sl);
+          return next ? [next] : [];
+        }),
+      })),
+    [setData],
+  );
+
+  /** A slider's value typed in place: a number, or worked out (π/4, 1/3); the range widens to take it. */
+  const typedSlider = useCallback(
+    async (name: string, text: string, set: (name: string, change: (sl: Slider) => Slider | null) => void) => {
+      let value = Number(text.replace(/−/g, "-"));
+      if (!Number.isFinite(value) && engine.current) {
+        try {
+          value = Number((await engine.current.giac(`evalf(${translate(parse(text), settings).giac})`)).trim());
+        } catch {
+          value = NaN;
+        }
+      }
+      if (!Number.isFinite(value)) {
+        setError("Error: Enter a number");
+        return;
+      }
+      set(name, (sl) => ({ ...sl, value, min: Math.min(sl.min, value), max: Math.max(sl.max, value) }));
+      assign(name, value, true);
+      say(`${name} = ${value}`);
+    },
+    [settings, assign, say],
   );
 
   const createSliders = useCallback(
@@ -774,7 +990,9 @@ export function CasApp() {
         });
       } else if ("parametric" in effect) {
         // x1(t), y1(t) become xp1_(t), yp1_(t); the t range is worked out to numbers.
-        const { n, texts } = effect.parametric;
+        const { n, texts, polar } = effect.parametric;
+        // A polar curve r(θ) is drawn as x = r·cos θ, y = r·sin θ (polarXY), its θ range in the place of t's.
+        const xy = polar ? polarXY(texts[0]!) : null;
         const rowOf = (t: string): Row => {
           try {
             return astToRow(parse(t));
@@ -788,19 +1006,20 @@ export function CasApp() {
             ...g,
             editing: n,
             entryKind: "par",
-            parDraft: { field: 0, rows: texts.map(rowOf) },
+            parDraft: { field: 0, rows: texts.map(rowOf), polar },
             edit: { row: rowOf(texts[0]!), cursor: { path: [], index: rowOf(texts[0]!).length } },
           }));
         };
         let defs: string[];
         let range: number[];
         try {
+          const [xText, yText] = xy ?? [texts[0]!, texts[1]!];
           defs = [
-            `${parNames(p.id, n)[0]}(t):=${translate(parse(texts[0]!), settings).giac}`,
-            `${parNames(p.id, n)[1]}(t):=${translate(parse(texts[1]!), settings).giac}`,
+            `${parNames(p.id, n)[0]}(t):=${translate(parse(xText), settings).giac}`,
+            `${parNames(p.id, n)[1]}(t):=${translate(parse(yText), settings).giac}`,
           ];
           range = [];
-          for (const t of texts.slice(2))
+          for (const t of texts.slice(polar ? 1 : 2))
             range.push(Number((await e.giac(`evalf(${translate(parse(t), settings).giac})`)).trim()));
         } catch {
           fail("Error: Syntax");
@@ -808,7 +1027,7 @@ export function CasApp() {
         }
         const [tmin, tmax, tstep] = range as [number, number, number];
         if (![tmin, tmax, tstep].every(Number.isFinite) || tmax <= tmin || tstep <= 0) {
-          fail("Error: Invalid t range");
+          fail(polar ? "Error: Invalid θ range" : "Error: Invalid t range");
           return;
         }
         for (const d of defs) {
@@ -818,21 +1037,82 @@ export function CasApp() {
           }
           e.remember(d);
         }
-        say(`Plotted x${n}(t)=${texts[0]}, y${n}(t)=${texts[1]}`);
-        offerSliders(texts.slice(0, 2), ["t"], p);
+        say(polar ? `Plotted r${n}(θ)=${texts[0]}` : `Plotted x${n}(t)=${texts[0]}, y${n}(t)=${texts[1]}`);
+        offerSliders(polar ? texts.slice(0, 1) : texts.slice(0, 2), polar ? ["θ"] : ["t"], p);
         setGraphs((g) => {
           const rest = (g.parametrics ?? []).filter((c) => c.n !== n);
           const curve = {
             n,
             x: texts[0]!,
-            y: texts[1]!,
+            y: polar ? "" : texts[1]!,
             xRow: rowOf(texts[0]!),
-            yRow: rowOf(texts[1]!),
+            yRow: polar ? [] : rowOf(texts[1]!),
             tmin,
             tmax,
             tstep,
+            ...(polar ? { polar } : {}),
           };
           return { ...g, parametrics: [...rest, curve].sort((a, b) => a.n - b.n) };
+        });
+      } else if ("surface" in effect) {
+        // z1(x, y): a function of x and y for the 3D view.
+        const { n, text } = effect.surface;
+        let def: string;
+        try {
+          def = `${surfaceName(p.id, n)}(x,y):=${translate(parse(text), settings).giac}`;
+        } catch {
+          setError("Error: Syntax");
+          setGraphs((g) => openSurface(g, n));
+          return;
+        }
+        if (/error/i.test(await e.giac(def))) return setError("Error: Invalid expression");
+        e.remember(def);
+        say(`Plotted z${n}(x,y)=${text}`);
+        const row = (() => {
+          try {
+            return astToRow(parse(text));
+          } catch {
+            return chars(text);
+          }
+        })();
+        setGraphs((g) => ({ ...g, surfaces: [...(g.surfaces ?? []).filter((s) => s.n !== n), { n, text, row }].sort((a, b) => a.n - b.n) }));
+      } else if ("sequence" in effect) {
+        // u1(n) = f(n, u1(n−1), …), its initial terms, and the n range: an engine function and the page's entry.
+        const { n, texts } = effect.sequence;
+        const rowOf = (t: string): Row => {
+          try {
+            return astToRow(parse(t));
+          } catch {
+            return chars(t);
+          }
+        };
+        const fail = (msg: string) => {
+          setError(msg);
+          setGraphs((g) => ({ ...g, editing: n, entryKind: "seq", parDraft: { field: 0, rows: texts.map(rowOf) }, edit: { row: rowOf(texts[0]!), cursor: { path: [], index: rowOf(texts[0]!).length } } }));
+        };
+        const value = async (t: string) => Number((await e.giac(`evalf(${translate(parse(t), settings).giac})`)).trim());
+        let def: { def: string; depth: number };
+        const init: number[] = [];
+        const range: number[] = [];
+        try {
+          def = seqDefinition(p.id, n, texts[0]!, settings);
+          for (const t of (texts[1] ?? "").split(",").filter((x) => x.trim())) init.push(await value(t));
+          for (const t of texts.slice(2, 5)) range.push(await value(t?.trim() ? t : "1"));
+        } catch (err) {
+          fail(err instanceof Error && err.message.startsWith("Error") ? err.message : "Error: Syntax");
+          return;
+        }
+        const [nmin, nmax, nstep] = range as [number, number, number];
+        if (![nmin, nmax, nstep].every(Number.isInteger) || nmax < nmin || nstep < 1) return fail("Error: Invalid n range");
+        if (init.length < def.depth) return fail(`Error: Needs ${def.depth} initial term${def.depth === 1 ? "" : "s"}`);
+        if (init.some((v) => !Number.isFinite(v))) return fail("Error: Initial terms must be numbers");
+        if (/error/i.test(await e.giac(def.def))) return fail("Error: Invalid expression");
+        e.remember(def.def);
+        say(`Plotted u${n}(n)=${texts[0]}`);
+        setGraphs((g) => {
+          const rest = (g.sequences ?? []).filter((s) => s.n !== n);
+          const s = { n, rhs: texts[0]!, row: rowOf(texts[0]!), init: texts[1] ?? "", initValues: init, depth: def.depth, nmin, nmax, nstep };
+          return { ...g, sequences: [...rest, s].sort((a, b) => a.n - b.n) };
         });
       } else if ("de" in effect) {
         // d1: y1′ = f(x, y1), with (x0, y10) optional: the field always, the solution through it when given.
@@ -893,6 +1173,7 @@ export function CasApp() {
           other === undefined ? undefined : fnName(p.id, other),
           a,
           b,
+          other,
         );
         if (!mark) setError("Error: Nothing found between the bounds");
         else {
@@ -1072,11 +1353,37 @@ export function CasApp() {
         const { page: next, effect } = calcKey(page, key, max);
         setCalc(() => next);
         if (effect) void runEvaluate(next, effect.evaluate === "approx");
+      } else if (page?.kind === "graphs" && (page.geo?.tool || page.geo?.sel) && geometryKey(geoOfGraph(page), key)) {
+        // A Geometry tool (or a picked object) on the graph takes esc, del and the arrows first.
+        const next = geometryKey(geoOfGraph(page), key)!;
+        setGraphGeo(() => next);
       } else if (page?.kind === "graphs") {
         const { page: next, effect } = graphKey(page, key, takenFns);
         setGraphs(() => next);
         if (effect) void runGraphEffect(next, effect);
+      } else if (page?.kind === "lists" && page.table) {
+        // The function table scrolls a step at a time with ▲ ▼; the spreadsheet under it takes no keys.
+        const t = page.table;
+        if (key.k === "up" || key.k === "down") setLists((p) => ({ ...p, table: { ...t, start: t.start + (key.k === "down" ? t.step : -t.step) } }));
       } else if (page?.kind === "lists") {
+        // A formula about to be entered that uses a letter which is both a column (x is column X) and a
+        // variable asks which is meant first, as the handheld's Conflict Detected does.
+        const formula = key.k === "enter" || key.k === "up" || key.k === "down" ? sheet.editingFormula(page) : null;
+        const conflicts = formula ? sheet.formulaConflicts(formula, (n) => defined.has(n)) : [];
+        if (formula && conflicts.length) {
+          listsConflict.current = { key, formula, names: conflicts };
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Conflict Detected",
+              note: `=${formula}`,
+              arrows: false,
+              fields: conflicts.map((n) => ({ label: `${n}: Column or Variable?`, value: "Column Reference", options: ["Column Reference", "Variable Reference"], stacked: true })),
+              build: `listsconflict:${conflicts.map((_, i) => `{${i}}`).join(":")}`,
+            }),
+          );
+          return;
+        }
         const { page: next, effect } = sheet.listsKey(page, key);
         setLists(() => next);
         if (effect && "error" in effect) setError(effect.error);
@@ -1084,6 +1391,9 @@ export function CasApp() {
       } else if (page?.kind === "geometry") {
         const next = geometryKey(page, key);
         if (next) setGeo(() => next);
+      } else if (page?.kind === "datastats") {
+        const next = dataKey(page, key);
+        if (next) setData(() => next);
       } else if (page?.kind === "notes") {
         notesApi.current?.key(key);
       } else if (page?.kind === "python") {
@@ -1120,7 +1430,7 @@ export function CasApp() {
         }
       }
     },
-    [wizard, finance, page, runEvaluate, runGraphEffect, setCalc, setGraphs, setLists, recalcLists, runPython, pyEdit, py, updatePage, shellPrint, takenFns],
+    [wizard, finance, page, defined, runEvaluate, runGraphEffect, setCalc, setGraphs, setLists, recalcLists, runPython, pyEdit, py, updatePage, shellPrint, takenFns],
   );
 
   /** Clear all: one empty Calculator page and no variables. The settings stay. */
@@ -1145,13 +1455,19 @@ export function CasApp() {
   // A new page is a clean sheet: a new Graphs page has no curves on it.
   const addPage = useCallback(
     (kind: "calculator" | "graphs" | "lists" | "python" | "pyshell" | "datastats" | "notes" | "geometry") => {
+      const target = fillTarget.current;
+      fillTarget.current = null;
       setDoc((d) => {
         const pages = d.pages.slice();
         const page = newPage(kind, problemOf(d.pages[d.active]));
         // Its entry line starts on the problem's next free function number.
         if (page.kind === "graphs") page.editing = nextFree(page, takenFns);
-        pages.splice(d.active + 1, 0, page);
-        return { ...d, pages, active: d.active + 1 };
+        if (target) return fillRegion(d, target.group, target.slot, page);
+        // After the whole of a page laid out with several apps, not between them.
+        const u = units(d)[unitOf(d, d.active)];
+        const at = u ? Math.max(...u.pages) + 1 : d.active + 1;
+        pages.splice(at, 0, page);
+        return { ...d, pages, active: at };
       });
     },
     [takenFns],
@@ -1226,7 +1542,7 @@ export function CasApp() {
       const name = files.nameOf(path);
       if (/\.py$/i.test(name)) {
         const doc: CasDocument = { title: stem(name), pages: [{ kind: "python", id: newId(), problem: 1, file: name, source: new TextDecoder().decode(bytes) }, newPage("pyshell")], active: 0 };
-        const saved: Saved = { doc, settings: DEFAULT_SETTINGS, definitions: [] };
+        const saved: Saved = { doc, settings: docDefaults(), definitions: [] };
         await files.cacheImport(path, saved);
         remember(path);
         await openSaved(saved, path);
@@ -1278,27 +1594,35 @@ export function CasApp() {
     async (first: "calculator" | "graphs" | "lists" | "python" | "datastats" | "notes" | "geometry") => {
       const doc = newDocument(first, "Untitled");
       if (first === "python") doc.pages.push(newPage("pyshell"));
-      await openSaved({ doc, settings: DEFAULT_SETTINGS, definitions: [] }, null);
+      await openSaved({ doc, settings: docDefaults(), definitions: [] }, null);
     },
     [openSaved],
   );
 
   /** Save: to the document's file, or Save As for one that hasn't been saved (or the Scratchpad). */
   const saveDocument = useCallback(
-    async (then?: () => void) => {
+    /** Resolves false when the save failed; true once saved, or once Save As has been asked for (it runs `then` itself). */
+    async (then?: () => void): Promise<boolean> => {
       const c = current.current;
       if (c.isScratch || !c.openPath) {
         afterSave.current = then ?? null;
         setWizard(openWizard({ kind: "wizard", title: "Save As", arrows: false, fields: [{ label: "File Name:", value: c.isScratch || c.doc.title === "Untitled" ? "" : c.doc.title }], build: "saveas:{0}" }));
-        return;
+        return true;
       }
-      await files.saveDoc(c.openPath, snapshot());
-      setDirty(false);
-      current.current.dirty = false;
-      await writeNow();
-      await refreshFiles();
+      try {
+        await files.saveDoc(c.openPath, snapshot());
+        setDirty(false);
+        current.current.dirty = false;
+        await writeNow();
+        await refreshFiles();
+      } catch (err) {
+        // Storage full or IndexedDB unavailable: the document stays unsaved (and dirty), and New/Open/Close don't go ahead.
+        toast.error(`Couldn't save: ${(err as Error).message || "the browser refused"}`);
+        return false;
+      }
       toast.success(`Saved ${files.nameOf(c.openPath)}`);
       then?.();
+      return true;
     },
     [snapshot, writeNow, refreshFiles],
   );
@@ -1318,7 +1642,7 @@ export function CasApp() {
           lines: [`Do you want to save changes to "${c.doc.title}"?`],
           ok: () => undefined,
           buttons: [
-            { label: "Yes", run: () => void saveDocument(() => resolve(true)) },
+            { label: "Yes", run: () => void saveDocument(() => resolve(true)).then((ok) => ok || resolve(false)) },
             { label: "No", run: () => resolve(true) },
             { label: "Cancel", run: () => resolve(false) },
           ],
@@ -1345,6 +1669,24 @@ export function CasApp() {
     } else toast("No document is open. Choose New or Browse.");
   }, [openSaved, writeNow]);
 
+  // Handheld Setup's Start Up In: Last Document opens what Home's 4 Current would, once the
+  // Scratchpad has finished loading (opening sooner would mix its definitions into the document's).
+  // StrictMode mounts twice: the first run is cancelled, and the second waits for the second engine.
+  useEffect(() => {
+    if (loadSetup().start !== "Last Document") return;
+    let live = true;
+    const cached = pref<Cached | null>("current", null);
+    const go = () => {
+      if (!live) return;
+      if (cached?.saved?.doc?.pages?.length) void openSaved(cached.saved, cached.path, false, cached.dirty);
+      else setView("doc");
+    };
+    startupReady.current.then(go, go);
+    return () => {
+      live = false;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** Where leaving a document goes: the screen it was opened from (Home or My Documents). */
   const backTo = useRef<"home" | "browse">("home");
   useEffect(() => {
@@ -1368,16 +1710,27 @@ export function CasApp() {
     } else void closeDocument();
   }, [closeDocument, writeNow]);
 
-  const tnsOf = useCallback((saved: Saved): Uint8Array => exportTns(saved.doc, saved.settings).bytes, []);
+  /** A saved document as .tns bytes; pages that can't be written are added to `dropped` when it's given. */
+  const tnsOf = useCallback((saved: Saved, dropped?: { dropped: number; droppedKinds: string[] }): Uint8Array => {
+    const r = exportTns(saved.doc, saved.settings);
+    if (dropped) {
+      dropped.dropped += r.dropped;
+      for (const k of r.droppedKinds) if (!dropped.droppedKinds.includes(k)) dropped.droppedKinds.push(k);
+    }
+    return r.bytes;
+  }, []);
 
   const downloadFile = useCallback(
     async (path: string) => {
       const rec = await files.getFile(path);
       if (!rec || rec.type !== "file") return;
       const name = files.nameOf(path);
-      const bytes = rec.bytes && !rec.edited ? rec.bytes : rec.doc ? tnsOf(rec.doc) : null;
+      const lost = { dropped: 0, droppedKinds: [] as string[] };
+      const bytes = rec.bytes && !rec.edited ? rec.bytes : rec.doc ? tnsOf(rec.doc, lost) : null;
       if (!bytes) return;
       download(new Blob([bytes as BlobPart]), /\.\w+$/.test(name) ? name : `${name}.tns`);
+      const warn = droppedMessage(lost);
+      if (warn) toast(warn);
     },
     [tnsOf],
   );
@@ -1425,8 +1778,390 @@ export function CasApp() {
     [newDoc, openScratchpad, recent, refreshFiles, startNew, openCurrent, leaveOk],
   );
 
+  /** Zoom – Data: a window round every scatter plot's and sequence's points, with a margin, as the handheld fits data. */
+  const zoomToData = async () => {
+    const e = engine.current;
+    const g = page?.kind === "graphs" ? page : null;
+    if (!e || !g) return;
+    const pts: [number, number][] = [];
+    const nums = (raw: string) => raw.trim().replace(/^(list)?\[|\]$/g, "").split(",").map(Number);
+    for (const sc of g.scatters ?? []) {
+      if (sc.hidden) continue;
+      const xs = nums(await e.giac(`evalf(${translate(parse(sc.x), settings).giac})`));
+      const ys = nums(await e.giac(`evalf(${translate(parse(sc.y), settings).giac})`));
+      xs.forEach((x, i) => pts.push([x, ys[i]!]));
+    }
+    if (g.sequences?.length) {
+      await e.giac(SEQ_TERMS);
+      for (const s of g.sequences) {
+        if (s.hidden) continue;
+        parseTerms(await e.giac(seqTermsCommand(seqName(g.id, s.n), s.depth, s.initValues, s.nmin, s.nmax))).forEach((v, i) => pts.push([s.nmin + i, v]));
+      }
+    }
+    const ok = pts.filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+    if (!ok.length) return setError("Error: No data to zoom to: add a scatter plot or a sequence");
+    const fit = (vs: number[]) => {
+      let [lo, hi] = [Math.min(...vs), Math.max(...vs)];
+      if (hi - lo < 1e-9) [lo, hi] = [lo - 1, hi + 1];
+      const pad = (hi - lo) * 0.1;
+      return [lo - pad, hi + pad] as const;
+    };
+    const [xmin, xmax] = fit(ok.map((p) => p[0]));
+    const [ymin, ymax] = fit(ok.map((p) => p[1]));
+    setGraphs((q) => ({ ...q, window: { xmin, xmax, ymin, ymax, xscl: autoScale(xmin, xmax), yscl: autoScale(ymin, ymax) }, marks: [] }));
+  };
+
+  /** The page's graphs by name (f1, rel1, x1 or r1, u1, s1, d1), for the Actions dialogs. */
+  const graphList = (g: GraphsPage) => [
+    ...g.functions.map((f) => ({ name: `f${f.n}`, kind: "fn" as const, n: f.n, hidden: f.hidden })),
+    ...(g.relations ?? []).map((r) => ({ name: `rel${r.n}`, kind: "rel" as const, n: r.n, hidden: r.hidden })),
+    ...(g.parametrics ?? []).map((c) => ({ name: `${c.polar ? "r" : "x"}${c.n}`, kind: "par" as const, n: c.n, hidden: c.hidden })),
+    ...(g.sequences ?? []).map((s) => ({ name: `u${s.n}`, kind: "seq" as const, n: s.n, hidden: s.hidden })),
+    ...(g.scatters ?? []).map((s) => ({ name: `s${s.n}`, kind: "scatter" as const, n: s.n, hidden: s.hidden })),
+    ...(g.des ?? []).map((d) => ({ name: `d${d.n}`, kind: "de" as const, n: d.n, hidden: d.hidden })),
+  ];
+
+  /**
+   * Geometry's Actions dialogs (Hide/Show, Attributes, Text, Coordinates and
+   * Equations) on a construction: a Geometry page's, or a Graphs page's
+   * when one of its objects is selected. wizardDone applies them to whichever
+   * page is active.
+   */
+  const geoDialog = (which: "hide" | "attrs" | "text" | "label", p: GeometryPage) => {
+    const ids = p.objects.map((o) => o.id);
+    if (which === "text") {
+      const v = p.view ?? GEO_VIEW;
+      const at = (n: number) => String(Number(n.toFixed(2)));
+      setWizard(openWizard({ kind: "wizard", title: "Text", arrows: false, fields: [{ label: "Text:", value: "" }, { label: "x:", value: at(v.x) }, { label: "y:", value: at(v.y) }], build: "geotext:{1}:{2}:{0}" }));
+      return;
+    }
+    if (!ids.length) return setError("Error: No objects on this page");
+    if (which === "hide") {
+      setWizard(openWizard({ kind: "wizard", title: "Hide/Show", arrows: false, fields: p.objects.map((o) => ({ label: `Show ${o.id}`, value: o.hidden ? "No" : "Yes", check: true })), build: `geohide:${ids.join(",")}:${ids.map((_, i) => `{${i}}`).join(":")}` }));
+      return;
+    }
+    if (which === "attrs") {
+      const o = p.objects.find((x) => x.id === p.sel) ?? p.objects[0]!;
+      const a = o.attrs;
+      setWizard(
+        openWizard({
+          kind: "wizard",
+          title: "Attributes",
+          arrows: false,
+          fields: [
+            { label: "Object:", value: o.id, options: ids },
+            { label: "Line Weight:", value: a?.weight ?? "Medium", options: ["Thin", "Medium", "Thick"] },
+            { label: "Line Style:", value: a?.style ?? "Continuous", options: ["Continuous", "Dotted", "Dashed"] },
+            { label: "Colour:", value: a?.colour ?? "Auto", options: COLOUR_OPTIONS },
+          ],
+          build: "geoattrs:{0}:{1}:{2}:{3}",
+        }),
+      );
+      return;
+    }
+    // Coordinates and Equations: a point's coordinates, a line's or circle's equation.
+    const shapes = resolveGeo(p.objects);
+    const labelled = ids.filter((id) => {
+      const t = shapes.get(id)?.t;
+      return t === "pt" || t === "line" || t === "circle";
+    });
+    if (!labelled.length) return setError("Error: Coordinates and Equations needs a point, a line or a circle");
+    const first = p.sel && labelled.includes(p.sel) ? p.sel : labelled[0]!;
+    setWizard(openWizard({ kind: "wizard", title: "Coordinates and Equations", arrows: false, fields: [{ label: "Object:", value: first, options: labelled }], build: "geolabel:{0}" }));
+  };
+
+  /** Graphs ▸ Actions: true when the id was one of them. */
+  const graphsActions = (id: string): boolean => {
+    const g = page?.kind === "graphs" ? page : null;
+    if (!g) return false;
+    // With one of the page's geometry objects selected, these act on the construction rather than the graphs.
+    if (g.geo?.sel && (id === "hideShow" || id === "attributes" || id === "coordinates")) {
+      geoDialog(id === "hideShow" ? "hide" : id === "attributes" ? "attrs" : "label", geoOfGraph(g));
+      return true;
+    }
+    const fns = g.functions.map((f) => `f${f.n}`);
+    const needFns = () => (fns.length ? false : (setError("Error: No functions on this page"), true));
+    const w = g.window;
+    const centre = (v: number) => String(Number(v.toPrecision(4)));
+    switch (id) {
+      case "pointer":
+        setGraphs((q) => ({ ...q, tool: null, zoomBox: undefined, mathDraw: undefined, selected: undefined, pathPlot: undefined }));
+        return true;
+      case "selectRegion":
+        setGraphs((q) => ({ ...startZoomBox(q), zoomBox: { ...startZoomBox(q).zoomBox!, select: true } }));
+        return true;
+      case "selectImage":
+        setError("Error: This page has no image to select");
+        return true;
+      case "selectGrid":
+        setWizard(openWizard({ kind: "wizard", title: "Grid", arrows: false, fields: [{ label: "Grid:", value: { none: "No Grid", dot: "Dot Grid", line: "Lined Grid" }[g.grid], options: ["No Grid", "Dot Grid", "Lined Grid"] }], build: "gridtype:{0}" }));
+        return true;
+      case "hideShow": {
+        const all = graphList(g).slice(0, 10);
+        if (!all.length) return setError("Error: No graphs on this page"), true;
+        setWizard(openWizard({ kind: "wizard", title: "Hide/Show", arrows: false, fields: all.map((x) => ({ label: `Show ${x.name}`, value: x.hidden ? "No" : "Yes", check: true })), build: `hideshow:${all.map((x) => x.name).join(",")}:${all.map((_, i) => `{${i}}`).join(":")}` }));
+        return true;
+      }
+      case "attributes": {
+        if (needFns()) return true;
+        const a = g.functions[0]!.attrs;
+        setWizard(
+          openWizard({
+            kind: "wizard",
+            title: "Attributes",
+            arrows: false,
+            fields: [
+              { label: "Graph:", value: fns[0], options: fns },
+              { label: "Line Weight:", value: a?.weight ?? "Medium", options: ["Thin", "Medium", "Thick"] },
+              { label: "Line Style:", value: a?.style ?? "Continuous", options: ["Continuous", "Dotted", "Dashed"] },
+              { label: "Colour:", value: a?.colour ?? "Auto", options: ["Auto", "Blue", "Red", "Green", "Orange", "Purple", "Teal", "Black"] },
+            ],
+            build: "attrs:{0}:{1}:{2}:{3}",
+          }),
+        );
+        return true;
+      }
+      case "setConditions":
+        if (needFns()) return true;
+        setWizard(openWizard({ kind: "wizard", title: "Set Conditions", arrows: false, fields: [{ label: "Graph:", value: fns[0], options: fns }, { label: "Show when:", value: g.functions[0]!.condition?.text ?? "", hint: "a>0 (blank: always)" }], build: "condition:{0}:{1}" }));
+        return true;
+      case "graphText":
+        setWizard(openWizard({ kind: "wizard", title: "Text", arrows: false, fields: [{ label: "Text:", value: "" }, { label: "x:", value: centre((w.xmin + w.xmax) / 2) }, { label: "y:", value: centre((w.ymin + w.ymax) / 2) }], build: "gtext:{1}:{2}:{0}" }));
+        return true;
+      case "coordinates":
+        if (needFns()) return true;
+        setWizard(openWizard({ kind: "wizard", title: "Coordinates and Equations", arrows: false, fields: [{ label: "Point on:", value: fns[0], options: fns }, { label: "x:", value: "0" }], build: "coords:{0}:{1}" }));
+        return true;
+      case "graphCalculate":
+        setWizard(openWizard({ kind: "wizard", title: "Calculate", arrows: false, fields: [{ label: "Expression:", value: "", hint: "f1(2)-f2(2)" }], build: "gcalc:{0}" }));
+        return true;
+      case "redefine": {
+        const all = graphList(g).filter((x) => x.kind !== "scatter");
+        if (!all.length) return setError("Error: No graphs on this page"), true;
+        setWizard(openWizard({ kind: "wizard", title: "Redefine", arrows: false, fields: [{ label: "Graph:", value: all[0]!.name, options: all.map((x) => x.name) }], build: "redefine:{0}" }));
+        return true;
+      }
+      case "viewGraphing":
+        setGraphs((q) => ({ ...q, view: undefined, axes: true }));
+        return true;
+      case "viewPlane":
+        // Plane Geometry: no axes; the analytic window shows as Settings says.
+        setGraphs((q) => ({ ...q, view: "plane", axes: false, grid: "none", hideAnalytic: q.gsettings?.analyticInPlane === false }));
+        return true;
+      case "view3d":
+        setGraphs((q) => ({ ...q, view: "3d", tool: null, editing: null }));
+        return true;
+      case "viewAnalytic":
+        setGraphs((q) => ({ ...q, hideAnalytic: !q.hideAnalytic }));
+        return true;
+      case "viewEndValues":
+        setGraphs((q) => ({ ...q, hideEndValues: !q.hideEndValues }));
+        return true;
+      case "viewGuides":
+        setGraphs((q) => ({ ...q, hideGuides: !q.hideGuides }));
+        return true;
+      case "pathFn":
+      case "pathPar":
+      case "pathPolar": {
+        const target =
+          id === "pathFn"
+            ? g.functions.find((f) => !f.hidden)
+            : (g.parametrics ?? []).find((c) => !c.hidden && Boolean(c.polar) === (id === "pathPolar"));
+        if (!target) return setError(`Error: No ${id === "pathFn" ? "function" : id === "pathPar" ? "parametric curve" : "polar curve"} to follow`), true;
+        setGraphs((q) => ({ ...q, tool: null, pathPlot: { kind: id === "pathFn" ? "fn" : "par", n: target.n, started: Date.now() } }));
+        return true;
+      }
+      case "pathSetup":
+        setWizard(openWizard({ kind: "wizard", title: "Path Setup", arrows: false, fields: [{ label: "Duration (s):", value: String(g.pathSeconds ?? 4) }], build: "pathsetup:{0}" }));
+        return true;
+      case "geoTrace":
+        setGraphs((q) => ({ ...q, geoTrace: !q.geoTrace }));
+        say(g.geoTrace ? "Geometry Trace off" : "Geometry Trace on: move a slider and the graphs leave their earlier places drawn");
+        return true;
+      case "geoTraceErase":
+        setGraphs((q) => ({ ...q, traceErased: (q.traceErased ?? 0) + 1 }));
+        return true;
+      case "graphSettings": {
+        const s = g.gsettings ?? {};
+        const yn = (v: boolean | undefined, d: boolean) => ((v ?? d) ? "Yes" : "No");
+        setWizard(
+          openWizard({
+            kind: "wizard",
+            title: "Graphs & Geometry Settings",
+            arrows: false,
+            fields: [
+              { label: "Display Digits:", value: s.digits ?? "Float3", options: Array.from({ length: 12 }, (_, i) => `Float${i + 1}`) },
+              { label: "Graphing Angle:", value: s.graphAngle ?? "Auto", options: ["Auto", "Radian", "Degree"] },
+              { label: "Geometry Angle:", value: s.geoAngle ?? "Degree", options: ["Auto", "Radian", "Degree"] },
+              { label: "Automatically hide plot labels", value: yn(s.hideLabels, false), check: true },
+              { label: "Show axis end values", value: yn(g.hideEndValues === undefined ? undefined : !g.hideEndValues, true), check: true },
+              { label: "Show tool tips", value: yn(s.tooltips, true), check: true },
+              { label: "Automatically find points of interest", value: yn(s.poi, false), check: true },
+              { label: "Force geometric triangle angles to integers", value: yn(s.intAngles, false), check: true },
+              { label: "Automatically label points", value: yn(s.labelPoints, false), check: true },
+              { label: "Show Analytic Window in Plane Geometry View", value: yn(s.analyticInPlane, true), check: true },
+            ],
+            build: "gsettings:{0}:{1}:{2}:{3}:{4}:{5}:{6}:{7}:{8}:{9}",
+          }),
+        );
+        return true;
+      }
+      case "mathDraw":
+        setGraphs((q) => ({ ...q, tool: null, editing: null, zoomBox: undefined, mathDraw: !q.mathDraw }));
+        say("MathDraw: draw a line or a circle on the graph. Esc stops.");
+        return true;
+    }
+    return false;
+  };
+
+  /** The dialogs Graphs ▸ Actions opened, once filled in. */
+  const graphsWizard = async (built: string) => {
+    const e = engine.current;
+    const [kind, ...rest] = built.split(":");
+    const arg = rest.join(":").trim();
+    const num = async (t: string) => (e ? Number((await e.giac(`evalf(${translate(parse(t || "0"), settings).giac})`)).trim()) : NaN);
+    switch (kind) {
+      case "pathsetup": {
+        const s = await num(arg);
+        if (!(s > 0)) return setError("Error: The duration is a positive number of seconds");
+        return setGraphs((g) => ({ ...g, pathSeconds: s }));
+      }
+      case "gsettings": {
+        const [digits, graphAngle, geoAngle, hideLabels, endValues, tooltips, poi, intAngles, labelPoints, analyticInPlane] = rest.map((s) => s.trim());
+        const yes = (v: string | undefined) => v === "Yes";
+        return setGraphs((g) => ({
+          ...g,
+          hideEndValues: !yes(endValues),
+          gsettings: { digits, graphAngle, geoAngle, hideLabels: yes(hideLabels), tooltips: yes(tooltips), poi: yes(poi), intAngles: yes(intAngles), labelPoints: yes(labelPoints), analyticInPlane: yes(analyticInPlane) },
+        }));
+      }
+      case "gridtype":
+        return setGraphs((g) => ({ ...g, grid: arg === "Dot Grid" ? "dot" : arg === "Lined Grid" ? "line" : "none" }));
+      case "hideshow": {
+        const [names = "", ...vals] = rest;
+        const shown = new Map(names.split(",").map((n, i) => [n, vals[i]?.trim() !== "No"]));
+        const hide = (name: string, h: boolean | undefined) => (shown.has(name) ? !shown.get(name) || undefined : h);
+        return setGraphs((g) => ({
+          ...g,
+          functions: g.functions.map((f) => ({ ...f, hidden: hide(`f${f.n}`, f.hidden) })),
+          relations: g.relations?.map((r) => ({ ...r, hidden: hide(`rel${r.n}`, r.hidden) })),
+          parametrics: g.parametrics?.map((c) => ({ ...c, hidden: hide(`${c.polar ? "r" : "x"}${c.n}`, c.hidden) })),
+          sequences: g.sequences?.map((s) => ({ ...s, hidden: hide(`u${s.n}`, s.hidden) })),
+          scatters: g.scatters?.map((s) => ({ ...s, hidden: hide(`s${s.n}`, s.hidden) })),
+          des: g.des?.map((d) => ({ ...d, hidden: hide(`d${d.n}`, d.hidden) })),
+        }));
+      }
+      case "attrs": {
+        const [fn = "", weight, style, colour] = rest.map((s) => s.trim());
+        const n = Number(fn.slice(1));
+        return setGraphs((g) => ({
+          ...g,
+          functions: g.functions.map((f) => (f.n !== n ? f : { ...f, attrs: { weight: weight as "Thin", style: style as "Continuous", colour: colour === "Auto" ? undefined : colour } })),
+        }));
+      }
+      case "condition": {
+        const [fn = "", ...cond] = rest;
+        const n = Number(fn.trim().slice(1));
+        const text = cond.join(":").trim();
+        let condition: { text: string; giac: string } | undefined;
+        if (text) {
+          try {
+            condition = { text, giac: translate(parse(text), settings).giac };
+          } catch {
+            return setError("Error: Syntax");
+          }
+        }
+        return setGraphs((g) => ({ ...g, functions: g.functions.map((f) => (f.n === n ? { ...f, condition } : f)) }));
+      }
+      case "gtext": {
+        const [xs = "", ys = "", ...text] = rest;
+        const [x, y] = [await num(xs), await num(ys)];
+        if (![x, y].every(Number.isFinite)) return setError("Error: The place is two numbers, x and y");
+        return setGraphs((g) => ({ ...g, texts: [...(g.texts ?? []), { x, y, text: text.join(":") }] }));
+      }
+      case "coords": {
+        const [fn = "", xs = ""] = rest.map((s) => s.trim());
+        const n = Number(fn.slice(1));
+        const x = await num(xs);
+        const p = page?.kind === "graphs" ? page : null;
+        if (!e || !p || !Number.isFinite(x)) return setError("Error: x is a number");
+        const y = Number((await e.giac(`evalf(${fnName(p.id, n)}(${x}))`)).trim());
+        if (!Number.isFinite(y)) return setError(`Error: f${n} is undefined at x = ${x}`);
+        const mark: Mark = { kind: "point", fn: n, x, y, title: "point" };
+        setGraphs((g) => ({ ...g, marks: [...g.marks, mark] }));
+        return say(markSaid(mark));
+      }
+      case "gcalc": {
+        if (!e) return;
+        const r = await evaluate(arg, e.giac, { settings });
+        if (!r.ok) return setError(r.error);
+        const w = page?.kind === "graphs" ? page.window : STANDARD;
+        // The result goes near the top left, under any already there.
+        setGraphs((g) => ({ ...g, texts: [...(g.texts ?? []), { x: w.xmin + (w.xmax - w.xmin) * 0.05, y: w.ymax - (w.ymax - w.ymin) * (0.2 + 0.07 * (g.texts?.length ?? 0)), text: `${arg} = ${r.outputText}` }] }));
+        return say(`${arg} = ${r.outputText}`);
+      }
+      case "redefine": {
+        const m = /^(f|rel|x|r|u|s|d)(\d+)$/.exec(arg);
+        if (!m) return;
+        const n = Number(m[2]);
+        return setGraphs((g) =>
+          m[1] === "f" ? openEntry(g, n) : m[1] === "rel" ? openRelation(g, n) : m[1] === "x" ? openParametric(g, settings.angle === "deg", n) : m[1] === "r" ? openPolar(g, settings.angle === "deg", n) : m[1] === "u" ? openSequence(g, n) : m[1] === "d" ? openDE(g, n) : g,
+        );
+      }
+    }
+  };
+
+  /**
+   * Analyze Conics on the page's conic: the first shown relation that is one
+   * (its coefficients read from the engine), the result added as marks.
+   */
+  const analyzeConic = async (f: ConicFeature) => {
+    const e = engine.current;
+    const g = page?.kind === "graphs" ? page : null;
+    if (!e || !g) return;
+    for (const r of g.relations ?? []) {
+      if (r.hidden || r.op !== "=") continue;
+      const P = `expand(${relName(g.id, r.n)}(x_,y_))`;
+      // Ax²+Bxy+Cy²+Dx+Ey+F from the derivatives at the origin.
+      const at0 = (d: string) => `subst(${d},[x_,y_],[0,0])`;
+      const terms = [at0("diff(P_,x_,2)/2"), at0("diff(diff(P_,x_),y_)"), at0("diff(P_,y_,2)/2"), at0("diff(P_,x_)"), at0("diff(P_,y_)"), at0("P_")];
+      await e.giac(`P_:=${P}`);
+      // Second degree in x and y together, or it isn't a conic.
+      const degree = Number((await e.giac("degree(subst(P_,[x_,y_],[t_*x_,t_*y_]),t_)")).trim());
+      const raw = degree === 2 ? await e.giac(`evalf([${terms.join(",")}])`) : "";
+      await e.giac("purge(P_)");
+      const coeffs = raw.trim().replace(/^\[|\]$/g, "").split(",").map(Number);
+      if (coeffs.length !== 6 || coeffs.some((v) => !Number.isFinite(v))) continue;
+      const k = classifyConic(coeffs);
+      if (!k) continue;
+      const res = conicFeature(k, f);
+      if (!res) return setError(`Error: This ${k.kind} has no ${f === "latus" ? "latus rectum" : f === "axes" ? "axes of symmetry" : f}`);
+      const marks: Mark[] = [
+        ...res.points.map((p) => ({ kind: "point" as const, fn: 0, rel: r.n, x: p.pt[0], y: p.pt[1], title: p.title })),
+        ...res.lines.map((l) => ({ kind: "line" as const, rel: r.n, ...l.line, title: l.title })),
+        ...res.values.map((v) => ({ kind: "value" as const, rel: r.n, ...v })),
+      ];
+      setGraphs((q) => ({ ...q, marks: [...q.marks, ...marks] }));
+      say(marks.map(markSaid).join(". "));
+      return;
+    }
+    setError("Error: No conic on this page: enter one as a relation, such as x^2+y^2=4");
+  };
+
   const graphAction = useCallback(
     (id: string) => {
+      if (id.startsWith("conic:")) return void analyzeConic(id.slice(6) as ConicFeature);
+      if (graphsActions(id)) return;
+      if (id === "zoomBox") return setGraphs((g) => startZoomBox(g));
+      if (id === "traceAll") return setGraphs((g) => startTool(g, "traceAll"));
+      if (id === "traceStep") {
+        const step = page?.kind === "graphs" ? page.traceStep : undefined;
+        return setWizard(
+          openWizard({ kind: "wizard", title: "Trace Step", arrows: false, fields: [{ label: "Trace Step:", value: step === undefined ? "Auto" : String(step), options: ["Auto"], free: true }], build: "tracestep:{0}" }),
+        );
+      }
+      if (id === "zoomUser") return setGraphs((g) => ({ ...g, window: g.userWindow ?? STANDARD, marks: [] }));
+      if (id === "zoomData") return void zoomToData();
       if (id.startsWith("zoom")) {
         setGraphs((g) => ({ ...g, window: zoomed(id, g.window, samples.current, 1.5), marks: [] }));
       } else if (id === "windowSettings" && page?.kind === "graphs") {
@@ -1462,6 +2197,13 @@ export function CasApp() {
         setGraphs((g) => (g.editing === null ? openEntry(g, nextFree(g, takenFns)) : { ...g, editing: null }));
       else if (id === "entryFunction") setGraphs((g) => openEntry(g, nextFree(g, takenFns)));
       else if (id === "entryRelation") setGraphs((g) => openRelation(g));
+      else if (id.startsWith("eqtpl:")) {
+        const form = astToRow(parse(id.slice(6)));
+        setGraphs((g) => {
+          const o = openRelation(g);
+          return { ...o, edit: { row: form, cursor: { path: [], index: form.length } } };
+        });
+      }
       else if (id === "insertSlider") {
         const taken = new Set([...defined, ...(page?.kind === "graphs" ? (page.sliders ?? []).map((sl) => sl.name) : [])]);
         let n = 1;
@@ -1469,6 +2211,26 @@ export function CasApp() {
         setWizard(sliderSettings(null, `v${n}`));
       }
       else if (id === "entryParametric") setGraphs((g) => openParametric(g, settings.angle === "deg"));
+      else if (id === "entryPolar") setGraphs((g) => openPolar(g, settings.angle === "deg"));
+      else if (id === "entrySequence") setGraphs((g) => openSequence(g));
+      else if (id === "entryCustom") {
+        const g = page?.kind === "graphs" ? page : null;
+        const names = (g?.sequences ?? []).map((s) => `u${s.n}`);
+        if (names.length < 2) setError("Error: A custom plot needs two sequences");
+        else
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Custom Plot",
+              arrows: false,
+              fields: [
+                { label: "X:", value: names[0], options: names },
+                { label: "Y:", value: names[1], options: names },
+              ],
+              build: "seqcustom:{0}:{1}",
+            }),
+          );
+      }
       else if (id === "entryDiffEq") setGraphs((g) => openDE(g));
       else if (id === "deSettings" && page?.kind === "graphs") {
         const s = page.deSettings ?? DE_DEFAULTS;
@@ -1495,16 +2257,131 @@ export function CasApp() {
     [page, setGraphs, settings.angle, takenFns, defined],
   );
 
+  /**
+   * A change to the document's pages or problems (delete, rename, the Page
+   * Sorter). When the shown problem is the one deleted, the problem shown
+   * next has its variables brought back from the document; when it's only
+   * renumbered, the engine already has the right ones.
+   */
+  const restructure = useCallback(
+    (next: CasDocument | null, refused: string) => {
+      if (!next) return setError(refused);
+      const d = latestDoc.current;
+      const e = engine.current;
+      const before = problemOf(d.pages[d.active]);
+      const shownId = next.pages[next.active]!.id;
+      const was = problemOf(d.pages.find((p) => p.id === shownId));
+      const now = problemOf(next.pages[next.active]);
+      shownProblem.current = now;
+      if (was === before) return setDoc(next);
+      const arriving = d.problems?.[String(was)] ?? [];
+      const problems = { ...(next.problems ?? {}) };
+      delete problems[String(now)];
+      setDoc({ ...next, problems });
+      lastAns.current = undefined;
+      if (e)
+        void (async () => {
+          await e.clearAll();
+          await e.restore(arriving);
+          setDefined(definedNames(arriving));
+          await applyPending(now);
+        })();
+    },
+    [applyPending],
+  );
+
+  /** Ctrl+Tab and a click on another region: the app there takes the keys; an empty region asks which app to put there. */
+  const focusRegion = useCallback((dir: 1 | -1) => {
+    const r = nextRegion(latestDoc.current, dir);
+    if (!r) return;
+    if ("active" in r) setDoc((d) => ({ ...d, active: r.active }));
+    else askRegion(r.group, r.slot);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function askRegion(group: number, slot: number) {
+    fillTarget.current = { group, slot };
+    creatingNew.current = false;
+    setMenu({ items: ADD_PAGE, state: openMenu() });
+  }
+
+  /** The Page Sorter's keys: choose, open, move or delete a page. */
+  const sorterKey = useCallback(
+    (key: Key) => {
+      const d = latestDoc.current;
+      const sel = sorter ?? 0;
+      const all = units(d);
+      const u = unitOf(d, sel);
+      if (key.k === "esc") return setSorter(null);
+      if (key.k === "enter") {
+        setDoc((x) => ({ ...x, active: sel }));
+        return setSorter(null);
+      }
+      if (key.k === "left" || key.k === "up" || key.k === "right" || key.k === "down") {
+        const step = key.k === "left" || key.k === "up" ? -1 : 1;
+        return setSorter(all[Math.max(0, Math.min(all.length - 1, u + step))]?.pages[0] ?? sel);
+      }
+      if (key.k === "selectLeft" || key.k === "selectRight") {
+        const r = movePage(d, sel, key.k === "selectLeft" ? -1 : 1);
+        setDoc(r.doc);
+        return setSorter(r.index);
+      }
+      if (key.k === "delete" || key.k === "backspace" || key.k === "cut") {
+        const next = deletePage(d, sel);
+        restructure(next, "Error: A document keeps at least one page");
+        if (next) setSorter(Math.min(sel, next.pages.length - 1));
+      }
+    },
+    [sorter, restructure],
+  );
+
   const runAction = useCallback(
     (action: MenuAction | undefined) => {
       if (!action) return;
       // On a Notes page, the Calculations menu types into the current maths box (or a new one).
       if (page?.kind === "notes" && (action.kind === "insert" || action.kind === "template"))
-        notesApi.current?.insertMath(action.kind === "insert" ? action.text : rowToLinear([templateNode(action.template)]));
+        notesApi.current?.insertMath(action.kind === "insert" ? action.text.replaceAll(CARET, "") : rowToLinear([templateNode(action.template)]));
       else if (action.kind === "insert") pageKey({ k: "text", text: action.text });
       else if (action.kind === "template") pageKey({ k: "template", id: action.template });
       else if (action.kind === "wizard") setWizard(openWizard(action));
       else if (action.id === "insertProblem") setDoc(insertProblem);
+      else if (action.id === "editUndo" || action.id === "editRedo") stepUndo(action.id === "editUndo");
+      else if (action.id === "editCopy") editOps.current.copy();
+      else if (action.id === "editCut") editOps.current.cut();
+      else if (action.id === "editPaste")
+        void navigator.clipboard
+          ?.readText()
+          .then((t) => t.trim() && pageKey({ k: "paste", text: t.replace(/\s+/g, " ").trim() }))
+          .catch(() => setError("Error: The browser didn't allow reading the clipboard. Use Ctrl+V."));
+      else if (action.id === "editDelete") pageKey({ k: "delete" });
+      else if (action.id === "pageSorter") setSorter(doc.active);
+      else if (action.id === "problemRename")
+        setWizard(openWizard({ kind: "wizard", title: "Rename Problem", arrows: false, fields: [{ label: "Name:", value: doc.problemNames?.[String(problemOf(page))] ?? "" }], build: "problemrename:{0}" }));
+      else if (action.id === "problemDelete") {
+        const n = problemOf(page);
+        setConfirm({
+          title: "Delete Problem",
+          lines: [`Delete problem ${n} and its pages?`, "", "Its variables go with it."],
+          ok: () => restructure(deleteProblem(latestDoc.current, n), "Error: A document keeps at least one problem"),
+        });
+      } else if (/^layout[1-8]$/.test(action.id)) {
+        const next = selectLayout(doc, Number(action.id.slice(6)));
+        setDoc(next);
+        // A new empty region asks for its app straight away.
+        const g = groupIndex(next, next.pages[next.active]!.id);
+        const empty = g < 0 ? -1 : next.groups![g]!.slots.indexOf(null);
+        if (empty >= 0) askRegion(g, empty);
+      } else if (action.id === "layoutCustom") {
+        if (groupIndex(doc, page?.id ?? -1) < 0) setError("Error: Choose a layout with more than one app first");
+        else setSplitting(true);
+      } else if (action.id === "layoutSwap") setDoc(swapApp);
+      else if (action.id === "layoutDelete") {
+        if (groupIndex(doc, page?.id ?? -1) < 0) setError("Error: This page has only one app");
+        else restructure(deletePage(doc, doc.active), "Error: A document keeps at least one page");
+      } else if (action.id === "layoutGroup") {
+        const next = groupWithNext(doc);
+        if (next === doc) setError("Error: Group needs a next page in the same problem, and at most four apps");
+        else setDoc(next);
+      } else if (action.id === "layoutUngroup") setDoc(ungroup);
       else if (/^add(Calculator|Graphs|Lists|Python|Shell|Data|Notes|Geometry)$/.test(action.id)) {
         const kinds = { addCalculator: "calculator", addGraphs: "graphs", addLists: "lists", addPython: "python", addShell: "pyshell", addData: "datastats", addNotes: "notes", addGeometry: "geometry" } as const;
         const kind = kinds[action.id as keyof typeof kinds];
@@ -1527,17 +2404,23 @@ export function CasApp() {
       else if (action.id === "fileDownload") {
         const r = exportTns(doc, settings);
         download(new Blob([r.bytes as BlobPart]), `${doc.title}.tns`);
-        if (r.dropped) toast(`${r.dropped} page${r.dropped === 1 ? "" : "s"} made here can't be written to .tns yet (Graphs); the rest is in the file.`);
+        const warn = droppedMessage(r);
+        if (warn) toast(warn);
       } else if (action.id === "handheldSetup")
         setWizard(
           openWizard({
             kind: "wizard",
             title: "Handheld Setup",
             fields: [
-              { label: "Text Size:", value: setup.text, options: ["Small", "Medium", "Large"] },
+              { label: "Text Size:", value: setup.text, options: [...SETUP_OPTIONS.text] },
               { label: "Haptics", value: setup.haptics ? "Yes" : "No", check: true },
+              // Axiom's own, after the handheld's two.
+              { label: "Keypad Layout:", value: setup.keypad, options: [...SETUP_OPTIONS.keypad] },
+              { label: "Show Keypad", value: setup.showKeypad ? "Yes" : "No", check: true },
+              { label: "Start Up In:", value: setup.start, options: [...SETUP_OPTIONS.start] },
+              { label: "Animations:", value: setup.motion, options: [...SETUP_OPTIONS.motion] },
             ],
-            build: "setup:{0}:{1}",
+            build: "setup:{0}:{1}:{2}:{3}:{4}:{5}",
           }),
         );
       else if (action.id === "status") void showStatus();
@@ -1573,15 +2456,25 @@ export function CasApp() {
             await files.put({ ...rec, path: files.join(folder, name), modified: Date.now() });
             await refreshFiles();
             toast.success(`Pasted ${name}`);
-          })();
+          })().catch((err: unknown) => toast.error(`Couldn't paste: ${(err as Error).message || "the browser refused"}`));
         } else if (action.id === "browseUpload") uploadInput.current?.click();
         else if (action.id === "browseDownload" && r && !r.folder) void downloadFile(r.path);
-        else if (action.id === "browseExportAll")
-          void files.exportAll((rec) => (rec.doc ? tnsOf(rec.doc) : null)).then((zip) => download(new Blob([zip as BlobPart]), "My Documents.zip"));
+        else if (action.id === "browseExportAll") {
+          const lost = { dropped: 0, droppedKinds: [] as string[] };
+          void files
+            .exportAll((rec) => (rec.doc ? tnsOf(rec.doc, lost) : null))
+            .then((zip) => {
+              download(new Blob([zip as BlobPart]), "My Documents.zip");
+              const warn = droppedMessage(lost);
+              if (warn) toast(warn);
+            })
+            .catch((err: unknown) => toast.error(`Couldn't export: ${(err as Error).message}`));
+        }
         else if (action.id === "browseSortName") setBrowse((b) => ({ ...b, sort: "name" }));
         else if (action.id === "browseSortSize") setBrowse((b) => ({ ...b, sort: "size" }));
       } else if (action.id.startsWith("lists") && page?.kind === "lists") {
         const fn = {
+          listsInsertCell: sheet.insertCell,
           listsInsertRow: sheet.insertRow,
           listsDeleteRow: sheet.deleteRow,
           listsInsertColumn: sheet.insertColumn,
@@ -1594,7 +2487,13 @@ export function CasApp() {
           const next = fn(page);
           setLists(() => next);
           void recalcLists(next);
-        }
+        } else if (action.id === "listsTable") setLists((p) => ({ ...p, table: p.table ? undefined : { start: 0, step: 1 }, edit: null }));
+      } else if (action.id === "geoCoords") {
+        setWizard(openWizard({ kind: "wizard", title: "Point by Coordinates", arrows: false, fields: [{ label: "x:", value: "0" }, { label: "y:", value: "0" }], build: "geocoords:{0}:{1}" }));
+      } else if (action.id.startsWith("geoTool:") && page?.kind === "graphs") {
+        const id = action.id;
+        setGraphs((g) => ({ ...g, tool: null, editing: null, mathDraw: undefined, zoomBox: undefined }));
+        setGraphGeo((p) => ({ ...p, tool: { name: id.slice(8) as GeoTool, picked: [] }, sel: null }));
       } else if (action.id.startsWith("geo") && page?.kind === "geometry") {
         const id = action.id;
         if (id.startsWith("geoTool:")) setGeo((p) => ({ ...p, tool: { name: id.slice(8) as GeoTool, picked: [] }, sel: null }));
@@ -1602,10 +2501,15 @@ export function CasApp() {
         else if (id === "geoDelete") setGeo((p) => (p.sel ? { ...p, objects: removeGeo(p.objects, [p.sel]), sel: null } : p));
         else if (id === "geoClear") setGeo((p) => ({ ...p, objects: [], tool: null, sel: null }));
         else if (id === "geoAxes") setGeo((p) => ({ ...p, axes: !p.axes }));
+        else if (id === "geoAnalytic") setGeo((p) => ({ ...p, analytic: !p.analytic }));
         else if (id === "geoGrid") setGeo((p) => ({ ...p, grid: !p.grid }));
         else if (id === "geoZoomIn") setGeo((p) => zoomedGeo(p, 0.8));
         else if (id === "geoZoomOut") setGeo((p) => zoomedGeo(p, 1.25));
         else if (id === "geoZoomReset") setGeo((p) => ({ ...p, view: undefined }));
+        else if (id === "geoHideShow") geoDialog("hide", page);
+        else if (id === "geoAttrs") geoDialog("attrs", page);
+        else if (id === "geoText") geoDialog("text", page);
+        else if (id === "geoLabel") geoDialog("label", page);
         else if (id === "geoStore") {
           const m = page.objects.find((o) => o.id === page.sel && o.kind === "measure");
           if (m?.kind === "measure")
@@ -1621,29 +2525,100 @@ export function CasApp() {
         } else if (id === "dsConnect") setData((p) => ({ ...p, connect: !p.connect }));
         else if (id === "dsWhiskers") setData((p) => ({ ...p, extendWhiskers: !p.extendWhiskers }));
         else if (id === "dsNormal") setData((p) => ({ ...p, normalPdf: !p.normalPdf }));
+        else if (id === "dsResidSquares") setData((p) => ({ ...p, residualSquares: !p.residualSquares }));
+        else if (id === "dsResidPlot") setData((p) => ({ ...p, residualPlot: !p.residualPlot }));
+        else if (id === "dsLabels") setData((p) => ({ ...p, labels: !p.labels }));
+        else if (id === "dsTrace") {
+          setData((p) => ({ ...p, trace: p.trace ? undefined : { target: 0, i: 0 }, selected: undefined }));
+          if (!page.trace) say("Graph Trace: ◄ ► move along, ▲ ▼ change what's traced, Esc ends");
+        } else if (id === "dsSelectAll") setData((p) => ({ ...p, selected: "all", textSel: undefined }));
+        else if (id === "dsText")
+          setWizard(openWizard({ kind: "wizard", title: "Insert Text", arrows: false, fields: [{ label: "Text:", value: "" }], build: "ds:text:{0}" }));
+        else if (id === "dsSlider") {
+          const taken = new Set([...defined, ...(page.sliders ?? []).map((sl) => sl.name)]);
+          let n = 1;
+          while (taken.has(`v${n}`)) n++;
+          setWizard(sliderSettings(null, `v${n}`));
+        } else if (id === "dsForceX" || id === "dsForceY") {
+          // The item forces the list the other way from how it reads (text numeric, numbers categorical), or undoes it.
+          const axis = id === "dsForceX" ? "forceX" : "forceY";
+          const text = id === "dsForceX" ? dataInfo.current.xText : dataInfo.current.yText;
+          setData((p) => ({ ...p, [axis]: p[axis] ? undefined : text ? "num" : "cat", window: undefined, sort: undefined }));
+        } else if (id === "dsRemoveSplit") setData((p) => ({ ...p, split: undefined, window: undefined }));
+        else if (id.startsWith("dsSort:")) {
+          // List order is the default, so it's stored as unset.
+          const order = id.slice(7) as NonNullable<DataStatsPage["sort"]>;
+          setData((p) => ({ ...p, sort: order === "list" ? undefined : order }));
+        } else if (id === "dsShade") {
+          // Which function (when there's more than one) and the bounds to shade between.
+          const fns = page.functions ?? [];
+          const s = page.shade;
+          const bounds = [
+            { label: "Lower Bound:", value: s?.from ?? (shownWin ? fmt(shownWin.xmin) : "") },
+            { label: "Upper Bound:", value: s?.to ?? (shownWin ? fmt(shownWin.xmax) : "") },
+          ];
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Shade Under Function",
+              arrows: false,
+              fields: fns.length > 1 ? [{ label: "Function:", value: `${(s?.fn ?? 0) + 1}: ${fns[s?.fn ?? 0]}`, options: fns.map((f, i) => `${i + 1}: ${f}`) }, ...bounds] : bounds,
+              build: fns.length > 1 ? "ds:shade:{0}:{1}:{2}" : "ds:shade:1:{0}:{1}",
+            }),
+          );
+        }
+        else if (id.startsWith("dsScale:")) {
+          // Count is the default, so it's stored as unset; the window refits to the new heights.
+          const scale = id.slice(8) as NonNullable<DataStatsPage["histScale"]>;
+          setData((p) => ({ ...p, histScale: scale === "count" ? undefined : scale, window: undefined }));
+        }
         else if (id.startsWith("dsAxis:")) {
           const axis = id.slice(7);
           const names = listNames();
           setMenu({
             items: names.length
-              ? names.map((n) => menuApp(n, `dsVar:${axis}:${n}`))
+              ? names.map((n) =>
+                  menuApp(n, axis === "sum" ? `dsSum:${n}` : axis === "xsum" ? `dsXSum:${n}` : axis === "split" ? `dsSplit:${n}` : `dsVar:${axis}:${n}`),
+                )
               : [{ label: "No lists in this problem" }],
             state: openMenu(),
           });
-        } else if (id.startsWith("dsVar:")) {
+        } else if (id.startsWith("dsSum:")) {
+          // A summary list takes the y variable's place; numbers summarised make a histogram, as on the handheld
+          // (categories make a bar chart, which the page picks for them).
+          const name = id.slice(6);
+          setData((p) => ({ ...p, ySummary: name, y: undefined, regression: undefined, movable: undefined, plot: p.plot === "box" || p.plot === "pie" || p.plot === "bar" ? p.plot : "histogram", window: undefined }));
+        } else if (id.startsWith("dsXSum:")) {
+          // The same, for a list up the y-axis.
+          const name = id.slice(7);
+          setData((p) => ({ ...p, xSummary: name, x: undefined, regression: undefined, movable: undefined, plot: p.plot === "box" || p.plot === "pie" || p.plot === "bar" ? p.plot : "histogram", window: undefined }));
+        } else if (id.startsWith("dsSplit:")) setData((p) => ({ ...p, split: id.slice(8), window: undefined }));
+        else if (id.startsWith("dsVar:")) {
           const [, axis, name] = id.split(":");
           setData((p) => {
-            const next = { ...p, [axis === "x" ? "x" : "y"]: name, window: undefined };
+            const next = { ...p, [axis === "x" ? "x" : "y"]: name, ...(axis === "y" ? { ySummary: undefined } : { xSummary: undefined }), window: undefined };
             // Two lists make a scatter plot, one a dot plot, as on the handheld.
             if (next.x && next.y && ONE_VAR.includes(next.plot)) next.plot = "scatter";
             if (!next.y && !ONE_VAR.includes(next.plot)) next.plot = "dot";
             return next;
           });
-        } else if (id === "dsRemoveX") setData((p) => ({ ...p, x: undefined, window: undefined }));
-        else if (id === "dsRemoveY") setData((p) => ({ ...p, y: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
+        } else if (id === "dsRemoveX")
+          setData((p) => ({ ...p, x: undefined, xSummary: undefined, forceX: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
+        else if (id === "dsRemoveY")
+          setData((p) => ({ ...p, y: undefined, ySummary: undefined, forceY: undefined, plot: ONE_VAR.includes(p.plot) ? p.plot : "dot", regression: undefined, movable: undefined, window: undefined }));
         else if (id === "dsClearAll") setData((p) => ({ kind: "datastats", id: p.id, problem: p.problem, plot: "dot" }));
         else if (id === "dsRemoveAnalysis")
-          setData((p) => ({ ...p, regression: undefined, movable: undefined, functions: undefined, values: undefined, normalPdf: undefined }));
+          setData((p) => ({
+            ...p,
+            regression: undefined,
+            movable: undefined,
+            functions: undefined,
+            values: undefined,
+            shade: undefined,
+            normalPdf: undefined,
+            residualSquares: undefined,
+            residualPlot: undefined,
+          }));
         else if (id.startsWith("dsReg:")) {
           const kind = id.slice(6);
           setData((p) => ({ ...p, regression: p.regression === kind ? undefined : kind }));
@@ -1736,11 +2711,59 @@ export function CasApp() {
               { label: "Vector Format:", value: "Rectangular", options: ["Rectangular"] },
               { label: "Base:", value: "Decimal", options: ["Decimal"] },
               { label: "Unit System:", value: "SI", options: ["SI"] },
+              // The handheld's Make Default is a button; the wizard has only OK and Cancel, so it's a box to tick.
+              { label: "Make Default", value: "No", check: true },
             ],
-            build: "settings:{0}:{1}:{3}:{4}",
+            build: "settings:{0}:{1}:{3}:{4}:{9}",
           }),
         );
-      } else if (action.id === "financeSolver") setFinance({ ...lastFinance.current, focus: 0, fresh: true });
+      } else if (action.id === "prgmNew")
+        setWizard(
+          openWizard({
+            kind: "wizard",
+            title: "New",
+            arrows: false,
+            fields: [
+              { label: "Name:", value: "" },
+              { label: "Type:", value: "Program", options: ["Program", "Function"] },
+              { label: "Library Access:", value: "None", options: ["None", "LibPriv", "LibPub"] },
+            ],
+            build: "prgmnew:{0}:{1}:{2}",
+          }),
+        );
+      else if (action.id === "prgmOpen" || action.id === "prgmView" || action.id === "recallDef") {
+        const e = engine.current;
+        if (!e) return;
+        const sources = [...definedSources(e.saved).keys()];
+        const names = action.id === "recallDef" ? [...new Set([...definedNames(e.saved), ...sources])].sort() : sources.sort();
+        if (!names.length) return setError(action.id === "recallDef" ? "Error: Nothing is defined in this problem" : "Error: No programs or functions are defined in this problem");
+        const title = { prgmOpen: "Open", prgmView: "View", recallDef: "Recall Definition" }[action.id];
+        setWizard(openWizard({ kind: "wizard", title, arrows: false, fields: [{ label: "Name:", value: names[0], options: names }], build: `${action.id.toLowerCase()}:{0}` }));
+      } else if (action.id === "prgmImport" || action.id === "libShortcut") {
+        void loadLibraries().then((objs) => {
+          if (!objs.length) return setError("Error: No library objects. A document in My Documents/MyLib defines them with Define LibPub or Define LibPriv.");
+          if (action.id === "prgmImport") {
+            const names = objs.map((o) => `${o.lib}\\${o.def.name}`);
+            setWizard(openWizard({ kind: "wizard", title: "Import", arrows: false, fields: [{ label: "Name:", value: names[0], options: names }], build: "libimport:{0}" }));
+          } else {
+            const libs = [...new Set(objs.map((o) => o.lib))];
+            setWizard(
+              openWizard({
+                kind: "wizard",
+                title: "Create Library Shortcut",
+                arrows: false,
+                fields: [
+                  { label: "Library:", value: libs[0], options: libs },
+                  { label: "Shortcut:", value: libs[0]!.slice(0, 2) },
+                  { label: "Include Private Objects", value: "No", check: true },
+                ],
+                build: "libshortcut:{0}:{1}:{2}",
+              }),
+            );
+          }
+        });
+      } else if (action.id === "refreshLibs") void refreshLibraries();
+      else if (action.id === "financeSolver") setFinance({ ...lastFinance.current, focus: 0, fresh: true, list: null });
       else if (action.id === "clearHistory") setCalc((p) => ({ ...p, history: [], sel: null }));
       else if (action.id === "clearAZ") {
         const e = engine.current;
@@ -1753,7 +2776,7 @@ export function CasApp() {
           });
       } else graphAction(action.id);
     },
-    [addPage, graphAction, pageKey, setCalc, settings, doc, setup, rows, browse, page, newDoc, writeNow, refreshFiles, showStatus, openFile, downloadFile, tnsOf, setLists, recalcLists, runPython, updatePage, startNew, closeDocument, saveDocument, isScratch], // eslint-disable-line react-hooks/exhaustive-deps
+    [addPage, graphAction, pageKey, setCalc, settings, doc, setup, rows, browse, page, newDoc, writeNow, refreshFiles, showStatus, openFile, downloadFile, tnsOf, setLists, recalcLists, runPython, updatePage, startNew, closeDocument, saveDocument, isScratch, refreshLibraries], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   function askDelete(path: string) {
@@ -1784,6 +2807,40 @@ export function CasApp() {
     (built: string) => {
       const field = (prefix: string) => built.slice(prefix.length).trim();
       const badName = (n: string) => !n || /[/\\:*?"<>|]/.test(n);
+      if (/^(prgmnew|prgmopen|prgmview|recalldef|libimport|libshortcut):/.test(built)) {
+        void programWizard(built);
+        return;
+      }
+      if (built.startsWith("problemrename:")) {
+        const n = problemOf(latestDoc.current.pages[latestDoc.current.active]);
+        setDoc((d) => renameProblem(d, n, built.slice(14)));
+        return;
+      }
+      if (/^(gridtype|hideshow|attrs|condition|gtext|coords|gcalc|redefine|pathsetup|gsettings):/.test(built)) {
+        void graphsWizard(built);
+        return;
+      }
+      if (built.startsWith("tracestep:")) {
+        const v = built.slice(10).trim();
+        const step = v === "Auto" || !v ? undefined : Number(v);
+        if (step !== undefined && !(step > 0)) return setError("Error: The step is a positive number, or Auto");
+        setGraphs((g) => ({ ...g, traceStep: step }));
+        return;
+      }
+      if (built.startsWith("seqcustom:")) {
+        const [x, y] = built.slice(10).split(":").map((v) => Number(v.trim().slice(1)));
+        setGraphs((g) => {
+          const n = Math.max(0, ...(g.customPlots ?? []).map((c) => c.n)) + 1;
+          return { ...g, customPlots: [...(g.customPlots ?? []), { n, x: x!, y: y! }] };
+        });
+        return;
+      }
+      if (built.startsWith("request:")) {
+        const answer = asking.current;
+        asking.current = null;
+        answer?.(built.slice(8));
+        return;
+      }
       if (built.startsWith("geostore:")) {
         // geostore:<measurement>:<variable>; an empty name unlinks it.
         const [id, name = ""] = built.slice(9).split(":").map((v) => v.trim());
@@ -1800,14 +2857,56 @@ export function CasApp() {
         const m = /^\s*(-?[\d.]+)\s*(?:\/\s*([\d.]+))?\s*$/.exec(text.replace("−", "-"));
         const n = m ? Number(m[1]) / (m[2] ? Number(m[2]) : 1) : NaN;
         if (!Number.isFinite(n)) return setError("Error: Type a number");
-        setGeo((p) => {
+        (page?.kind === "graphs" ? setGraphGeo : setGeo)((p) => {
           const r = transformWith(p.objects, tool as GeoTool, [obj!, centre!], n);
           if ("error" in r) {
             setTimeout(() => setError(`Error: ${r.error}`));
             return p;
           }
-          return { ...p, objects: r.objs };
+          return { ...p, objects: r.objs! };
         });
+        return;
+      }
+      if (/^geo(hide|attrs|text|label):/.test(built)) {
+        const set = page?.kind === "graphs" ? setGraphGeo : setGeo;
+        const [kind = "", ...rest] = built.split(":");
+        if (kind === "geohide") {
+          const [names = "", ...vals] = rest;
+          const shown = new Map(names.split(",").map((n, i) => [n, vals[i]?.trim() !== "No"]));
+          set((p) => ({
+            ...p,
+            objects: p.objects.map((o) => (shown.has(o.id) ? { ...o, hidden: !shown.get(o.id) || undefined } : o)),
+            sel: p.sel && shown.get(p.sel) === false ? null : p.sel,
+          }));
+          const hidden = [...shown].filter(([, v]) => !v).map(([n]) => n);
+          return say(hidden.length ? `Hidden: ${hidden.join(", ")}` : "Every object shown");
+        }
+        if (kind === "geoattrs") {
+          const [id = "", weight, style, colour] = rest.map((v) => v.trim());
+          set((p) => ({
+            ...p,
+            objects: p.objects.map((o) =>
+              o.id !== id ? o : { ...o, attrs: { weight: weight as "Thin", style: style as "Continuous", colour: colour === "Auto" ? undefined : colour } },
+            ),
+          }));
+          return say(`${id}: ${weight}, ${style}${colour && colour !== "Auto" ? `, ${colour}` : ""}`);
+        }
+        if (kind === "geotext") {
+          const [xs = "", ys = "", ...text] = rest;
+          const [x, y] = [Number(xs.trim().replace("−", "-")), Number(ys.trim().replace("−", "-"))];
+          if (![x, y].every(Number.isFinite)) return setError("Error: The place is two numbers, x and y");
+          if (!text.join(":").trim()) return;
+          return setGeo((p) => ({ ...p, texts: [...(p.texts ?? []), { x, y, text: text.join(":") }] }));
+        }
+        const of = rest.join(":").trim();
+        set((p) => (p.objects.some((o) => o.id === of) ? { ...p, objects: [...p.objects, { id: nextGeoId(p.objects, "coords"), kind: "coords", of }] } : p));
+        return;
+      }
+      if (built.startsWith("geocoords:")) {
+        const [xs = "", ys = ""] = built.slice(10).split(":");
+        const [x, y] = [Number(xs.trim().replace("−", "-")), Number(ys.trim().replace("−", "-"))];
+        if (![x, y].every(Number.isFinite)) return setError("Error: Type two numbers");
+        (page?.kind === "graphs" ? setGraphGeo : setGeo)((p) => ({ ...p, objects: [...p.objects, { id: nextGeoLabel(p.objects), kind: "point", x, y }] }));
         return;
       }
       if (built.startsWith("saveas:")) {
@@ -1816,7 +2915,13 @@ export function CasApp() {
         void (async () => {
           const path = files.join(files.ROOT, await files.freeName(files.ROOT, `${name}.tns`));
           const s: Saved = { doc: { ...current.current.doc, title: stem(files.nameOf(path)) }, settings: current.current.settings, definitions: engine.current?.saved ?? [] };
-          await files.put({ path, type: "file", doc: s, size: files.sizeOf(s), modified: Date.now() });
+          try {
+            await files.put({ path, type: "file", doc: s, size: files.sizeOf(s), modified: Date.now() });
+          } catch (err) {
+            afterSave.current = null;
+            toast.error(`Couldn't save: ${(err as Error).message || "the browser refused"}`);
+            return;
+          }
           skipSave.current = true;
           setDoc(s.doc);
           setIsScratch(false);
@@ -1856,8 +2961,7 @@ export function CasApp() {
         return;
       }
       if (built.startsWith("setup:")) {
-        const [text, haptics] = built.slice(6).split(":");
-        const next: Setup = { text: (["Small", "Medium", "Large"].includes(text!) ? text : "Medium") as Setup["text"], haptics: haptics === "Yes" };
+        const next = parseSetup(built);
         setSetupState(next);
         setPref("setup", next);
         return;
@@ -1889,9 +2993,22 @@ export function CasApp() {
         const [, what, ...args] = built.split(":");
         if (what === "bins") {
           const [width, start] = args.map((a) => (a?.trim() ? Number(a) : NaN));
-          if (!args[0]?.trim()) setData((p) => ({ ...p, bins: undefined, window: undefined }));
+          if (!args[0]?.trim()) setData((p) => ({ ...p, bins: undefined, binEdges: undefined, window: undefined }));
           else if (!(width! > 0)) setError("Error: The bin width must be more than 0");
-          else setData((p) => ({ ...p, bins: { width: width!, start: Number.isFinite(start) ? start! : 0 }, window: undefined }));
+          else setData((p) => ({ ...p, bins: { width: width!, start: Number.isFinite(start) ? start! : 0 }, binEdges: undefined, window: undefined }));
+        } else if (what === "vbins") {
+          // Variable Bin Width: the boundaries as a list ({0,10,25,50}) or a list's name; Equal Bin Width undoes it.
+          const edges = args.join(":").trim();
+          if (!edges) setError("Error: Enter the bin boundaries");
+          else setData((p) => ({ ...p, binEdges: edges, bins: undefined, window: undefined }));
+        } else if (what === "text") {
+          const text = args.join(":").trim();
+          if (text)
+            setData((p) => {
+              const texts = p.texts ?? [];
+              // New texts go down the left, under the last one (clear of a selection's readout).
+              return { ...p, texts: [...texts, { text, x: 0.04, y: Math.min(0.85, 0.14 + texts.length * 0.08) }] };
+            });
         } else if (what === "fn" && args.join(":").trim()) setData((p) => ({ ...p, functions: [...(p.functions ?? []), args.join(":").trim()] }));
         else if (what === "value" && args.join(":").trim()) setData((p) => ({ ...p, values: [...(p.values ?? []), args.join(":").trim()] }));
         else if (what === "window") {
@@ -1899,6 +3016,49 @@ export function CasApp() {
           if (![xmin, xmax, ymin, ymax].every(Number.isFinite) || xmin! >= xmax! || ymin! >= ymax!) setError("Error: Invalid window settings");
           else setData((p) => ({ ...p, window: { xmin: xmin!, xmax: xmax!, ymin: ymin!, ymax: ymax!, xscl: 1, yscl: 1 } }));
         } else if (what === "settings") setData((p) => ({ ...p, digits: args[0], diagnostics: args[1] === "Yes" }));
+        else if (what === "shade") {
+          const fn = parseInt(args[0] ?? "1", 10) - 1;
+          const [from, to] = [args[1]?.trim(), args[2]?.trim()];
+          if (!from || !to) setError("Error: Enter both bounds");
+          else setData((p) => (p.functions?.[fn] ? { ...p, shade: { fn, from, to } } : p));
+        }
+        return;
+      }
+      if (built.startsWith("lists:run:") && page?.kind === "lists") {
+        // A Calculator statistics dialog run from the page: its columns (a[] for an unnamed one) as lists,
+        // then a procedure's stat.results, or a distribution's value, shown in a box.
+        const cmd = sheet.columnRefs(built.slice("lists:run:".length), page.cols);
+        void (async () => {
+          const procedure = !/^\s*[\wχ²]+\(/.test(cmd);
+          const r = await notesEvaluate(cmd, false);
+          if (!r.ok) return setError(r.text.startsWith("Error") ? r.text : `Error: ${r.text}`);
+          if (!procedure) return setWarning([`${cmd} = ${r.text}`]);
+          const e = engine.current;
+          const store = e ? await loadStats(e.giac).catch(() => null) : null;
+          if (!store) return setWarning([r.text]);
+          const show = (v: StatResult["rows"][number][1]): string =>
+            Array.isArray(v) ? `{${v.map((x) => (Array.isArray(x) ? show(x) : +x.toPrecision(8))).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v;
+          setWarning(store.rows.map(([label, v]) => `${label}: ${show(v)}`));
+        })();
+        return;
+      }
+      if (built.startsWith("listsconflict:") && page?.kind === "lists") {
+        // Each letter as the student settled it: a column reference becomes x[], a variable stays x; then the entry goes in.
+        const pending = listsConflict.current;
+        listsConflict.current = null;
+        if (!pending || !page.edit) return;
+        const picks = built.slice("listsconflict:".length).split(":");
+        const choices = Object.fromEntries(pending.names.map((n, i) => [n, picks[i] === "Variable Reference" ? ("variable" as const) : ("column" as const)]));
+        const { page: next, effect } = sheet.listsKey(sheet.withFormula(page, sheet.resolveConflicts(pending.formula, choices)), pending.key);
+        setLists(() => next);
+        if (effect && "error" in effect) setError(effect.error);
+        else if (effect) void recalcLists(next);
+        return;
+      }
+      if (built.startsWith("lists:tableset:") && page?.kind === "lists") {
+        const [start, step] = built.slice("lists:tableset:".length).split(":").map((v) => Number(v.replace(/−/g, "-")));
+        if (!Number.isFinite(start) || !(step! > 0)) setError("Error: Invalid table settings");
+        else setLists((p) => ({ ...p, table: { start: start!, step: step! } }));
         return;
       }
       if (built.startsWith("lists:") && page?.kind === "lists") {
@@ -1913,26 +3073,9 @@ export function CasApp() {
           void recalcLists(next);
           return;
         }
-        if (parts[1] === "stat") {
-          const [, , cmd, xName, yName] = parts;
-          const col = (n: string | undefined) =>
-            page.cols.find((c) => c.name === n?.trim().toLowerCase()) ?? page.cols[(n?.trim().toUpperCase().charCodeAt(0) ?? 0) - 65];
-          const xs = sheet.columnNumbers(col(xName));
-          const ys = sheet.columnNumbers(col(yName));
-          if (!xs.length || (yName !== undefined && !ys.length)) return setError("Error: The list has no numbers");
-          let res: StatResult;
-          try {
-            res = cmd === "OneVar" ? oneVar(xs) : cmd === "TwoVar" ? twoVar(xs, ys) : regression(cmd!, xs, ys);
-          } catch (err) {
-            return setError(`Error: ${(err as Error).message}`);
-          }
-          const show = (v: number | string | number[]) => (Array.isArray(v) ? `{${v.map((x) => +x.toPrecision(8)).join(", ")}}` : typeof v === "number" ? String(+v.toPrecision(10)) : v);
-          setWarning(res.rows.map(([label, v]) => `${label}: ${show(v)}`));
-          return;
-        }
       }
       if (built.startsWith("settings:")) {
-        const [digits, angle, complex, mode] = built.slice(9).split(":");
+        const [digits, angle, complex, mode, makeDefault] = built.slice(9).split(":");
         const next: Settings = {
           digits: digits === "Float" ? 12 : Number(digits?.replace("Float", "")) || 6,
           angle: angle === "Degree" ? "deg" : "rad",
@@ -1941,6 +3084,8 @@ export function CasApp() {
         };
         setSettings(next);
         void engine.current?.applySettings(next);
+        // New documents start with these from now on (state/setup.ts docDefaults).
+        if (makeDefault === "Yes") setPref("docDefaults", next);
         return;
       }
       if (built.startsWith("slider:")) {
@@ -1967,6 +3112,17 @@ export function CasApp() {
         };
         sl.value = snap(sl, Number.isFinite(Number(value)) ? Number(value) : lo);
         assign(sl.name, sl.value, true);
+        if (page?.kind === "datastats") {
+          // Data & Statistics keeps its sliders in a column down the left; Settings keeps one's place in it.
+          setData((p) => {
+            const list = (p.sliders ?? []).slice();
+            const at = list.findIndex((x) => x.name === old);
+            const rest = list.filter((x) => x.name !== old && x.name !== sl.name);
+            rest.splice(at < 0 ? rest.length : at, 0, sl);
+            return { ...p, sliders: rest };
+          });
+          return;
+        }
         setGraphs((g) => {
           const rest = (g.sliders ?? []).filter((x) => x.name !== old && x.name !== sl.name);
           const at = (g.sliders ?? []).findIndex((x) => x.name === old);
@@ -2013,10 +3169,8 @@ export function CasApp() {
           setError("Error: Invalid window settings");
           return;
         }
-        setGraphs((g) => ({
-          ...g,
-          window: { xmin: xmin!, xmax: xmax!, xscl: xscl!, ymin: ymin!, ymax: ymax!, yscl: yscl! },
-        }));
+        const window = { xmin: xmin!, xmax: xmax!, xscl: xscl!, ymin: ymin!, ymax: ymax!, yscl: yscl! };
+        setGraphs((g) => ({ ...g, window, userWindow: window }));
         return;
       }
       if (built.startsWith("notesattrs:")) {
@@ -2037,7 +3191,7 @@ export function CasApp() {
       setCalc((p) => ({ ...p, edit: wizardInsert(p.edit, built), sel: null }));
       setGraphs((g) => (g.editing !== null ? { ...g, edit: wizardInsert(g.edit, built) } : g));
     },
-    [setCalc, setGraphs, assign, rows, browse, page, refreshFiles, remember, setLists, recalcLists],
+    [setCalc, setGraphs, assign, rows, browse, page, refreshFiles, remember, setLists, recalcLists, programWizard, notesEvaluate],
   );
 
   // The catalog's answer to a key or a click: keep it open, or close it and insert.
@@ -2110,6 +3264,7 @@ export function CasApp() {
         const r = menuKeyPress(menu.items, menu.state, key);
         setMenu(r.state ? { items: menu.items, state: r.state } : null);
         // Leaving New's add-page menu without choosing goes back home.
+        if (!r.state && !r.action) fillTarget.current = null;
         if (!r.state && !r.action && creatingNew.current) {
           creatingNew.current = false;
           setView(backTo.current);
@@ -2128,6 +3283,20 @@ export function CasApp() {
         if (r.state) lastFinance.current = r.state;
         setFinance(r.state);
         if (r.error) setError(r.error);
+        return;
+      }
+      if (sorter !== null) {
+        sorterKey(key);
+        return;
+      }
+      if (splitting) {
+        if (key.k === "left" || key.k === "up") setDoc((d) => moveSplit(d, -0.05));
+        else if (key.k === "right" || key.k === "down") setDoc((d) => moveSplit(d, 0.05));
+        else if (key.k === "enter" || key.k === "esc") setSplitting(false);
+        return;
+      }
+      if (key.k === "switchApp") {
+        focusRegion(1);
         return;
       }
       // The handheld's own keys, wherever you are.
@@ -2150,7 +3319,7 @@ export function CasApp() {
       }
       if (view === "home") {
         if (key.k === "menu") setMenu({ items: SETTINGS_MENU, state: openMenu() });
-        else if (key.k === "esc") setView("doc");
+        else if (key.k === "esc") void openCurrent();
         else {
           const r = homeKeyPress(homeSel, key, recent.length > 0, !isScratch || Boolean(pref<Cached | null>("current", null)));
           setHomeSel(r.sel);
@@ -2171,12 +3340,13 @@ export function CasApp() {
       }
       if (key.k === "menu") {
         if (page?.kind === "lists") {
-          const name = (i: number) => page.cols[i]?.name ?? sheet.letter(i).toLowerCase();
-          setMenu({ items: listsMenu(name(page.sel.col), name(page.sel.col + 1)), state: openMenu() });
+          // An unnamed column is a[] (column A), as the handheld writes it in the dialogs.
+          const name = (i: number) => page.cols[i]?.name ?? `${sheet.letter(i).toLowerCase()}[]`;
+          setMenu({ items: listsMenu(name(page.sel.col), name(page.sel.col + 1), page.table), state: openMenu() });
           return;
         }
         if (page?.kind === "datastats") {
-          setMenu({ items: dataMenu(page), state: openMenu() });
+          setMenu({ items: dataMenu(page, dataInfo.current), state: openMenu() });
           return;
         }
         if (page?.kind === "geometry") {
@@ -2194,7 +3364,7 @@ export function CasApp() {
         setMenu({
           items:
             page?.kind === "graphs"
-              ? graphsMenu({ axes: page.axes, entryLine: page.editing !== null, grid: page.grid, table: page.table })
+              ? graphsMenu({ axes: page.axes, entryLine: page.editing !== null, grid: page.grid, table: page.table, hideAnalytic: page.hideAnalytic, hideEndValues: page.hideEndValues, hideGuides: page.hideGuides })
               : calculatorMenu,
           state: openMenu(),
         });
@@ -2210,10 +3380,12 @@ export function CasApp() {
         return;
       }
       if (key.k === "prevPage" || key.k === "nextPage") {
-        setDoc((d) => ({
-          ...d,
-          active: Math.max(0, Math.min(d.pages.length - 1, d.active + (key.k === "prevPage" ? -1 : 1))),
-        }));
+        // By page tab: a page laid out with several apps is one step.
+        setDoc((d) => {
+          const all = units(d);
+          const u = Math.max(0, Math.min(all.length - 1, unitOf(d, d.active) + (key.k === "prevPage" ? -1 : 1)));
+          return all[u]!.pages.includes(d.active) ? d : { ...d, active: all[u]!.pages[0]! };
+        });
         return;
       }
       // Esc steps back: it cancels what's open on the page first, then leaves the document.
@@ -2224,6 +3396,8 @@ export function CasApp() {
       pageKey(key);
     },
     [
+      sorter,
+      splitting,
       leaveDocument,
       py,
       confirm,
@@ -2234,6 +3408,7 @@ export function CasApp() {
       rows,
       homeAction,
       isScratch,
+      openCurrent,
       openFile,
       openScratchpad,
       writeNow,
@@ -2353,6 +3528,64 @@ export function CasApp() {
     void navigator.clipboard?.writeText(text).catch(() => undefined);
   };
 
+  editOps.current = {
+    copy: copySelection,
+    cut: () => {
+      if (page?.kind === "calculator" && page.sel) copySelection();
+      else if ((page?.kind === "calculator" || page?.kind === "graphs") && selection(page.edit)) {
+        copySelection();
+        handleKey({ k: "delete" });
+      }
+    },
+  };
+
+  /** Another region's app on a page laid out with several: drawn as it stands, taking no keys. */
+  const renderOther = (p: Page): ReactNode => {
+    const none = () => undefined;
+    const ready = status === "ready" || status === "busy";
+    switch (p.kind) {
+      case "calculator":
+        return <CalculatorApp page={p} onPick={none} onCaret={none} onWarning={none} onCursor={none} onSelect={none} />;
+      case "graphs":
+        return (
+          <GraphsApp
+            page={{ ...p, editing: null, tool: null }}
+            giac={engine.current?.giac ?? null}
+            ready={ready}
+            onSamples={none}
+            onWindow={none}
+            onToolX={none}
+            onConfirm={none}
+            onToolFn={none}
+            onEditFn={none}
+            onEditRel={none}
+            onEditPar={none}
+            onDESettings={none}
+            onSlider={none}
+            onSliderTyped={none}
+            onSliderAction={none}
+            onSliderPlace={none}
+            onCursor={none}
+            onSelect={none}
+          />
+        );
+      case "lists":
+        return <ListsApp page={p} onSelect={none} />;
+      case "notes":
+        return <NotesApp page={p} apiRef={otherNotes} onChange={none} evaluate={notesEvaluate} />;
+      case "datastats":
+        return <DataStatsApp page={p} giac={engine.current?.giac ?? null} ready={ready} toGiac={(text) => translate(parse(text), settings).giac} onAxis={none} onPage={none} onWindow={none} />;
+      case "geometry":
+        return <GeometryApp page={p} onChange={none} onError={none} onAsk={none} />;
+      case "python":
+        return <PythonEditor page={p} onChange={none} editorRef={none} />;
+      case "pyshell":
+        return <PythonShell page={p} prompt={null} status={py.status} />;
+      default:
+        return <UnsupportedApp page={p} />;
+    }
+  };
+
   const onPaste = (e: ClipboardEvent) => {
     if ((e.target as HTMLElement).dataset.pyEditor !== undefined || (e.target as HTMLElement).closest?.("[data-notes-editor]")) return;
     const text = e.clipboardData.getData("text").replace(/\s+/g, " ").trim();
@@ -2383,13 +3616,13 @@ export function CasApp() {
   }, [menu, say]);
   useEffect(() => {
     if (wizard) say(wizardSaid(wizard));
-  }, [wizard?.focus, wizard?.wizard, say]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [wizard?.focus, wizard?.wizard, wizard?.list?.sel, Boolean(wizard?.list), say]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (error) {
       say(error);
-      haptic("error");
+      hap("error");
     }
-  }, [error, say, haptic]);
+  }, [error, say, hap]);
   useEffect(() => {
     if (warning) say(`Warning. ${warning.filter(Boolean).join(" ")}`);
   }, [warning, say]);
@@ -2397,7 +3630,8 @@ export function CasApp() {
     if (catalog) say(catalogSaid(catalog));
   }, [catalog, say]);
   useEffect(() => {
-    if (finance) say(`Finance Solver. ${FINANCE_NAMES[finance.focus]} ${finance.values[finance.focus]}`);
+    if (finance?.list) say(`PmtAt list, ${PMT_AT[finance.list.sel]}, ${finance.list.sel + 1} of ${PMT_AT.length}`);
+    else if (finance) say(`Finance Solver. ${FINANCE_NAMES[finance.focus]} ${finance.values[finance.focus]}`);
   }, [finance, say]);
   useEffect(() => {
     const c = palette !== null ? PALETTE[palette] : undefined;
@@ -2475,6 +3709,41 @@ export function CasApp() {
   }, []);
   const uploadRef = useRef(upload);
   uploadRef.current = upload;
+
+  // The installed app opening files from the computer (the manifest's
+  // file_handlers: double-click a .tns, or Open with). One document goes into
+  // My Documents and opens; several, or a zip, are added as an upload is.
+  const launch = useCallback(
+    async (list: File[]) => {
+      const f = list[0];
+      if (list.length !== 1 || !f || !/\.(tns|py)$/i.test(f.name)) return upload(list);
+      const bytes = new Uint8Array(await f.arrayBuffer());
+      let path = files.join(files.ROOT, f.name);
+      const there = await files.getFile(path);
+      const same = there?.bytes?.length === bytes.length && there.bytes.every((b, i) => b === bytes[i]);
+      // The same file again opens the copy here, with the changes made since.
+      // A different file by that name gets a new name rather than replace it.
+      if (!same) {
+        if (there) path = files.join(files.ROOT, await files.freeName(files.ROOT, f.name));
+        await addFiles(files.ROOT, [new File([bytes], files.nameOf(path))]);
+        await refreshFiles();
+      }
+      await openFile(path);
+    },
+    [upload, refreshFiles, openFile],
+  );
+  const launchRef = useRef(launch);
+  launchRef.current = launch;
+  useEffect(() => {
+    // Chromium only, and only in the installed app; elsewhere there's no launchQueue.
+    const queue = (window as { launchQueue?: { setConsumer(fn: (p: { files: readonly FileSystemHandle[] }) => void): void } }).launchQueue;
+    queue?.setConsumer(({ files: handles }) => {
+      if (!handles.length) return;
+      void Promise.all(handles.filter((h): h is FileSystemFileHandle => h.kind === "file").map((h) => h.getFile()))
+        .then((list) => launchRef.current(list))
+        .catch((err: Error) => toast.error(`Couldn't open that file: ${err.message}`));
+    });
+  }, []);
 
   // The window-wide key listener below reads the newest state through a ref.
   const latest = useRef({ doc, page, runAction, handleKey, addPage, setCalc });
@@ -2563,7 +3832,10 @@ export function CasApp() {
       await newDoc(first);
     },
     openFile,
-    save: async (name) => (name ? wizardDone(`saveas:${name}`) : saveDocument()),
+    save: async (name) => {
+      if (name) return wizardDone(`saveas:${name}`);
+      if (!(await saveDocument())) throw new Error("The browser couldn't save the document (its storage may be full); ask the student to free some space or download it instead.");
+    },
     discard: () => {
       setDirty(false);
       current.current.dirty = false;
@@ -2597,6 +3869,7 @@ export function CasApp() {
     setListColumn: (col, ch) => {
       if (page?.kind !== "lists") return "The active page isn't Lists & Spreadsheet.";
       if (ch.name && !/^[a-zA-Z]\w*$/.test(ch.name)) return "A list name is letters, digits and _, starting with a letter.";
+      if (ch.name && isReservedName(ch.name)) return `${ch.name} is the name of a command (Reserved name); choose another list name.`;
       const cols = page.cols.slice();
       while (cols.length <= col) cols.push({ cells: [] });
       const c = { ...cols[col]! };
@@ -2656,7 +3929,8 @@ export function CasApp() {
         }
         out[i] = v;
       }
-      setWizard({ ...wizard, values: out, fresh: false });
+      // An open list would take the OK's Enter as a pick: filling the dialog closes it.
+      setWizard({ ...wizard, values: out, fresh: false, list: null });
       return null;
     },
     wizardDone,
@@ -2695,7 +3969,6 @@ export function CasApp() {
   // A tool holds its host across awaits: each call goes through to the newest render's, never a stale one.
   const agentProxy = useMemo(() => new Proxy({} as AgentHost, { get: (_, k) => agentHost.current[k as keyof AgentHost] }), []);
   const agent = useCallback(() => agentProxy, [agentProxy]);
-  useEffect(() => registerWebMcp(agent), [agent]);
   // Which thread owns the open document. One calculator, many chats: a thread's document is set aside when it's left and put back when it's opened.
   const docBinding = useRef<DocBinding>(null!);
   const restoring = useRef<string | null>(null);
@@ -2766,6 +4039,9 @@ export function CasApp() {
   };
   const binding = useCallback(() => docBinding.current, []);
   const assistant = useAssistant(agent, binding);
+  // The assistant's settings can stop offering the tools to browser agents; turning it back on offers them again.
+  const shareTools = assistant.config.webmcp !== false;
+  useEffect(() => (shareTools ? registerWebMcp(agent) : undefined), [agent, shareTools]);
   // Back in AI mode with nothing open (a reload, say): the open chat's document comes back.
   useEffect(() => {
     if (ai === "immersive" && view !== "doc" && assistant.thread.doc) void docBinding.current.restore(assistant.thread);
@@ -2812,7 +4088,7 @@ export function CasApp() {
     },
   };
   return (
-    <>
+    <MotionConfig reducedMotion={MOTION[setup.motion]}>
     {/* On a wide window the calculator moves aside for the assistant rather than sitting under it; AI mode puts it away. */}
     <div className={cn(DEVICE_WIDTH, aiOpen && "ai-open", ai === "immersive" && "hidden")}>
       <header className="mb-4 flex items-center justify-between gap-3 px-1">
@@ -2881,8 +4157,8 @@ export function CasApp() {
             {createPortal(
             <Screen
               variant={view === "new" ? "doc" : view}
-              pageLabels={view === "doc" ? doc.pages.map((_, i) => pageLabel(doc, i)) : []}
-              active={doc.active}
+              pageLabels={view === "doc" ? units(doc).map((u) => pageLabel(doc, u.pages[0]!)) : []}
+              active={unitOf(doc, doc.active)}
               title={view === "home" ? "Axiom" : view === "browse" ? "My Documents" : view === "new" ? "Untitled" : `${dirty ? "*" : ""}${doc.title}`}
               onClose={() => {
                 // X closes the document (Save / No / Cancel first when it has changes) and goes back
@@ -2896,7 +4172,7 @@ export function CasApp() {
                 }
               }}
               angle={settings.angle === "rad" ? "RAD" : "DEG"}
-              onSelectPage={(i) => setDoc((d) => ({ ...d, active: i }))}
+              onSelectPage={(u) => setDoc((d) => ({ ...d, active: units(d)[u]?.pages[0] ?? d.active }))}
               onToggleAngle={() => {
                 const next: Settings = { ...settings, angle: settings.angle === "rad" ? "deg" : "rad" };
                 setSettings(next);
@@ -2908,18 +4184,25 @@ export function CasApp() {
                   {wizard && (
                     <WizardDialog
                       state={wizard}
-                      onFocus={(i) => setWizard((w) => (w ? { ...w, focus: i, fresh: true } : w))}
+                      onFocus={(i) => setWizard((w) => (w ? { ...w, focus: i, fresh: true, list: null } : w))}
                       onOk={() => handleKey({ k: "enter" })}
                       onCancel={() => setWizard(null)}
                       onArrow={(i) =>
-                        setWizard((w) => (w ? (wizardKeyPress({ ...w, focus: i }, { k: "right" }).state ?? w) : w))
+                        setWizard((w) => (w ? (wizardKeyPress({ ...w, focus: i, list: null }, { k: "right" }).state ?? w) : w))
                       }
+                      onPick={(i) => setWizard((w) => (w ? wizardPick(w, i) : w))}
+                      onHighlight={(i) => setWizard((w) => (w?.list ? { ...w, list: { ...w.list, sel: i } } : w))}
+                      onCloseList={() => setWizard((w) => (w ? { ...w, list: null } : w))}
                     />
                   )}
                   {finance && (
                     <FinanceSolver
                       state={finance}
-                      onFocus={(i) => setFinance((f) => (f ? { ...f, focus: i, fresh: true } : f))}
+                      onFocus={(i) => setFinance((f) => (f ? { ...f, focus: i, fresh: true, list: null } : f))}
+                      onOpenList={() => setFinance((f) => (f ? (financeKeyPress({ ...f, focus: 7, list: null }, { k: "right" }).state ?? f) : f))}
+                      onPick={(i) => setFinance((f) => (f ? financePick(f, i) : f))}
+                      onHighlight={(i) => setFinance((f) => (f?.list ? { ...f, list: { ...f.list, sel: i } } : f))}
+                      onCloseList={() => setFinance((f) => (f ? { ...f, list: null } : f))}
                     />
                   )}
                   <AnimatePresence>
@@ -2999,7 +4282,28 @@ export function CasApp() {
                   }}
                 />
               )}
-              {view === "doc" && page?.kind === "lists" && <ListsApp page={page} highlights={pageHighlights} onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))} />}
+              {view === "doc" && sorter !== null && (
+                <PageSorter doc={doc} sel={sorter} names={PAGE_APPS} onPick={(i, open) => (open ? (setDoc((d) => ({ ...d, active: i })), setSorter(null)) : setSorter(i))} />
+              )}
+              {view === "doc" && sorter === null && (
+              <LayoutFrame doc={doc} renderOther={renderOther} splitting={splitting} onFocus={(id) => setDoc((d) => ({ ...d, active: Math.max(0, d.pages.findIndex((p) => p.id === id)) }))} onEmpty={askRegion}>
+              {view === "doc" && page?.kind === "lists" && !page.table && (
+                <ListsApp
+                  page={page}
+                  highlights={pageHighlights}
+                  onSelect={(sel) => setLists((p) => ({ ...p, sel, edit: null }))}
+                />
+              )}
+              {view === "doc" && page?.kind === "lists" && page.table && (
+                <FunctionTable
+                  fns={problemFunctions(doc, problemOf(page))}
+                  start={page.table.start}
+                  step={page.table.step}
+                  giac={engine.current?.giac ?? null}
+                  ready={status === "ready" || status === "busy"}
+                  className="absolute inset-0"
+                />
+              )}
               {view === "doc" && page?.kind === "notes" && (
                 <NotesApp
                   page={page}
@@ -3015,8 +4319,23 @@ export function CasApp() {
                   ready={status === "ready" || status === "busy"}
                   toGiac={(text) => translate(parse(text), settings).giac}
                   onAxis={(axis) => runAction({ kind: "app", id: `dsAxis:${axis}` })}
-                  onMovable={(m, b) => setData((p) => (p.movable ? { ...p, movable: { ...p.movable, m, b } } : p))}
+                  onPage={setData}
                   onWindow={(w) => (dataWindow.current = w)}
+                  onInfo={(info) => (dataInfo.current = info)}
+                  onSay={say}
+                  onSlider={(name, value, final) => {
+                    setDataSlider(name, (sl) => ({ ...sl, value }));
+                    assign(name, value, final);
+                    if (final) say(`${name} = ${value}`);
+                  }}
+                  onSliderTyped={(name, text) => void typedSlider(name, text, setDataSlider)}
+                  onSliderAction={(name, action) => {
+                    const sl = page.sliders?.find((x) => x.name === name);
+                    if (!sl) return;
+                    if (action === "settings") setWizard(sliderSettings(sl));
+                    else if (action === "minimize") setDataSlider(name, (x) => ({ ...x, minimized: !x.minimized }));
+                    else if (action === "delete") setDataSlider(name, () => null);
+                  }}
                 />
               )}
               {view === "doc" && page?.kind === "geometry" && <GeometryApp page={page} highlights={pageHighlights} onChange={setGeo} onError={setError} onAsk={askGeoAmount} />}
@@ -3053,7 +4372,20 @@ export function CasApp() {
                   onSelect={(a, b) => setCalc((p) => ({ ...p, sel: null, edit: selectBetween(p.edit, a, b) }))}
                 />
               )}
-              {view === "doc" && page?.kind === "graphs" && (
+              {view === "doc" && page?.kind === "graphs" && page.view === "3d" && (
+                <Graph3D
+                  page={page}
+                  giac={engine.current?.giac ?? null}
+                  ready={status === "ready" || status === "busy"}
+                  onTurn={(dy, dp) => setGraphs((g) => {
+                    const v = { yaw: -0.7, pitch: 0.55, ...g.view3d };
+                    return { ...g, view3d: { yaw: v.yaw + dy, pitch: Math.max(-1.5, Math.min(1.5, v.pitch + dp)) } };
+                  })}
+                  onCursor={(cursor) => setGraphs((g) => ({ ...g, edit: { row: g.edit.row, cursor } }))}
+                  onSelect={(a, b) => setGraphs((g) => ({ ...g, edit: selectBetween(g.edit, a, b) }))}
+                />
+              )}
+              {view === "doc" && page?.kind === "graphs" && page.view !== "3d" && (
                 <GraphsApp
                   page={page}
                   highlights={pageHighlights}
@@ -3062,6 +4394,15 @@ export function CasApp() {
                   onSamples={(s) => (samples.current = s)}
                   onWindow={(window) => setGraphs((g) => ({ ...g, window }))}
                   onToolX={onToolX}
+                  onMathDraw={(pts) => {
+                    const rel = recognise(pts, page.window.xmax - page.window.xmin);
+                    if (!rel) return;
+                    const n = Math.max(0, ...(page.relations ?? []).map((r) => r.n)) + 1;
+                    const row = astToRow(parse(rel));
+                    const next = { ...page, edit: { row, cursor: { path: [], index: row.length } } };
+                    void runGraphEffect(next, { relation: { n, text: rel } });
+                  }}
+                  onBox={(x, y, set) => setGraphs((g) => (!g.zoomBox ? g : set ? zoomBoxAt(g, x, y) : { ...g, zoomBox: { ...g.zoomBox, x, y } }))}
                   onToolFn={(n, pick) =>
                     setGraphs((g) =>
                       g.tool?.kind === "bounds"
@@ -3078,31 +4419,15 @@ export function CasApp() {
                   }}
                   onEditFn={(n) => setGraphs((g) => openEntry(g, n))}
                   onEditRel={(n) => setGraphs((g) => openRelation(g, n))}
-                  onEditPar={(n) => setGraphs((g) => openParametric(g, settings.angle === "deg", n))}
+                  onEditPar={(n) => setGraphs((g) => (g.parametrics?.find((c) => c.n === n)?.polar ? openPolar(g, settings.angle === "deg", n) : openParametric(g, settings.angle === "deg", n)))}
+                  onEditSeq={(n) => setGraphs((g) => openSequence(g, n))}
                   onDESettings={() => graphAction("deSettings")}
                   onSlider={(name, value, final) => {
                     setSlider(name, (sl) => ({ ...sl, value }));
                     assign(name, value, final);
                     if (final) say(`${name} = ${value}`);
                   }}
-                  onSliderTyped={async (name, text) => {
-                    // A number as typed, or worked out (π/4, 1/3); the range widens to take it.
-                    let value = Number(text.replace(/−/g, "-"));
-                    if (!Number.isFinite(value) && engine.current) {
-                      try {
-                        value = Number((await engine.current.giac(`evalf(${translate(parse(text), settings).giac})`)).trim());
-                      } catch {
-                        value = NaN;
-                      }
-                    }
-                    if (!Number.isFinite(value)) {
-                      setError("Error: Enter a number");
-                      return;
-                    }
-                    setSlider(name, (sl) => ({ ...sl, value, min: Math.min(sl.min, value), max: Math.max(sl.max, value) }));
-                    assign(name, value, true);
-                    say(`${name} = ${value}`);
-                  }}
+                  onSliderTyped={(name, text) => void typedSlider(name, text, setSlider)}
                   onSliderPlace={(name, at) => setSlider(name, (sl) => ({ ...sl, at }))}
                   onSliderAction={(name, action) => {
                     const sl = page.sliders?.find((x) => x.name === name);
@@ -3118,6 +4443,25 @@ export function CasApp() {
                   onSelect={(a, b) => setGraphs((g) => ({ ...g, edit: selectBetween(g.edit, a, b) }))}
                 />
               )}
+              {view === "doc" && page?.kind === "graphs" && page.view !== "3d" && !page.table && (page.geo?.objects.length || page.geo?.tool) ? (
+                <GeometryApp
+                  key={`graphgeo${page.id}`}
+                  page={geoOfGraph(page)}
+                  overlay={{
+                    view: { x: (page.window.xmin + page.window.xmax) / 2, y: (page.window.ymin + page.window.ymax) / 2, w: page.window.xmax - page.window.xmin },
+                    onView: (v) =>
+                      setGraphs((g) => {
+                        const dy = v.y - (g.window.ymin + g.window.ymax) / 2;
+                        return { ...g, window: { ...g.window, xmin: v.x - v.w / 2, xmax: v.x + v.w / 2, ymin: g.window.ymin + dy, ymax: g.window.ymax + dy } };
+                      }),
+                  }}
+                  onChange={setGraphGeo}
+                  onError={setError}
+                  onAsk={askGeoAmount}
+                />
+              ) : null}
+              </LayoutFrame>
+              )}
               {status === "loading" && (
                 <Notice>
                   <TextShimmer className="text-casLabel">Loading</TextShimmer>
@@ -3132,25 +4476,27 @@ export function CasApp() {
             screenHost,
             )}
           </div>
-          <div className="@container lg:w-[min(24rem,calc(var(--cas-h)/2.1))] lg:shrink-0">
+          {/* Show Keypad off hides it on large screens only: a phone has no other way to type. */}
+          <div className={cn("@container lg:w-[min(24rem,calc(var(--cas-h)/2.1))] lg:shrink-0", !setup.showKeypad && "lg:hidden")}>
             <Keypad
               onKey={(k) => {
-                haptic(k.k === "enter" ? "medium" : "light");
+                hap(k.k === "enter" ? "medium" : "light");
                 handleKey(k);
               }}
               onKeys={(ks) => {
-                haptic("light");
+                hap("light");
                 handleKeys(ks);
               }}
               onPanel={(p) => {
-                haptic("light");
+                hap("light");
                 setMenu({ items: p.items, state: openMenu(p.cols) });
               }}
               onOpen={(o) => {
-                haptic("light");
+                hap("light");
                 if (o.open === "templates") setPalette(0);
                 else setCatalog(openCatalog(o.tab));
               }}
+              layout={setup.keypad}
             />
           </div>
         </DefinedNames.Provider>
@@ -3161,6 +4507,7 @@ export function CasApp() {
           screen={() => screenHost.firstElementChild as HTMLElement | null}
           label={pageLabel(doc, doc.active)}
           onClear={clearAll}
+          haptics={setup.haptics}
         />
         <Legal />
       </div>
@@ -3202,20 +4549,27 @@ export function CasApp() {
         />
       )}
     </AnimatePresence>
-    <AssistantSettings open={aiSettings} onOpenChange={setAiSettings} config={assistant.config} setConfig={assistant.setConfig} />
-    </>
+    <AssistantSettings open={aiSettings} onOpenChange={setAiSettings} config={assistant.config} setConfig={assistant.setConfig} onDeleteAll={assistant.removeAll} />
+    </MotionConfig>
   );
 }
 
 /** Whether Esc has something to cancel on the page (a selection, a tool, an entry line, a cell, a running program). */
+/** The functions of a problem's Graphs pages, for a Lists & Spreadsheet function table. */
+function problemFunctions(doc: CasDocument, problem: number): TableFn[] {
+  return doc.pages.flatMap((p) => (p.kind === "graphs" && problemOf(p) === problem ? graphFunctions(p) : []));
+}
+
 function pageTakesEsc(page: Page | undefined, py: { status: PyStatus; canvas: DrawOp[] | null }): boolean {
   switch (page?.kind) {
     case "calculator":
       return page.sel !== null;
     case "graphs":
-      return page.tool !== null || page.editing !== null;
+      return page.tool !== null || page.editing !== null || Boolean(page.geo?.tool || page.geo?.sel || page.zoomBox || page.mathDraw || page.pathPlot || page.selected);
     case "geometry":
       return Boolean(page.tool || page.sel);
+    case "datastats":
+      return dataTakesEsc(page);
     case "lists":
       return page.edit !== null;
     case "pyshell":
@@ -3224,6 +4578,9 @@ function pageTakesEsc(page: Page | undefined, py: { status: PyStatus; canvas: Dr
       return false;
   }
 }
+
+/** A Graphs page's construction as the Geometry view and keys take it: no grid or axes of its own. */
+const geoOfGraph = (g: GraphsPage): GeometryPage => ({ kind: "geometry", id: g.id, objects: g.geo?.objects ?? [], tool: g.geo?.tool ?? null, sel: g.geo?.sel ?? null });
 
 const PAGE_APPS: Record<Page["kind"], string> = {
   calculator: "Calculator",

@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { GlowButton } from "@/src/components/amicro/glow-button";
 import { TextShimmer } from "@/src/components/amicro/text-shimmer";
 import { useWebHaptics } from "@/src/hooks/use-web-haptics";
+import { useInstall } from "@/src/install";
 import { cn } from "@/shared/lib/utils";
 import type { EngineStatus } from "../engine/client";
 import { CheckBox } from "../menus/wizard";
@@ -23,13 +24,15 @@ export type Choice = { label: string; run: () => void };
 const CAS_SOURCE = "https://github.com/notnooob/axiom";
 const GIAC_SOURCE = "https://www-fourier.univ-grenoble-alpes.fr/~parisse/giac.html";
 
-/** The GPL's notices, kept to one quiet line. */
+/** The GPL's notices, kept to one quiet line, and Install app when the browser offers it. */
 export function Legal() {
   const link = "underline decoration-neutral-600 underline-offset-2 transition-colors duration-150 hover:text-neutral-200 hover:decoration-neutral-300";
+  const install = useInstall();
   return (
     <p className="m-0 text-[12px] leading-relaxed text-neutral-500">
       Free software under the{" "}
-      <a href="cas/giac/COPYING" className={link}>
+      {/* A new tab: in the installed app there's no Back button to return from it. */}
+      <a href="cas/giac/COPYING" target="_blank" rel="noreferrer" className={link}>
         GNU GPL v3
       </a>
       , with no warranty.{" "}
@@ -41,6 +44,14 @@ export function Legal() {
         Giac
       </a>
       . Not affiliated with Texas Instruments. Axiom v{__APP_VERSION__}.
+      {install && (
+        <>
+          {" "}
+          <button type="button" onClick={() => void install()} className={cn(link, "cursor-pointer text-neutral-400")}>
+            Install app
+          </button>
+        </>
+      )}
     </p>
   );
 }
@@ -52,9 +63,11 @@ export function Legal() {
  * all sits apart at the far edge, quiet until it asks for the second click
  * (the document is saved and undo doesn't reach it).
  */
-export function ScreenBar({ screen, label, onClear }: { screen: () => HTMLElement | null; label: string; onClear: () => void }) {
+export function ScreenBar({ screen, label, onClear, haptics = true }: { screen: () => HTMLElement | null; label: string; onClear: () => void; haptics?: boolean }) {
   const [confirming, setConfirming] = useState(false);
-  const { trigger: haptic } = useWebHaptics();
+  const { trigger } = useWebHaptics();
+  // Handheld Setup's Haptics: off means none at all, here too.
+  const haptic = (t: Parameters<typeof trigger>[0]) => haptics && trigger(t);
   useEffect(() => {
     if (!confirming) return;
     const t = setTimeout(() => setConfirming(false), 4000);

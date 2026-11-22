@@ -9,6 +9,8 @@ import { selectBetween, selection, type EditState } from "../math/editor";
 import { MathView, useCaretInView } from "../math/render";
 import { FlagBadge, flagRing, type Flag } from "../screen/flag";
 import type { HistoryEntry } from "../state/document";
+import { parse } from "../math/ast";
+import { astToRow } from "../math/tree";
 
 /** One → moves a too-wide part this fraction of the screen's width. */
 const SCROLL_STEP = 0.5;
@@ -71,6 +73,7 @@ export function HistoryRow({
       <Clipped scroll={selected === "input" ? scroll : 0} active={selected === "input"}>
         <MathView {...pick("input")} />
       </Clipped>
+      {entry.display && <Displayed lines={entry.display} />}
       {entry.error ? (
         <span className="ml-auto max-w-full font-casui text-[3.4cqw]">{entry.error}</span>
       ) : (
@@ -103,6 +106,42 @@ export function HistoryRow({
       <FlagBadge {...flag} className="ml-[1cqw]" />
       <div className="min-w-0 flex-1">{body}</div>
       <div aria-hidden className={cn("absolute inset-0", flagRing(flag.tone))} />
+    </div>
+  );
+}
+
+/**
+ * What a program showed with Disp, below its entry and above its "Done",
+ * left-aligned as on the handheld: text plainly, anything else as maths.
+ */
+function Displayed({ lines }: { lines: string[][] }) {
+  const part = (p: string, i: number) => {
+    if (p.startsWith('"')) {
+      let text = p;
+      try {
+        text = JSON.parse(p) as string;
+      } catch {
+        // Shown as it came.
+      }
+      return (
+        <span key={i} className="whitespace-pre font-casmath">
+          {text}
+        </span>
+      );
+    }
+    try {
+      return <MathView key={i} row={astToRow(parse(p))} />;
+    } catch {
+      return <span key={i}>{p}</span>;
+    }
+  };
+  return (
+    <div className="basis-full py-[0.6cqw]">
+      {lines.map((line, i) => (
+        <div key={i} className="flex items-center gap-x-[1.6cqw]">
+          {line.map(part)}
+        </div>
+      ))}
     </div>
   );
 }

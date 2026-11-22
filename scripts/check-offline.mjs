@@ -23,19 +23,16 @@ try {
   await page.goto(url);
   // First visit: the worker takes over, the page reloads once for isolation, then the cache fills.
   await page.waitForFunction(() => navigator.serviceWorker.controller && crossOriginIsolated, null, { timeout: 60000 });
-  await page.waitForFunction(
-    async () => {
-      const keys = await caches.keys();
+  // Polled from here: waitForFunction takes an async function's Promise as a
+  // truthy answer, so it passed at once and the check went offline mid-fill.
+  const filled = () =>
+    page.evaluate(async () => {
       const list = await (await fetch("precache.json")).json();
-      for (const k of keys) {
-        const c = await caches.open(k);
-        if ((await c.keys()).length >= list.files.length) return true;
-      }
+      for (const k of await caches.keys()) if ((await (await caches.open(k)).keys()).length >= list.files.length) return true;
       return false;
-    },
-    null,
-    { timeout: 180000, polling: 1000 },
-  );
+    });
+  for (const start = Date.now(); !(await filled()); await page.waitForTimeout(1000))
+    if (Date.now() - start > 180000) throw new Error("the cache didn't fill within 3 minutes");
   console.log("✓ cache filled");
   // Let the first load finish (Giac arrives over the network then): cutting it off mid-download fails the reload.
   await page.waitForFunction(() => document.body.innerText.includes("Engine ready"), null, { timeout: 120000 });
@@ -46,8 +43,8 @@ try {
   if (!(await page.evaluate(() => crossOriginIsolated))) fail("not cross-origin isolated offline");
   else console.log("✓ offline, isolated, engine ready");
 
-  // A fresh browser opens on My Documents: Esc goes back to the Scratchpad's Calculator.
-  await page.keyboard.press("Escape");
+  // A fresh browser opens on Home: A is the Scratchpad's Calculator.
+  await page.keyboard.press("a");
   // 2^10 through Giac (brackets are templates in the 2D editor, awkward to type from a script).
   await page.keyboard.type("2^10");
   await page.keyboard.press("Enter");

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-import { app, off, rule, sub, type Menu } from "../menus/types";
+import { app, na, off, rule, sub, type Menu } from "../menus/types";
 import type { GeometryPage } from "../state/document";
 import { TOOL_NAMES, type GeoTool } from "./model";
 
@@ -12,12 +12,12 @@ export function geometryMenu(p: GeometryPage): Menu {
   return [
     sub("Actions", [
       app("Select", "geoSelect"),
-      p.sel ? app("Delete", "geoDelete") : off("Delete"),
-      measure ? app("Store…", "geoStore") : off("Store…"),
-      rule(off("Hide/Show")),
-      off("Attributes"),
-      off("Text"),
-      off("Coordinates and Equations"),
+      p.sel ? app("Delete", "geoDelete") : na("Delete", "select an object first"),
+      measure ? app("Store…", "geoStore") : na("Store…", "select a measurement first"),
+      rule(app("Hide/Show", "geoHideShow")),
+      app("Attributes", "geoAttrs"),
+      app("Text", "geoText"),
+      app("Coordinates and Equations", "geoLabel"),
       rule(app("Clear All", "geoClear")),
     ]),
     sub("View", [
@@ -25,30 +25,30 @@ export function geometryMenu(p: GeometryPage): Menu {
       app(tick(p.grid, "Show Grid"), "geoGrid"),
       rule(app("Zoom In", "geoZoomIn")),
       app("Zoom Out", "geoZoomOut"),
-      p.view ? app("Zoom Standard", "geoZoomReset") : off("Zoom Standard"),
-      rule(off("Show Analytic Window")),
+      p.view ? app("Zoom Standard", "geoZoomReset") : na("Zoom Standard", "the view is already the standard one"),
+      rule(app(tick(p.analytic, "Show Analytic Window"), "geoAnalytic")),
     ]),
     sub("Points & Lines", [
       tool("point"),
-      off("Point On"),
+      tool("pointon"),
       tool("intersection"),
       rule(tool("line")),
       tool("segment"),
       tool("ray"),
-      off("Tangent"),
-      off("Vector"),
-      off("Circle Arc"),
+      tool("tangent"),
+      tool("vector"),
+      tool("arc"),
     ]),
     sub("Measurement", [tool("length"), tool("area"), tool("slope"), tool("angle")]),
-    sub("Shapes", [tool("circle"), tool("triangle"), off("Rectangle"), tool("polygon"), off("Regular Polygon"), off("Ellipse")]),
+    sub("Shapes", [tool("circle"), tool("triangle"), tool("rectangle"), tool("polygon"), tool("regpoly"), tool("ellipse")]),
     sub("Construction", [
       tool("parallel"),
       tool("perpendicular"),
       tool("bisector"),
       tool("anglebisector"),
       tool("midpoint"),
-      rule(off("Locus")),
-      off("Compass"),
+      rule(tool("locus")),
+      tool("compass"),
     ]),
     sub("Transformation", [tool("symmetry"), tool("reflection"), tool("translation"), tool("rotation"), tool("dilation")]),
   ];

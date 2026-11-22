@@ -30,12 +30,29 @@ export function menuSaid(menu: Menu, state: MenuState): string {
 }
 
 export function wizardSaid(w: WizardState): string {
+  // A dropdown's open list: the highlighted option and where it is in the list.
+  const lf = w.list ? w.wizard.fields[w.list.field] : undefined;
+  if (w.list && lf?.options) return `${lf.label.replace(/:$/, "")} list, ${lf.options[w.list.sel]}, ${w.list.sel + 1} of ${lf.options.length}`;
   const f = w.wizard.fields[w.focus];
-  return f ? `${w.wizard.title}. ${f.label} ${w.values[w.focus] ?? ""}` : w.wizard.title;
+  const title = w.wizard.note ? `${w.wizard.title}. ${w.wizard.note}` : w.wizard.title;
+  return f ? `${title}. ${f.label} ${w.values[w.focus] ?? ""}` : title;
 }
 
+/** Each app's name, as the page's tab and the add-page menu give it. */
+const APP_SAID: Record<Page["kind"], string> = {
+  calculator: "Calculator",
+  graphs: "Graphs",
+  lists: "Lists & Spreadsheet",
+  datastats: "Data & Statistics",
+  notes: "Notes",
+  geometry: "Geometry",
+  python: "Python",
+  pyshell: "Python Shell",
+  unsupported: "an app Axiom doesn't have yet",
+};
+
 export function pageSaid(page: Page, label: string): string {
-  return `Page ${label}, ${page.kind === "calculator" ? "Calculator" : "Graphs"}`;
+  return `Page ${label}, ${page.kind === "unsupported" ? `${page.app}, not built yet` : APP_SAID[page.kind]}`;
 }
 
 export function toolSaid(tool: Tool | null): string {
@@ -47,8 +64,11 @@ export function toolSaid(tool: Tool | null): string {
 }
 
 export function markSaid(mark: Mark): string {
+  if (mark.kind === "area" && mark.other !== undefined) return `Area between f${mark.fn} and f${mark.other} from ${fmt3(mark.a)} to ${fmt3(mark.b)}: ${fmt3(mark.value)}`;
   if (mark.kind === "area") return `Integral of f${mark.fn} from ${fmt3(mark.a)} to ${fmt3(mark.b)}: ${fmt3(mark.value)}`;
-  return `${mark.title ? `${mark.title}, ` : ""}f${mark.fn}: (${fmt3(mark.x)}, ${fmt3(mark.y)})`;
+  if (mark.kind === "line") return `${mark.title} of rel${mark.rel}: ${fmt3(mark.a)}x + ${fmt3(mark.b)}y = ${fmt3(mark.c)}`;
+  if (mark.kind === "value") return `${mark.title} of rel${mark.rel}: ${fmt3(mark.value)}`;
+  return `${mark.title ? `${mark.title}, ` : ""}${mark.rel !== undefined ? `rel${mark.rel}` : `f${mark.fn}`}: (${fmt3(mark.x)}, ${fmt3(mark.y)})`;
 }
 
 /** The graph canvas's text alternative. */

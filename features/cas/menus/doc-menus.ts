@@ -28,8 +28,15 @@ export const DOC_MENU: Menu = [
     app("Save As...", "fileSaveAs"),
     rule(app("Download .tns (experimental)", "fileDownload")),
   ]),
-  off("Edit"),
-  off("View"),
+  sub("Edit", [
+    { ...app("Undo", "editUndo"), hint: "Ctrl+Z" },
+    { ...app("Redo", "editRedo"), hint: "Ctrl+Y" },
+    rule({ ...app("Cut", "editCut"), hint: "Ctrl+X" }),
+    { ...app("Copy", "editCopy"), hint: "Ctrl+C" },
+    { ...app("Paste", "editPaste"), hint: "Ctrl+V" },
+    app("Delete", "editDelete"),
+  ]),
+  sub("View", [app("Page Sorter", "pageSorter")]),
   sub("Insert", [
     app("Problem", "insertProblem"),
     rule(app("Calculator", "addCalculator")),
@@ -39,8 +46,18 @@ export const DOC_MENU: Menu = [
     app("Notes", "addNotes"),
     app("Python", "addPython"),
   ]),
-  off("Problem"),
-  off("Page Layout"),
+  sub("Problem", [app("Rename...", "problemRename"), app("Delete", "problemDelete")]),
+  sub("Page Layout", [
+    sub(
+      "Select Layout",
+      Array.from({ length: 8 }, (_, i) => app(`Layout ${i + 1}`, `layout${i + 1}`)),
+    ),
+    app("Custom Split", "layoutCustom"),
+    app("Swap Application", "layoutSwap"),
+    app("Delete Application", "layoutDelete"),
+    rule(app("Group", "layoutGroup")),
+    app("Ungroup", "layoutUngroup"),
+  ]),
   sub("Settings", [app("Document Settings...", "docSettings"), app("Handheld Setup...", "handheldSetup")]),
 ];
 
