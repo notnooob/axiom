@@ -6,6 +6,18 @@ import { dataKey, dataTakesEsc } from "./keys";
 const page = (more: Partial<DataStatsPage> = {}): DataStatsPage => ({ kind: "datastats", id: 1, plot: "dot", x: "a", ...more });
 
 describe("data & statistics keys", () => {
+  it("moves, sizes and removes the selected image", () => {
+    let p = page({ image: { src: "data:,", x: 0.2, y: 0.2, w: 0.5, aspect: 0.5 }, imageSel: true });
+    expect(dataTakesEsc(p)).toBe(true);
+    p = dataKey(p, { k: "right" })!;
+    p = dataKey(p, { k: "down" })!;
+    expect(p.image).toMatchObject({ x: 0.22, y: 0.22 });
+    p = dataKey(p, { k: "char", c: "+" })!;
+    expect(p.image!.w).toBeCloseTo(0.55);
+    expect(dataKey(p, { k: "esc" })).toMatchObject({ imageSel: undefined, image: p.image });
+    expect(dataKey(p, { k: "delete" })!.image).toBeUndefined();
+  });
+
   it("moves Graph Trace along with ◄ ►, between traces with ▲ ▼, and ends it with Esc", () => {
     let p = page({ trace: { target: 0, i: 0 } });
     p = dataKey(p, { k: "right" })!;

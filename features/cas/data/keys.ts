@@ -6,8 +6,10 @@
  */
 import type { Key } from "../keys";
 import type { DataStatsPage } from "../state/document";
+import { imageKey } from "./image";
 
 export function dataKey(p: DataStatsPage, key: Key): DataStatsPage | null {
+  if (p.imageSel) return imageKey(p, key);
   if (p.trace) {
     const { target, i } = p.trace;
     // ◄ ► move along what's traced; ▲ ▼ go to the next thing to trace (the data, a regression, a function …).
@@ -25,4 +27,4 @@ export function dataKey(p: DataStatsPage, key: Key): DataStatsPage | null {
 }
 
 /** Whether Esc belongs to the page (ending a trace, or letting go of what's selected) rather than leaving the document. */
-export const dataTakesEsc = (p: DataStatsPage) => Boolean(p.trace || p.selected || p.textSel !== undefined);
+export const dataTakesEsc = (p: DataStatsPage) => Boolean(p.trace || p.selected || p.textSel !== undefined || p.imageSel);

@@ -51,6 +51,8 @@ export const DOC_MENU: Menu = [
     app("Data & Statistics", "addData"),
     app("Notes", "addNotes"),
     PTT?.noPython ? off("Python") : app("Python", "addPython"),
+    // A picture behind a Data & Statistics plot (data/image.ts).
+    rule(app("Image...", "insertImage")),
   ]),
   sub("Problem", [app("Rename...", "problemRename"), app("Delete", "problemDelete")]),
   sub("Page Layout", [

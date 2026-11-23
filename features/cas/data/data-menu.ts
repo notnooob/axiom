@@ -96,7 +96,7 @@ export function dataMenu(p: DataStatsPage, info: DataInfo = NO_INFO): Menu {
       rule(app("Insert Text", "dsText")),
       app("Insert Slider", "dsSlider"),
       rule(shown && POINT_PLOTS.includes(plot) ? app("Select All Points", "dsSelectAll") : na("Select All Points", "for plots drawn as points")),
-      off("Select Image"),
+      p.image ? app("Select Image", "dsSelectImage") : na("Select Image", "insert one first: doc ▸ Insert ▸ Image"),
       categorical && !info.two
         ? sub("Sort", [
             app(tick(!p.sort || p.sort === "list", "List Order"), "dsSort:list"),

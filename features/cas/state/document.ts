@@ -282,6 +282,12 @@ export type DataStatsPage = {
   split?: string;
   /** Insert Text: notes on the plot, placed as fractions of its width and height. */
   texts?: { text: string; x: number; y: number }[];
+  /**
+   * A picture behind the plot (doc ▸ Insert ▸ Image): its top left and width as
+   * fractions of the page, and its height over its width. imageSel: Select Image is moving it.
+   */
+  image?: { src: string; x: number; y: number; w: number; aspect: number };
+  imageSel?: boolean;
   /** Actions ▸ Hide Text: the analyses' equations and values (regressions, the movable line, functions, plotted values) are hidden, the lines stay. */
   hideText?: boolean;
   /** The text selected (clicked), for Del to remove. */
@@ -407,6 +413,7 @@ export const problemOf = (p: Page | undefined): number => p?.problem ?? 1;
 const VIEW_ONLY: Partial<Record<Page["kind"], ReadonlySet<string>>> = {
   graphs: new Set(["tool", "editing", "entryKind", "edit", "parDraft", "zoomBox", "selected", "mathDraw", "pathPlot"]),
   geometry: new Set(["tool", "sel", "view"]),
+  datastats: new Set(["imageSel"]),
 };
 
 /** Whether next changes what page p holds (so its imported card no longer matches), not just how it's being worked on. */

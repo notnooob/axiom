@@ -391,6 +391,17 @@ export function DataStatsApp({
 
   const fs = Math.max(9, size.w * 0.028);
 
+  // The page's picture, once the browser has decoded it.
+  const [picture, setPicture] = useState<HTMLImageElement | null>(null);
+  const pictureSrc = page.image?.src;
+  useEffect(() => {
+    setPicture(null);
+    if (!pictureSrc) return;
+    const el = new Image();
+    el.onload = () => setPicture(el);
+    el.src = pictureSrc;
+  }, [pictureSrc]);
+
   useEffect(() => {
     const c = canvas.current;
     if (!c || !size.w || !size.h) return;
@@ -403,6 +414,19 @@ export function DataStatsApp({
     screen();
     g.fillStyle = palette.casScreen;
     g.fillRect(0, 0, size.w, size.h);
+    // The page's picture, behind everything; boxed while Select Image moves it.
+    if (page.image && picture) {
+      const { x, y, w: iw, aspect } = page.image;
+      const [px, py, pw] = [x * size.w, y * size.h, iw * size.w];
+      g.drawImage(picture, px, py, pw, pw * aspect);
+      if (page.imageSel) {
+        g.strokeStyle = "#1f4fd8";
+        g.setLineDash([4, 3]);
+        g.lineWidth = 1.5;
+        g.strokeRect(px, py, pw, pw * aspect);
+        g.setLineDash([]);
+      }
+    }
     g.font = `${fs}px "Source Sans 3 Variable", sans-serif`;
     marks.current = [];
     const stops: Stop[] = [];
@@ -925,7 +949,7 @@ export function DataStatsApp({
     drawTrace();
     drawTexts();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- onSay only reports; it needn't redraw
-  }, [size, w, page, plot, counts, cats, badSummary, both, values, xs, ys, pts, one, reg, extra, against, resid, residualPlot, vertical, bands, edges, curves, expanded, nums, raw.split, summary, fs]);
+  }, [size, w, page, plot, counts, cats, badSummary, both, values, xs, ys, pts, one, reg, extra, against, resid, residualPlot, vertical, bands, edges, curves, expanded, nums, raw.split, summary, fs, picture]);
 
   // A trace that's ended starts its readout afresh next time.
   useEffect(() => {

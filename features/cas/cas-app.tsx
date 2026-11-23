@@ -127,6 +127,7 @@ import { clearPrefs, clearTestPrefs, load, pref, save, setPref, type Saved } fro
 import { blockedCommands, parsePtt, PTT, PTT_OPTIONS, pttLines, setPtt, type PressToTest } from "./state/ptt";
 import { setBlocked } from "./engine/restrict";
 import { PttPill } from "./screen/ptt-pill";
+import { placeImage, shrinkImage } from "./data/image";
 import { docDefaults, loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Setup } from "./state/setup";
 import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
@@ -306,6 +307,8 @@ export function CasApp() {
   const [confirm, setConfirm] = useState<{ title: string; lines: string[]; ok: () => void; buttons?: Choice[] } | null>(null);
   const [dragging, setDragging] = useState(false);
   const uploadInput = useRef<HTMLInputElement>(null);
+  /** doc ▸ Insert ▸ Image's file picker (data/image.ts). */
+  const imageInput = useRef<HTMLInputElement>(null);
   /** The next change to doc is an opening, not an edit: don't write it back. */
   const skipSave = useRef(false);
   /** New Document asked which app to start with: ADD_PAGE's answer makes the document. */
@@ -2470,6 +2473,10 @@ export function CasApp() {
           .then((t) => t.trim() && pageKey({ k: "paste", text: pasted(t) }))
           .catch(() => setError("Error: The browser didn't allow reading the clipboard. Use Ctrl+V."));
       else if (action.id === "editDelete") pageKey({ k: "delete" });
+      else if (action.id === "insertImage") {
+        if (page?.kind === "datastats") imageInput.current?.click();
+        else setError("Error: An image goes on a Data & Statistics page");
+      }
       else if (action.id === "editCopyLatex" || action.id === "editCopyMathml") copyAs(action.id === "editCopyLatex" ? "latex" : "mathml");
       else if (action.id === "pageSorter") setSorter(doc.active);
       else if (action.id === "problemRename")
@@ -2680,6 +2687,7 @@ export function CasApp() {
         else if (id === "dsResidPlot") setData((p) => ({ ...p, residualPlot: !p.residualPlot }));
         else if (id === "dsLabels") setData((p) => ({ ...p, labels: !p.labels }));
         else if (id === "dsHideText") setData((p) => ({ ...p, hideText: !p.hideText || undefined }));
+        else if (id === "dsSelectImage") setData((p) => (p.image ? { ...p, imageSel: true, trace: undefined, textSel: undefined } : p));
         else if (id === "dsTrace") {
           setData((p) => ({ ...p, trace: p.trace ? undefined : { target: 0, i: 0 }, selected: undefined }));
           if (!page.trace) say("Graph Trace: ◄ ► move along, ▲ ▼ change what's traced, Esc ends");
@@ -4750,6 +4758,24 @@ export function CasApp() {
         />
         <Legal />
       </div>
+      <input
+        ref={imageInput}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          e.target.value = "";
+          if (!f) return;
+          shrinkImage(f)
+            .then(({ src, aspect }) => {
+              // The screen is 4:3; the page's height is about three quarters of its width.
+              setData((p) => ({ ...p, image: { src, ...placeImage(aspect, 0.7) }, imageSel: true }));
+              say("Image inserted and selected: the arrows move it, plus and minus size it, Esc lets it go.");
+            })
+            .catch((err: Error) => setError(`Error: Couldn't insert the image: ${err.message}`));
+        }}
+      />
       <input
         ref={uploadInput}
         type="file"
