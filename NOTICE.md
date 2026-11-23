@@ -56,6 +56,10 @@ SOFTWARE.
 
 `features/cas/tns/container.ts`, `method13.ts` and `tixc.ts` are ported from TnsTools, https://github.com/MaksimirKurtov/TnsTools, under the MIT licence (Copyright (c) its contributors; see that repository's LICENSE). The port fixes one encoder case (text starting with a space after a repeated tag), and reads and writes documents with more than 256 tag names (a closing tag spelt out in full).
 
+## libnspire
+
+`features/cas/link/wire.ts`, `transport.ts` and `navnet.ts` are ported to TypeScript from libnspire, https://github.com/Vogtinator/libnspire (Daniel Tang and its contributors), under the GNU General Public License, version 3 or later: the CX II's NNSE framing and handshake (`src/cx2.cpp`), NavNet packets (`src/packet.c`, `src/data.c`), and the file, folder and device-information services (`src/services/`). The port reads USB through WebUSB rather than libusb, and keeps one reader running so acknowledgements and the handshake are answered whoever is waiting.
+
 ## Pyodide
 
 Python runs on Pyodide, https://pyodide.org, under the Mozilla Public License 2.0 (with Python's own PSF licence for the standard library). It is copied unmodified from the `pyodide` npm package into `public/pyodide/` at build time.
