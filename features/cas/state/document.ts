@@ -330,6 +330,8 @@ export type GeometryPage = {
   view?: { x: number; y: number; w: number };
   /** Texts placed with Actions ▸ Text, at a point of the plane (cm). */
   texts?: GraphText[];
+  /** The imported card, written back unchanged on export while the page is unedited. */
+  xml?: string;
 };
 
 /** A page from an app that isn't built yet (Lua, Widgets…), kept so the document stays whole. */
@@ -402,6 +404,7 @@ export const problemOf = (p: Page | undefined): number => p?.problem ?? 1;
  */
 const VIEW_ONLY: Partial<Record<Page["kind"], ReadonlySet<string>>> = {
   graphs: new Set(["tool", "editing", "entryKind", "edit", "parDraft", "zoomBox", "selected", "mathDraw", "pathPlot"]),
+  geometry: new Set(["tool", "sel", "view"]),
 };
 
 /** Whether next changes what page p holds (so its imported card no longer matches), not just how it's being worked on. */

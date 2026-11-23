@@ -8,13 +8,14 @@
  *   TI.Notepad     Notes             rich text (r2dtotree) with maths boxes
  *   TI.PythonEditor / TI.PythonShell  the .py file is a separate container entry
  *   TI.DataGrapher Data & Statistics (an x/y scatter becomes a Graphs page)
- *   TI.GeoGrapher  Graphs & Geometry (its f1… come from the problem's variables)
+ *   TI.GeoGrapher  Graphs & Geometry (geographer.ts): a Graphs or a Geometry page
  *   TI.ScriptApp   Lua: not supported
  */
 import { parse } from "../math/ast";
 import { astToRow, chars, type Row } from "../math/tree";
 import { newId, newPage, type CasDocument, type HistoryEntry, type NotesRun, type Page } from "../state/document";
 import type { TnsContents } from "./decode";
+import { readGeoGrapher, type RawObj } from "./geographer";
 
 const parser = () => new DOMParser();
 
@@ -128,7 +129,7 @@ const APP_NAMES: Record<string, string> = {
 const utf8 = new TextDecoder();
 
 /** One card's page: an app built here, or an "unsupported" page that keeps its XML. */
-function card(c: Element, problem: number, files: Map<string, Uint8Array>, sym: Map<string, SymEntry>): Page {
+function card(c: Element, problem: number, files: Map<string, Uint8Array>, sym: Map<string, SymEntry>, lost: { n: number }): Page {
   const w = first(c, "wdgt");
   const type = w?.getAttribute("type") ?? "";
   if (!w) return { kind: "unsupported", id: newId(), problem, app: "Unknown" };
@@ -154,21 +155,69 @@ function card(c: Element, problem: number, files: Map<string, Uint8Array>, sym: 
       xml: cardXml(c),
     };
   }
-  if (type === "TI.GeoGrapher") {
-    // Graphs keeps its curves as the problem's f1, f2 … functions of x.
-    const page = newPage("graphs", problem);
-    if (page.kind === "graphs") {
-      for (const [name, e] of sym) {
-        const m = /^f(\d+)$/.exec(name);
-        if (m && e.t === "6" && e.p === "x") page.functions.push({ n: Number(m[1]), text: e.v, row: mathRow(e.v) });
+  if (type === "TI.GeoGrapher") return geoGrapher(c, w, problem, sym, lost);
+  return { kind: "unsupported", id: newId(), problem, app: APP_NAMES[type] ?? type.replace(/^TI\./, ""), xml: cardXml(c) };
+}
+
+/**
+ * Graphs & Geometry (geographer.ts reads the objects): a Graphs page when it
+ * has graphs or shows axes, else a Geometry page. Either keeps the card's XML,
+ * written back on export until the page is edited.
+ */
+function geoGrapher(c: Element, w: Element, problem: number, sym: Map<string, SymEntry>, lost: { n: number }): Page {
+  const objs = first(w, "objs");
+  const raw: RawObj[] = objs
+    ? Array.from(objs.children).map((o) => ({
+        type: o.localName,
+        fields: Object.fromEntries(Array.from(o.children).map((k) => [k.localName, k.textContent?.trim() ?? ""])),
+      }))
+    : [];
+  const g = readGeoGrapher(raw);
+  lost.n += g.lost;
+  const xml = cardXml(c);
+  if (g.app === "geometry")
+    return {
+      kind: "geometry",
+      id: newId(),
+      problem,
+      objects: g.objects,
+      // A plane Geometry page's axes are its analytic window.
+      ...(g.axes ? { analytic: true } : {}),
+      grid: g.grid,
+      view: g.view,
+      ...(g.texts.length ? { texts: g.texts } : {}),
+      ...(xml ? { xml } : {}),
+    };
+  const page = newPage("graphs", problem);
+  if (page.kind !== "graphs") throw new Error("unreachable");
+  // Newer files keep the curves as the problem's f1, f2 … functions of x too; older ones only in the card.
+  for (const [name, e] of sym) {
+    const m = /^f(\d+)$/.exec(name);
+    if (m && e.t === "6" && e.p === "x") page.functions.push({ n: Number(m[1]), text: e.v, row: mathRow(e.v) });
+  }
+  if (!page.functions.length) {
+    const used = new Set(g.functions.map((f) => f.n).filter((n): n is number => n !== undefined));
+    let next = 1;
+    for (const f of g.functions) {
+      let n = f.n;
+      if (n === undefined) {
+        while (used.has(next)) next++;
+        n = next;
+        used.add(n);
       }
-      page.functions.sort((a, b) => a.n - b.n);
-      page.editing = null;
-      page.xml = cardXml(c);
-      if (page.functions.length) return page;
+      page.functions.push({ n, text: f.text, row: mathRow(f.text), ...(f.hidden ? { hidden: true } : {}) });
     }
   }
-  return { kind: "unsupported", id: newId(), problem, app: APP_NAMES[type] ?? type.replace(/^TI\./, ""), xml: cardXml(c) };
+  page.functions.sort((a, b) => a.n - b.n);
+  page.editing = null;
+  page.window = g.window;
+  page.axes = g.axes;
+  page.grid = g.grid ? "dot" : "none";
+  if (g.objects.length) page.geo = { objects: g.objects };
+  if (g.texts.length) page.texts = g.texts;
+  if (!g.axes && !g.functions.length && !page.functions.length) page.view = "plane";
+  if (xml) page.xml = xml;
+  return page;
 }
 
 type SymEntry = { t: string; p?: string; v: string };
@@ -195,12 +244,14 @@ function statements(sym: Map<string, SymEntry>): { run: string[]; skipped: numbe
   return { run, skipped };
 }
 
-export type Imported = { doc: CasDocument; skipped: number };
+/** skipped: programs and functions that can't run here; lostObjects: Graphs & Geometry objects that couldn't be brought across. */
+export type Imported = { doc: CasDocument; skipped: number; lostObjects: number };
 
 export function importTns(contents: TnsContents, title: string): Imported {
   const pages: Page[] = [];
   const pendingSym: Record<string, string[]> = {};
   let skipped = 0;
+  const lost = { n: 0 };
   const problems = [...contents.xml.keys()]
     .map((k) => /^Problem(\d+)\.xml$/.exec(k))
     .filter((m): m is RegExpExecArray => m !== null)
@@ -221,10 +272,10 @@ export function importTns(contents: TnsContents, title: string): Imported {
     const root = xml.documentElement;
     for (const c of kids(root, "card")) {
       if (text(c, "isDummyCard") === "1") continue;
-      pages.push(card(c, n, contents.files, sym));
+      pages.push(card(c, n, contents.files, sym, lost));
     }
   }
   if (!pages.length) pages.push(newPage("calculator"));
-  return { doc: { title, pages, active: 0, ...(Object.keys(pendingSym).length ? { pendingSym } : {}) }, skipped };
+  return { doc: { title, pages, active: 0, ...(Object.keys(pendingSym).length ? { pendingSym } : {}) }, skipped, lostObjects: lost.n };
 }
 

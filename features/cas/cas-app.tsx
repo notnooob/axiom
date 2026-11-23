@@ -536,7 +536,7 @@ export function CasApp() {
         let next = fn(p as Extract<Page, { kind: K }>);
         // An imported page's original XML no longer matches once what it holds is edited
         // (not when only its tool, selection or entry line changes).
-        if ((next.kind === "graphs" || next.kind === "datastats" || next.kind === "notes") && next.xml && editsContent(p, next)) next = { ...next, xml: undefined };
+        if ((next.kind === "graphs" || next.kind === "datastats" || next.kind === "notes" || next.kind === "geometry") && next.xml && editsContent(p, next)) next = { ...next, xml: undefined };
         recordUndo(p, next);
         pages[d.active] = next;
         return { ...d, pages };
@@ -1568,6 +1568,8 @@ export function CasApp() {
         await openSaved(saved, path);
         await refreshFiles();
         if (imported.skipped) toast(`${imported.skipped} program${imported.skipped === 1 ? "" : "s"} or function${imported.skipped === 1 ? "" : "s"} in this document can't run here yet.`);
+        if (imported.lostObjects)
+          toast(`${imported.lostObjects} Graphs & Geometry object${imported.lostObjects === 1 ? " was" : "s were"} built in a way Axiom can't follow yet, so ${imported.lostObjects === 1 ? "it's" : "they're"} left out. Downloading the .tns keeps ${imported.lostObjects === 1 ? "it" : "them"} until the page is edited.`);
       } catch (err) {
         setError(`Error: Couldn't open ${name}: ${(err as Error).message}`);
       }

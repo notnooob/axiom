@@ -7,7 +7,7 @@
  *   Lists      → tabulator columns (name, cells as typed, values)
  *   Python     → TI.PythonEditor + the .py file; Shell → TI.PythonShell
  *   Notes → TI.Notepad (r2dtotree): the original card while unedited, else written afresh
- *   Unsupported and imported Graphs pages → their original card XML
+ *   Unsupported pages, and imported Graphs and Geometry pages while unedited → their original card XML
  *   Graphs made here → not written yet (their f1… go into the problem's variables)
  */
 import type { Settings } from "../engine/evaluate";
@@ -134,7 +134,7 @@ export function exportTns(doc: CasDocument, settings: Settings): ExportResult {
           `${CARD}<wdgt xmlns:pysh="urn:TI.PythonShell" type="TI.PythonShell" ver="1.0"><pysh:data><pysh:name>Python Shell</pysh:name>` +
             `</pysh:data><pysh:mFlags>0</pysh:mFlags><pysh:value>11</pysh:value></wdgt></card>`,
         );
-      else if ((p.kind === "notes" || p.kind === "unsupported" || p.kind === "graphs" || p.kind === "datastats") && p.xml) cards.push(p.xml);
+      else if ((p.kind === "notes" || p.kind === "unsupported" || p.kind === "graphs" || p.kind === "datastats" || p.kind === "geometry") && p.xml) cards.push(p.xml);
       else if (p.kind === "notes")
         cards.push(
           `${CARD}<wdgt xmlns:np="urn:TI.Notepad" type="TI.Notepad" ver="2.0"><np:mFlags>0</np:mFlags><np:value>3</np:value>` +

@@ -175,7 +175,8 @@ Each app has a pure key or click model plus a view, so the logic can be tested w
 - `container.ts` (ZIP with TI's header), `method13.ts` (TI's encryption) and `tixc.ts` (TI's XML compression) are ported from TnsTools (MIT).
 - `decode.ts` and `encode.ts` handle whole files.
 - `import.ts` turns a decoded file into a document and `export.ts` does the reverse; export is experimental.
-- **Not yet supported:** Graphs and Geometry pages aren't exported, and a Geometry page in a `.tns` imports as an `unsupported` page that keeps its XML.
+- `geographer.ts` reads TI's Graphs & Geometry card (TI.GeoGrapher) into a Graphs or a Geometry page; objects it can't follow are counted and the student is told. An imported page keeps its card XML (`xml`), written back on export until it's edited.
+- **Not yet supported:** Graphs and Geometry pages made in Axiom aren't exported: writing a new GeoGrapher card needs checking against TI's software first.
 
 ### The assistant: `ai/`
 
