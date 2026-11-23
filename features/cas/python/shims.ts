@@ -214,5 +214,51 @@ def paint_buffer():
 `,
   ti_hub: `raise ImportError("ti_hub needs a TI-Innovator Hub, which a browser can't reach")`,
   ti_rover: `raise ImportError("ti_rover needs a TI-Innovator Rover, which a browser can't reach")`,
-  ti_image: `raise ImportError("ti_image isn't available here yet")`,
+  // Images as rows of (r, g, b) pixels; show_image sends the whole picture as one drawing op.
+  ti_image: `
+import _axiom, base64 as _b64
+
+def _byte(v):
+    return max(0, min(255, int(v)))
+
+class _Image:
+    def __init__(self, w, h, color=(255, 255, 255), name=""):
+        w, h = int(w), int(h)
+        if w <= 0 or h <= 0:
+            raise ValueError("an image needs a width and a height of at least 1")
+        self.w, self.h, self.name = w, h, name
+        self._px = bytearray(bytes((_byte(color[0]), _byte(color[1]), _byte(color[2]))) * (w * h))
+
+    def _at(self, x, y):
+        x, y = int(x), int(y)
+        if not (0 <= x < self.w and 0 <= y < self.h):
+            raise IndexError("pixel (%d, %d) is outside the %d by %d image" % (x, y, self.w, self.h))
+        return 3 * (y * self.w + x)
+
+    def get_pixel(self, x, y):
+        i = self._at(x, y)
+        p = self._px
+        return (p[i], p[i + 1], p[i + 2])
+
+    def set_pixel(self, x, y, color):
+        i = self._at(x, y)
+        self._px[i:i + 3] = bytes((_byte(color[0]), _byte(color[1]), _byte(color[2])))
+
+    def show_image(self, x, y):
+        _axiom.draw("image", int(x), int(y), self.w, self.h, _b64.b64encode(bytes(self._px)).decode())
+
+    def __repr__(self):
+        return "<image %s %dx%d>" % (self.name or "(new)", self.w, self.h)
+
+def new_image(width, height, color=(255, 255, 255)):
+    return _Image(width, height, color)
+
+def copy_image(image):
+    im = _Image(image.w, image.h, name=image.name)
+    im._px[:] = image._px
+    return im
+
+def load_image(name):
+    raise OSError("load_image needs an image stored in the document, and Axiom's pages don't hold images yet: make one with new_image")
+`,
 };

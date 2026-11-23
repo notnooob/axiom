@@ -177,6 +177,23 @@ export function PythonCanvas({ ops }: { ops: DrawOp[] }) {
         case "point":
           c.fillRect(X(n(a[0])) - 1.5, Y(n(a[1])) - 1.5, 3, 3);
           break;
+        case "image": {
+          // ti_image's show_image: w×h pixels of r, g, b bytes, base64, its top left at (x, y) on the screen.
+          const [x, y, w, h] = a.slice(0, 4).map(n) as [number, number, number, number];
+          const rgb = Uint8Array.from(atob(String(a[4] ?? "")), (ch) => ch.charCodeAt(0));
+          if (!(w > 0 && h > 0) || rgb.length < w * h * 3) break;
+          const img = new ImageData(w, h);
+          for (let i = 0, j = 0; i < w * h; i++, j += 3) img.data.set([rgb[j]!, rgb[j + 1]!, rgb[j + 2]!, 255], i * 4);
+          const off = document.createElement("canvas");
+          off.width = w;
+          off.height = h;
+          off.getContext("2d")?.putImageData(img, 0, 0);
+          // Pixels stay square and sharp at the canvas's double scale.
+          c.imageSmoothingEnabled = false;
+          c.drawImage(off, x, y);
+          c.imageSmoothingEnabled = true;
+          break;
+        }
       }
     }
   }, [ops]);
