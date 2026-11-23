@@ -92,6 +92,7 @@ import * as files from "./files/store";
 import { addFiles } from "./files/upload";
 import { classify, decodeTns } from "./tns/decode";
 import { droppedMessage, exportTns } from "./tns/export";
+import { writeToDisk } from "./files/disk";
 import { isShareFragment, LONG_LINK, readShareFragment, shareFragment } from "./files/share";
 import { importTns } from "./tns/import";
 import { ListsApp } from "./lists/lists-app";
@@ -1601,6 +1602,61 @@ export function CasApp() {
     [openSaved],
   );
 
+  /**
+   * Save's second half for a document the installed app was opened with: the
+   * file on the computer too (files/disk.ts). A .tns is only written once the
+   * student has agreed, and never when pages would be lost from it.
+   */
+  const saveToComputer = useCallback(async (path: string, saved: Saved): Promise<void> => {
+    const rec = await files.getFile(path);
+    if (!rec?.handle || rec.disk === "no") return;
+    const name = files.nameOf(path);
+    let bytes: Uint8Array;
+    if (/\.py$/i.test(name)) {
+      const pys = saved.doc.pages.filter((p) => p.kind === "python");
+      const py = pys.find((p) => p.file === name) ?? pys[0];
+      if (!py) return;
+      bytes = new TextEncoder().encode(py.source);
+    } else {
+      const r = exportTns(saved.doc, saved.settings);
+      if (r.dropped) {
+        toast(`Saved in My Documents. ${name} on the computer wasn't changed: ${droppedMessage(r)?.replace(/; the rest is in the file\.$/, ".")}`);
+        return;
+      }
+      bytes = r.bytes;
+      if (rec.disk !== "yes") {
+        const choice = await new Promise<"yes" | "no" | null>((resolve) =>
+          setConfirm({
+            title: "Save to Computer",
+            lines: [
+              `Also save the changes to ${name} on this computer?`,
+              "",
+              "Axiom's .tns writing is new: keep a copy if the file matters, in case TI's software can't open the result.",
+            ],
+            ok: () => resolve(null),
+            buttons: [
+              { label: "Yes", run: () => resolve("yes") },
+              { label: "No", run: () => resolve("no") },
+            ],
+          }),
+        );
+        if (!choice) return;
+        await files.patch(path, { disk: choice });
+        if (choice === "no") return;
+      }
+    }
+    try {
+      if ((await writeToDisk(rec.handle, bytes)) === "denied") {
+        toast(`Saved in My Documents. ${name} on the computer wasn't changed: the browser wasn't allowed to write to it.`);
+        return;
+      }
+      await files.savedToDisk(path, bytes);
+      toast.success(`Saved ${name} on the computer`);
+    } catch (err) {
+      toast.error(`Saved in My Documents, but couldn't write ${name} on the computer: ${(err as Error).message || "the browser refused"}`);
+    }
+  }, []);
+
   /** Save: to the document's file, or Save As for one that hasn't been saved (or the Scratchpad). */
   const saveDocument = useCallback(
     /** Resolves false when the save failed; true once saved, or once Save As has been asked for (it runs `then` itself). */
@@ -1611,8 +1667,9 @@ export function CasApp() {
         setWizard(openWizard({ kind: "wizard", title: "Save As", arrows: false, fields: [{ label: "File Name:", value: c.isScratch || c.doc.title === "Untitled" ? "" : c.doc.title }], build: "saveas:{0}" }));
         return true;
       }
+      const saved = snapshot();
       try {
-        await files.saveDoc(c.openPath, snapshot());
+        await files.saveDoc(c.openPath, saved);
         setDirty(false);
         current.current.dirty = false;
         await writeNow();
@@ -1623,10 +1680,11 @@ export function CasApp() {
         return false;
       }
       toast.success(`Saved ${files.nameOf(c.openPath)}`);
+      await saveToComputer(c.openPath, saved);
       then?.();
       return true;
     },
-    [snapshot, writeNow, refreshFiles],
+    [snapshot, writeNow, refreshFiles, saveToComputer],
   );
 
   /**
@@ -2498,7 +2556,9 @@ export function CasApp() {
             const rec = await files.getFile(from);
             if (!rec) return;
             const name = await files.freeName(folder, files.nameOf(from));
-            await files.put({ ...rec, path: files.join(folder, name), modified: Date.now() });
+            // A copy is its own file: Save doesn't write it over the computer's file the original came from.
+            const { handle: _handle, disk: _disk, ...copy } = rec;
+            await files.put({ ...copy, path: files.join(folder, name), modified: Date.now() });
             await refreshFiles();
             toast.success(`Pasted ${name}`);
           })().catch((err: unknown) => toast.error(`Couldn't paste: ${(err as Error).message || "the browser refused"}`));
@@ -3785,7 +3845,7 @@ export function CasApp() {
   // file_handlers: double-click a .tns, or Open with). One document goes into
   // My Documents and opens; several, or a zip, are added as an upload is.
   const launch = useCallback(
-    async (list: File[]) => {
+    async (list: File[], handle?: FileSystemFileHandle) => {
       const f = list[0];
       if (list.length !== 1 || !f || !/\.(tns|py)$/i.test(f.name)) return upload(list);
       const bytes = new Uint8Array(await f.arrayBuffer());
@@ -3799,6 +3859,8 @@ export function CasApp() {
         await addFiles(files.ROOT, [new File([bytes], files.nameOf(path))]);
         await refreshFiles();
       }
+      // Save writes back to the computer's file too (saveToComputer).
+      if (handle) await files.patch(path, { handle });
       await openFile(path);
     },
     [upload, refreshFiles, openFile],
@@ -3810,10 +3872,36 @@ export function CasApp() {
     const queue = (window as { launchQueue?: { setConsumer(fn: (p: { files: readonly FileSystemHandle[] }) => void): void } }).launchQueue;
     queue?.setConsumer(({ files: handles }) => {
       if (!handles.length) return;
-      void Promise.all(handles.filter((h): h is FileSystemFileHandle => h.kind === "file").map((h) => h.getFile()))
-        .then((list) => launchRef.current(list))
+      const fileHandles = handles.filter((h): h is FileSystemFileHandle => h.kind === "file");
+      void Promise.all(fileHandles.map((h) => h.getFile()))
+        .then((list) => launchRef.current(list, fileHandles.length === 1 ? fileHandles[0] : undefined))
         .catch((err: Error) => toast.error(`Couldn't open that file: ${err.message}`));
     });
+  }, []);
+  // Files shared to the installed app from another (Android's share sheet): the service
+  // worker keeps them in a cache and opens ?shared=n (public/sw.js, receiveShare). They
+  // open as a double-clicked file does, once the Scratchpad has loaded.
+  useEffect(() => {
+    if (!new URLSearchParams(location.search).has("shared") || !("caches" in window)) return;
+    let live = true;
+    const go = async () => {
+      if (!live) return;
+      history.replaceState(null, "", location.pathname + location.hash);
+      const inbox = await caches.open("share-inbox");
+      const list: File[] = [];
+      for (const req of await inbox.keys()) {
+        const res = await inbox.match(req);
+        if (res) list.push(new File([await res.blob()], decodeURIComponent(res.headers.get("x-name") ?? "Shared.tns")));
+        await inbox.delete(req);
+      }
+      if (list.length) await launchRef.current(list);
+      else toast.error("The shared file didn't arrive. Try sharing it again.");
+    };
+    const run = () => void go().catch((err: Error) => toast.error(`Couldn't open the shared file: ${err.message}`));
+    startupReady.current.then(run, run);
+    return () => {
+      live = false;
+    };
   }, []);
 
   // The window-wide key listener below reads the newest state through a ref.

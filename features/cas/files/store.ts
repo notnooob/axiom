@@ -20,6 +20,15 @@ export type FileRecord = {
   bytes?: Uint8Array;
   /** The document was changed after upload, so `bytes` no longer matches it. */
   edited?: boolean;
+  /**
+   * The file on the computer this came from, when the installed app was
+   * opened with it (Chromium's file handlers): Save writes back to it too.
+   * Kept in IndexedDB, which stores handles; the browser asks again for
+   * permission to write after a restart.
+   */
+  handle?: FileSystemFileHandle;
+  /** Whether Save may write a .tns back to `handle`, once the student has said (Axiom's .tns writing is experimental). */
+  disk?: "yes" | "no";
 };
 
 const store = createStore("axiom-files", "files");
@@ -73,9 +82,22 @@ export async function saveDoc(path: string, doc: Saved): Promise<void> {
     type: "file",
     doc,
     ...(old?.bytes ? { bytes: old.bytes, edited: true } : {}),
+    ...(old?.handle ? { handle: old.handle, ...(old.disk ? { disk: old.disk } : {}) } : {}),
     size: old?.bytes?.length ?? sizeOf(doc),
     modified: Date.now(),
   });
+}
+
+/** Change some of a record's fields (the computer's file it came from), leaving its contents and date as they are. */
+export async function patch(path: string, fields: Partial<Pick<FileRecord, "handle" | "disk">>): Promise<void> {
+  const old = await getFile(path);
+  if (old) await set(path, { ...old, ...fields }, store);
+}
+
+/** After Save wrote `bytes` to the computer's file: they're the file again, as if just uploaded. */
+export async function savedToDisk(path: string, bytes: Uint8Array): Promise<void> {
+  const old = await getFile(path);
+  if (old) await set(path, { ...old, bytes, edited: false, size: bytes.length }, store);
 }
 
 /** Cache the imported form of an uploaded document without marking it edited. */

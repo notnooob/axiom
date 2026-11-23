@@ -72,9 +72,36 @@ function isolated(res) {
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
+/** Where shared files wait for the page (not "axiom-…", which activate clears). */
+const INBOX = "share-inbox";
+
+/**
+ * The manifest's share_target: on Android, a .tns shared from Drive or email
+ * arrives here as a POST. The files wait in a cache for the page, which
+ * opens them as the installed app opens a double-clicked file (?shared).
+ */
+async function receiveShare(req) {
+  const form = await req.formData();
+  const files = form.getAll("files").filter((f) => typeof f === "object" && f !== null && "name" in f);
+  const inbox = await caches.open(INBOX);
+  for (const k of await inbox.keys()) await inbox.delete(k);
+  let n = 0;
+  for (const f of files)
+    await inbox.put(
+      new URL(`share-inbox/${n++}`, scope()).href,
+      new Response(f, { headers: { "content-type": f.type || "application/octet-stream", "x-name": encodeURIComponent(f.name) } }),
+    );
+  return Response.redirect(new URL(`./?shared=${n}`, scope()).href, 303);
+}
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
-  if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) return;
+  const url = new URL(req.url);
+  if (req.method === "POST" && url.href === new URL("share", scope()).href) {
+    e.respondWith(receiveShare(req));
+    return;
+  }
+  if (req.method !== "GET" || url.origin !== self.location.origin) return;
   e.respondWith(
     (async () => {
       const cache = await caches.open(CACHE);
