@@ -168,6 +168,10 @@ export class NnseLink implements PacketLink {
     switch (m.service) {
       case Svc.AddrReq:
         if (m.data[0] !== 0) return;
+        // A new session (it's been plugged in again): count from 0, as the sessions seen
+        // working on a real CX II did, rather than from a number kept from an old one.
+        this.seqno = 0;
+        this.onSeq?.(0);
         // libnspire's note: the calculator sometimes ignores the first message after
         // reconnecting, so the answer goes twice; a second one it receives is ignored.
         for (let i = 0; i < 2; i++) void this.write(this.message(Svc.AddrReq, Uint8Array.of(0x80))).catch(() => undefined);
