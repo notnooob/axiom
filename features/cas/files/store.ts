@@ -28,8 +28,12 @@ export type FileRecord = {
    * permission to write after a restart.
    */
   handle?: FileSystemFileHandle;
-  /** Whether Save may write a .tns back to `handle`, once the student has said (Axiom's .tns writing is experimental). */
+  /** Whether Save may write a .tns back to `handle` (or the handheld), once the student has said (Axiom's .tns writing is experimental). */
   disk?: "yes" | "no";
+  /** The connected handheld's file this was opened from (link/): Save writes it there too. */
+  calc?: string;
+  /** Saved here while the handheld wasn't connected: the handheld's copy is older. */
+  calcPending?: boolean;
 };
 
 // Press-to-Test keeps its own files, so the student's own are put away for the test (state/ptt.ts).
@@ -90,14 +94,16 @@ export async function saveDoc(path: string, doc: Saved): Promise<void> {
     type: "file",
     doc,
     ...(old?.bytes ? { bytes: old.bytes, edited: true } : {}),
-    ...(old?.handle ? { handle: old.handle, ...(old.disk ? { disk: old.disk } : {}) } : {}),
+    ...(old?.handle ? { handle: old.handle } : {}),
+    ...(old?.calc ? { calc: old.calc, ...(old.calcPending ? { calcPending: true } : {}) } : {}),
+    ...(old?.disk ? { disk: old.disk } : {}),
     size: old?.bytes?.length ?? sizeOf(doc),
     modified: Date.now(),
   });
 }
 
 /** Change some of a record's fields (the computer's file it came from), leaving its contents and date as they are. */
-export async function patch(path: string, fields: Partial<Pick<FileRecord, "handle" | "disk">>): Promise<void> {
+export async function patch(path: string, fields: Partial<Pick<FileRecord, "handle" | "disk" | "calc" | "calcPending">>): Promise<void> {
   const old = await getFile(path);
   if (old) await set(path, { ...old, ...fields }, store);
 }

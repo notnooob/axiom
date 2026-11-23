@@ -128,6 +128,9 @@ import { blockedCommands, parsePtt, PTT, PTT_OPTIONS, pttLines, setPtt, type Pre
 import { setBlocked } from "./engine/restrict";
 import { PttPill } from "./screen/ptt-pill";
 import { placeImage, shrinkImage } from "./data/image";
+import { HandheldButton, HandheldPanel, type Outgoing } from "./link/handheld-panel";
+import { connected as connectedHandheld } from "./link/manager";
+import { baseName as handheldName } from "./link/handheld";
 import { docDefaults, loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Setup } from "./state/setup";
 import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
@@ -1673,6 +1676,54 @@ export function CasApp() {
     }
   }, []);
 
+  /**
+   * Save's part for a document opened from the connected handheld (link/):
+   * written back to it, under the same rules as a computer's file. Without
+   * the handheld it's kept here and marked, to go next time.
+   */
+  const saveToHandheld = useCallback(async (path: string, saved: Saved): Promise<void> => {
+    const rec = await files.getFile(path);
+    if (!rec?.calc || rec.disk === "no") return;
+    const name = handheldName(rec.calc);
+    const h = connectedHandheld();
+    if (!h) {
+      await files.patch(path, { calcPending: true });
+      toast(`Saved in My Documents. Connect the handheld and save again to update ${name} on it.`);
+      return;
+    }
+    const r = exportTns(saved.doc, saved.settings);
+    if (r.dropped) {
+      toast(`Saved in My Documents. ${name} on the handheld wasn't changed: ${droppedMessage(r)?.replace(/; the rest is in the file\.$/, ".")}`);
+      return;
+    }
+    if (rec.disk !== "yes") {
+      const choice = await new Promise<"yes" | "no" | null>((resolve) =>
+        setConfirm({
+          title: "Save to Handheld",
+          lines: [`Also save the changes to ${name} on the handheld?`, "", "Axiom's .tns writing is new: keep a copy if the document matters, in case the handheld can't open the result."],
+          ok: () => resolve(null),
+          buttons: [
+            { label: "Yes", run: () => resolve("yes") },
+            { label: "No", run: () => resolve("no") },
+          ],
+        }),
+      );
+      if (!choice) return;
+      await files.patch(path, { disk: choice });
+      if (choice === "no") return;
+    }
+    const id = toast.loading(`Saving ${name} on the handheld…`);
+    try {
+      await h.write(rec.calc, r.bytes, (done, total) => toast.loading(`Saving ${name} on the handheld… ${Math.round((done / total) * 100)}%`, { id }));
+      await files.savedToDisk(path, r.bytes);
+      await files.patch(path, { calcPending: false });
+      toast.success(`Saved ${name} on the handheld`, { id });
+    } catch (err) {
+      await files.patch(path, { calcPending: true });
+      toast.error(`Saved in My Documents, but not on the handheld: ${(err as Error).message}`, { id });
+    }
+  }, []);
+
   /** Save: to the document's file, or Save As for one that hasn't been saved (or the Scratchpad). */
   const saveDocument = useCallback(
     /** Resolves false when the save failed; true once saved, or once Save As has been asked for (it runs `then` itself). */
@@ -1697,10 +1748,11 @@ export function CasApp() {
       }
       toast.success(`Saved ${files.nameOf(c.openPath)}`);
       await saveToComputer(c.openPath, saved);
+      await saveToHandheld(c.openPath, saved);
       then?.();
       return true;
     },
-    [snapshot, writeNow, refreshFiles, saveToComputer],
+    [snapshot, writeNow, refreshFiles, saveToComputer, saveToHandheld],
   );
 
   /**
@@ -2610,7 +2662,7 @@ export function CasApp() {
             if (!rec) return;
             const name = await files.freeName(folder, files.nameOf(from));
             // A copy is its own file: Save doesn't write it over the computer's file the original came from.
-            const { handle: _handle, disk: _disk, ...copy } = rec;
+            const { handle: _handle, disk: _disk, calc: _calc, calcPending: _pending, ...copy } = rec;
             await files.put({ ...copy, path: files.join(folder, name), modified: Date.now() });
             await refreshFiles();
             toast.success(`Pasted ${name}`);
@@ -2628,7 +2680,37 @@ export function CasApp() {
             })
             .catch((err: unknown) => toast.error(`Couldn't export: ${(err as Error).message}`));
         }
-        else if (action.id === "browseSortName") setBrowse((b) => ({ ...b, sort: "name" }));
+        else if (action.id === "browseSendHandheld") {
+          if (!r || r.folder) return;
+          const h = connectedHandheld();
+          if (!h) {
+            toast("Connect the handheld first.");
+            setHandheldOpen(true);
+            return;
+          }
+          void (async () => {
+            const rec = await files.getFile(r.path);
+            if (!rec) return;
+            const lost = { dropped: 0, droppedKinds: [] as string[] };
+            const bytes = rec.bytes && !rec.edited ? rec.bytes : rec.doc ? tnsOf(rec.doc, lost) : null;
+            if (!bytes) return;
+            const name = /\.\w+$/.test(r.name) ? r.name : `${r.name}.${h.info.ext.file || "tns"}`;
+            const there = (await h.list("/")).some((e) => !e.dir && e.name.toLowerCase() === name.toLowerCase());
+            const go = async () => {
+              const id = toast.loading(`Sending ${name}…`);
+              try {
+                await h.write(`/${name}`, bytes, (done, total) => toast.loading(`Sending ${name}… ${Math.round((done / total) * 100)}%`, { id }));
+                toast.success(`Sent ${name} to the handheld`, { id });
+                const warn = droppedMessage(lost);
+                if (warn) toast(warn);
+              } catch (err) {
+                toast.error((err as Error).message, { id });
+              }
+            };
+            if (there) setConfirm({ title: "Send to Handheld", lines: [`${name} is already on the handheld. Replace it?`], ok: () => undefined, buttons: [{ label: "Replace", run: () => void go() }, { label: "Cancel", run: () => undefined }] });
+            else await go();
+          })().catch((err: unknown) => toast.error((err as Error).message));
+        } else if (action.id === "browseSortName") setBrowse((b) => ({ ...b, sort: "name" }));
         else if (action.id === "browseSortSize") setBrowse((b) => ({ ...b, sort: "size" }));
       } else if (action.id.startsWith("lists") && page?.kind === "lists") {
         const fn = {
@@ -4027,6 +4109,31 @@ export function CasApp() {
   const immersive = useRef(false);
   immersive.current = ai === "immersive";
   const [aiSettings, setAiSettings] = useState(false);
+  /** The connected handheld's documents (link/handheld-panel.tsx). */
+  const [handheldOpen, setHandheldOpen] = useState(false);
+  /** A document from the handheld: into My Documents/Handheld, linked so Save writes it back. */
+  const openFromHandheld = async (devPath: string, bytes: Uint8Array) => {
+    const path = files.join(files.join(files.ROOT, "Handheld"), devPath.replace(/^\/+/, ""));
+    if (!current.current.isScratch && current.current.openPath === path) {
+      toast("That document is already open.");
+      return;
+    }
+    const there = await files.getFile(path);
+    if (there?.calcPending) toast("Opened your copy: it has changes that aren't on the handheld yet. Save to send them.");
+    else await files.put({ path, type: "file", bytes, size: bytes.length, modified: Date.now(), calc: devPath, ...(there?.disk ? { disk: there.disk } : {}) });
+    await refreshFiles();
+    await openFile(path);
+  };
+  const copyFromHandheld = async (devPath: string, bytes: Uint8Array) => {
+    const name = await files.freeName(files.ROOT, handheldName(devPath));
+    await addFiles(files.ROOT, [new File([bytes as BlobPart], name)]);
+    await refreshFiles();
+  };
+  const currentOutgoing = (): Outgoing | null => {
+    if (view !== "doc") return null;
+    const r = exportTns(doc, settings);
+    return { name: isScratch ? "Scratchpad" : doc.title, bytes: r.bytes, warn: droppedMessage(r) };
+  };
   const dialogNow = (): AgentDialog | null => {
     if (confirm) return { kind: "message", title: confirm.title, lines: confirm.lines, ...(confirm.buttons ? { buttons: confirm.buttons.map((b) => b.label) } : {}) };
     if (error) return { kind: "error", lines: [error] };
@@ -4340,6 +4447,7 @@ export function CasApp() {
         <span className="text-[17px] font-semibold tracking-[-0.019em] text-ink">Axiom</span>
         <div className="flex items-center gap-2">
           {PTT && <PttPill test={PTT} />}
+          {!PTT && <HandheldButton onClick={() => setHandheldOpen(true)} />}
           {!noAssistant && <button
             type="button"
             onClick={() => setAi((a) => (a === "panel" ? "off" : "panel"))}
@@ -4796,6 +4904,7 @@ export function CasApp() {
         </div>
       )}
     </div>
+    {!PTT && <HandheldPanel open={handheldOpen} onOpenChange={setHandheldOpen} onOpenDoc={openFromHandheld} onCopyDoc={copyFromHandheld} current={currentOutgoing} />}
     <AiPanel open={aiOpen && !noAssistant} onClose={() => setAi("off")} onImmersive={() => setAi("immersive")} onSettings={() => setAiSettings(true)} assistant={assistant} doc={docActions} info={docInfo} />
     <AnimatePresence>
       {ai === "immersive" && !noAssistant && (

@@ -93,4 +93,6 @@ export const BROWSE_MENU: Menu = [
   app("Download", "browseDownload"),
   app("Export All (zip)", "browseExportAll"),
   rule(sub("Sort", [app("By Name", "browseSortName"), app("By Size", "browseSortSize")])),
+  // A TI-Nspire on the USB cable (link/), after the handheld's own items.
+  rule(app("Send to Handheld", "browseSendHandheld")),
 ];
