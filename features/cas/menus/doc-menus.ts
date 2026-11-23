@@ -27,6 +27,7 @@ export const DOC_MENU: Menu = [
     rule(app("Save Document", "fileSave")),
     app("Save As...", "fileSaveAs"),
     rule(app("Download .tns (experimental)", "fileDownload")),
+    app("Copy Share Link", "fileShareLink"),
   ]),
   sub("Edit", [
     { ...app("Undo", "editUndo"), hint: "Ctrl+Z" },

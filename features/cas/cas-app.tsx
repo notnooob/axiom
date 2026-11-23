@@ -92,6 +92,7 @@ import * as files from "./files/store";
 import { addFiles } from "./files/upload";
 import { classify, decodeTns } from "./tns/decode";
 import { droppedMessage, exportTns } from "./tns/export";
+import { isShareFragment, LONG_LINK, readShareFragment, shareFragment } from "./files/share";
 import { importTns } from "./tns/import";
 import { ListsApp } from "./lists/lists-app";
 import { listsMenu } from "./lists/lists-menu";
@@ -1688,6 +1689,41 @@ export function CasApp() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // A shared link (#doc=…, files/share.ts) opens its document as a new, unsaved one:
+  // on start-up once the Scratchpad has loaded, and when a link is opened in a tab that's already here.
+  const openShared = useCallback(
+    async (hash: string) => {
+      const saved = readShareFragment(hash);
+      // Off the address bar either way, so a reload doesn't open it again over the student's changes.
+      history.replaceState(null, "", location.pathname + location.search);
+      if (!saved) {
+        toast.error("That link's document couldn't be read. It may have been cut short when it was sent.");
+        return;
+      }
+      if (!(await leaveOk())) return;
+      await openSaved(saved, null, false, true);
+      toast(`Opened "${saved.doc.title}" from a link. Save it to keep it in My Documents.`);
+    },
+    [leaveOk, openSaved],
+  );
+  const openSharedRef = useRef(openShared);
+  openSharedRef.current = openShared;
+  useEffect(() => {
+    let live = true;
+    const go = () => {
+      if (live && isShareFragment(location.hash)) void openSharedRef.current(location.hash);
+    };
+    startupReady.current.then(go, go);
+    const onHash = () => {
+      if (isShareFragment(location.hash)) void openSharedRef.current(location.hash);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => {
+      live = false;
+      window.removeEventListener("hashchange", onHash);
+    };
+  }, []);
+
   /** Where leaving a document goes: the screen it was opened from (Home or My Documents). */
   const backTo = useRef<"home" | "browse">("home");
   useEffect(() => {
@@ -2408,6 +2444,13 @@ export function CasApp() {
         download(new Blob([r.bytes as BlobPart]), `${doc.title}.tns`);
         const warn = droppedMessage(r);
         if (warn) toast(warn);
+      } else if (action.id === "fileShareLink") {
+        const link = `${location.origin}${location.pathname}${shareFragment(snapshot())}`;
+        const long = link.length > LONG_LINK ? ` It's long (${Math.round(link.length / 1000)} KB), so some apps may cut it short; download the .tns instead if it won't open.` : "";
+        void navigator.clipboard
+          ?.writeText(link)
+          .then(() => toast.success(`Link copied. Anyone who opens it gets a copy of this document; nothing is uploaded.${long}`))
+          .catch(() => setError("Error: The browser didn't allow writing to the clipboard."));
       } else if (action.id === "handheldSetup")
         setWizard(
           openWizard({
