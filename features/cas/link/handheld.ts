@@ -10,7 +10,7 @@
  * Nothing goes anywhere but the cable.
  */
 import { NavNetError, Session, type DeviceInfo, type Entry } from "./navnet";
-import { LinkError, NnseLink, RawLink, type PacketLink, type Pipe } from "./transport";
+import { LinkError, NnseLink, RawLink, type NnseOptions, type PacketLink, type Pipe } from "./transport";
 
 /** TI's vendor id; the original CX and the CX II's product ids. */
 const TI = 0x0451;
@@ -107,10 +107,11 @@ export class Handheld {
   }
 
   /** Open a handheld the browser has given us. */
-  static async open(dev: UsbDevice): Promise<Handheld> {
+  /** opts: where the CX II's message numbers start, and where to say they've moved on (transport.ts). */
+  static async open(dev: UsbDevice, opts: NnseOptions = {}): Promise<Handheld> {
     const pipe = await openPipe(dev);
     const cx2 = dev.productId === PID_CX2;
-    const link = cx2 ? new NnseLink(pipe) : new RawLink(pipe);
+    const link = cx2 ? new NnseLink(pipe, opts) : new RawLink(pipe);
     try {
       return await Handheld.over(link, cx2, dev);
     } catch (e) {

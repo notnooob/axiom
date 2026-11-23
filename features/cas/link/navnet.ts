@@ -248,7 +248,8 @@ export class Session {
       const ext = { file: e.str(), os: e.str() };
       return {
         name,
-        os: `${maj}.${min}.${build}`,
+        // The minor byte holds two digits: 5, 30, 564 is OS 5.3.0.564.
+        os: `${maj}.${Math.floor(min / 10)}.${min % 10}.${build}`,
         storage,
         ram,
         battery: batt === 0x00 ? "powered" : batt === 0xf1 ? "low" : batt === 0x7f ? "ok" : "unknown",

@@ -7,8 +7,14 @@
  * is open and sorts what arrives: the CX II's handshake (an address request
  * and a time request, answered here), acknowledgements, and stream messages,
  * which carry NavNet packets and wait in an inbox until they're asked for.
+ *
+ * Found on a real CX II (OS 5.3), beyond libnspire: the calculator offers its
+ * handshake about every 15 seconds while it has no host, only once per time
+ * it's plugged in, and afterwards takes only the message numbered one after
+ * the last it took, ignoring any other without a word. A reloaded page starts
+ * counting again, so it finds the number again (resync) and remembers it.
  */
-import { Addr, decodeNnse, encodeNnse, NNSE_HEADER, NNSE_MAX, splitNnse, Svc } from "./wire";
+import { Addr, decodeNnse, encodeNavNet, encodeNnse, NAVNET_HEADER, NNSE_MAX, nnseSum, splitNnse, Svc } from "./wire";
 
 /** One USB bulk endpoint pair. read resolves with one transfer; both reject once the device has gone. */
 export interface Pipe {
@@ -26,6 +32,23 @@ export interface PacketLink {
 
 export class LinkError extends Error {}
 
+/** How long to wait for the CX II's handshake: it comes round about every 15 seconds. */
+export const HANDSHAKE_MS = 35_000;
+
+/**
+ * Where an NNSE link starts numbering its messages, and where to say when the number
+ * moves on, so the app can keep it between visits.
+ */
+export type NnseOptions = { clock?: () => number; seq?: number; onSeq?: (next: number) => void };
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** NavNet's opening packet (the address exchange): harmless to send again, so resync probes with it. */
+const PROBE = encodeNavNet({ srcAddr: 0x6400, dstAddr: 0x6401, srcSid: 0x4003, dstSid: 0x4003, ack: 0, seq: 0, data: Uint8Array.of(0x64, 0x01, 0xff, 0x00) });
+/** Resync sends this many numbers at a time, and tries this many runs. */
+const WINDOW = 256;
+const WINDOWS = 16;
+
 /** Values waiting to be taken, in order, with a time limit on each wait. */
 export class Inbox<T> {
   private items: T[] = [];
@@ -35,6 +58,10 @@ export class Inbox<T> {
     const w = this.waiting.shift();
     if (w) w.resolve(v);
     else this.items.push(v);
+  }
+  /** Drop what's waiting to be taken. */
+  clear() {
+    this.items = [];
   }
   fail(e: Error) {
     this.failed = e;
@@ -66,7 +93,7 @@ export class Inbox<T> {
 /** The CX II: NavNet packets in NNSE stream messages, each acknowledged. */
 export class NnseLink implements PacketLink {
   broken: Error | null = null;
-  private seqno = 0;
+  private seqno: number;
   private buf: Uint8Array = new Uint8Array(0);
   private streams = new Inbox<Uint8Array>();
   private acks = new Map<number, () => void>();
@@ -74,11 +101,19 @@ export class NnseLink implements PacketLink {
   private onReady: (() => void)[] = [];
   /** Writes one at a time, in order. */
   private writing: Promise<unknown> = Promise.resolve();
+  private clock: () => number;
+  private onSeq?: (next: number) => void;
+  /** Resync hears every acknowledgement while it runs. */
+  private ackSeen: ((seq: number) => void) | null = null;
+  private starting: Promise<void> | null = null;
 
   constructor(
     private pipe: Pipe,
-    private clock: () => number = () => Date.now(),
+    opts: NnseOptions = {},
   ) {
+    this.clock = opts.clock ?? (() => Date.now());
+    this.seqno = (opts.seq ?? 0) & 0xffff;
+    this.onSeq = opts.onSeq;
     void this.pump();
   }
 
@@ -112,14 +147,19 @@ export class NnseLink implements PacketLink {
     return next;
   }
 
+  /** A message with the next number: every message counts, whatever its service. */
   private message(service: number, data: Uint8Array, reqAck = 0) {
-    return encodeNnse({ service, src: Addr.Me, dest: Addr.Calc, reqAck, seqno: this.seqno++, data });
+    const seqno = this.seqno;
+    this.seqno = (seqno + 1) & 0xffff;
+    this.onSeq?.(this.seqno);
+    return encodeNnse({ service, src: Addr.Me, dest: Addr.Calc, reqAck, seqno, data });
   }
 
   private handle(raw: Uint8Array) {
     const m = decodeNnse(raw);
     if (!m || (m.dest !== Addr.Me && m.dest !== Addr.All)) return;
     if (m.service & Svc.Ack) {
+      this.ackSeen?.(m.seqno);
       this.acks.get(m.seqno)?.();
       return;
     }
@@ -139,8 +179,7 @@ export class NnseLink implements PacketLink {
         new DataView(out.buffer).setUint32(1, Math.floor(this.clock() / 1000));
         void this.write(this.message(Svc.Time, out)).catch(() => undefined);
         // The time request is the handshake's last step.
-        this.ready = true;
-        for (const f of this.onReady.splice(0)) f();
+        this.becomeReady();
         return;
       }
       case Svc.Unknown:
@@ -152,26 +191,100 @@ export class NnseLink implements PacketLink {
     }
   }
 
-  /** The handshake done: the calculator starts it once the link opens. */
-  waitReady(timeoutMs: number): Promise<void> {
+  private becomeReady() {
+    this.ready = true;
+    for (const f of this.onReady.splice(0)) f();
+  }
+
+  /** Whether the handshake is done within the time (false when it isn't: the link is still usable). */
+  private handshakeWithin(ms: number): Promise<boolean> {
+    if (this.ready) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        this.onReady = this.onReady.filter((f) => f !== done);
+        resolve(false);
+      }, ms);
+      this.onReady.push(done);
+    });
+  }
+
+  /**
+   * Ready to carry packets. A calculator just plugged in offers its handshake soon (and
+   * again about every 15 seconds). One that already had a session (the page reloaded, or
+   * the tab closed) offers none until it's unplugged: it carries on that session, and
+   * resync finds where it had got to.
+   */
+  private whenReady(): Promise<void> {
     if (this.ready) return Promise.resolve();
     if (this.broken) return Promise.reject(this.broken);
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new LinkError("The handheld didn't start talking. Make sure it's on and unlocked, then plug it in again.")), timeoutMs);
-      this.onReady.push(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-    });
+    return (this.starting ??= (async () => {
+      if (await this.handshakeWithin(2500)) return;
+      if (await this.resync()) return;
+      if (await this.handshakeWithin(HANDSHAKE_MS)) return;
+      if (this.broken) throw this.broken;
+      throw new LinkError("The handheld didn't answer. Unplug it and plug it in again with its screen on, then connect.");
+    })().finally(() => (this.starting = null)));
+  }
+
+  /**
+   * The calculator takes only the message numbered one after the last it took. So send a
+   * run of numbers, each with the harmless opening packet: it takes the one it was waiting
+   * for and every one after, and its acknowledgements say which. The remembered number
+   * goes first, then runs from 0 up.
+   */
+  private async resync(): Promise<boolean> {
+    const seen: number[] = [];
+    this.ackSeen = (seq) => seen.push(seq);
+    try {
+      const first = (this.seqno - 32) & 0xffff;
+      const starts = [first];
+      for (let from = 0; starts.length < WINDOWS; from += WINDOW) if (Math.abs(from - first) >= WINDOW) starts.push(from);
+      for (const from of starts) {
+        if (this.ready || this.broken) return this.ready;
+        for (let i = 0; i < WINDOW; i++) await this.write(encodeNnse({ service: Svc.Stream, src: Addr.Me, dest: Addr.Calc, reqAck: 1, seqno: (from + i) & 0xffff, data: PROBE }));
+        // It works through the run slowly (a real CX II took seconds for a couple of hundred),
+        // and the next number is only known once it's finished: wait until the acknowledgements stop.
+        const until = Date.now() + 15_000;
+        let count = -1;
+        await sleep(400);
+        while (seen.length !== count && Date.now() < until) {
+          count = seen.length;
+          await sleep(500);
+        }
+        if (seen.length) {
+          this.seqno = (seen[seen.length - 1]! + 1) & 0xffff;
+          this.onSeq?.(this.seqno);
+          // Anything said back to the probes isn't for the session about to start.
+          this.streams.clear();
+          this.becomeReady();
+          return true;
+        }
+      }
+      return false;
+    } finally {
+      this.ackSeen = null;
+    }
   }
 
   async send(packet: Uint8Array) {
     if (this.broken) throw this.broken;
-    await this.waitReady(20_000);
-    // Acknowledged within a few seconds; one more try (flagged as a retry) before giving up.
+    await this.whenReady();
+    // Acknowledged within a few seconds. One more try, with the same number (it only takes
+    // the next one) and flagged as a retry, before giving up.
+    const msg = this.message(Svc.Stream, packet, 0x01);
+    const seq = (msg[8]! << 8) | msg[9]!;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const msg = this.message(Svc.Stream, packet, attempt ? 0x09 : 0x01);
-      const seq = (msg[8]! << 8) | msg[9]!;
+      if (attempt) {
+        msg[5] = 0x09;
+        msg[10] = msg[11] = 0;
+        const sum = nnseSum(msg) ^ 0xffff;
+        msg[10] = sum >> 8;
+        msg[11] = sum & 0xff;
+      }
       const acked = new Promise<boolean>((resolve) => {
         const timer = setTimeout(() => resolve(false), 5000);
         this.acks.set(seq, () => {
@@ -200,7 +313,7 @@ export class RawLink implements PacketLink {
   constructor(private pipe: Pipe) {
     void (async () => {
       try {
-        for (;;) this.inbox.put(await this.pipe.read(NNSE_HEADER + 4 + 254));
+        for (;;) this.inbox.put(await this.pipe.read(NAVNET_HEADER + 254));
       } catch (e) {
         this.broken = e instanceof Error ? e : new Error(String(e));
         this.inbox.fail(this.broken);

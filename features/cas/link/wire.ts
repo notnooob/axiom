@@ -14,8 +14,9 @@
 
 // ---------------------------------------------------------------- NNSE (CX II)
 
-export const NNSE_HEADER = 16;
-/** The largest NNSE message: its header and 1472 bytes. */
+/** misc, service, src, dest, unknown, reqAck (a byte each), then length, seqno and checksum (two each). */
+export const NNSE_HEADER = 12;
+/** The largest NNSE message: its header and 1472 bytes (libnspire reads up to this). */
 export const NNSE_MAX = NNSE_HEADER + 1472;
 
 /** NNSE addresses: everyone, this computer, the calculator. */

@@ -19,7 +19,7 @@ describe("wire formats", () => {
     const m = encodeNnse({ service: 4, src: 0xfe, dest: 1, reqAck: 1, seqno: 7, data: Uint8Array.of(1, 2, 3) });
     expect(nnseSum(m)).toBe(0xffff);
     expect(decodeNnse(m)).toMatchObject({ service: 4, seqno: 7, data: Uint8Array.of(1, 2, 3) });
-    m[17] ^= 1;
+    m[13] ^= 1;
     expect(decodeNnse(m)).toBeNull();
   });
 
@@ -55,7 +55,7 @@ describe("a handheld on the link", () => {
 
   it("says what it is", async () => {
     const { h } = await connect();
-    expect(h.info).toMatchObject({ name: "TI-Nspire CX II CAS", os: "6.2.300", storage: { free: 50_000_000, total: 100_000_000 }, battery: "ok", ext: { file: "tns" }, lcd: { width: 320, height: 240 } });
+    expect(h.info).toMatchObject({ name: "TI-Nspire CX II CAS", os: "6.2.0.300", storage: { free: 50_000_000, total: 100_000_000 }, battery: "ok", ext: { file: "tns" }, lcd: { width: 320, height: 240 } });
   });
 
   it("lists, sends, reads, renames and deletes documents", async () => {
@@ -87,6 +87,21 @@ describe("a handheld on the link", () => {
     expect(calc.dirs.has("/Maths")).toBe(false);
     await expect(h.list("/Maths")).rejects.toThrow(/no folder/);
   });
+
+  it("picks up a session an earlier page left open, finding the message number it waits for", async () => {
+    // As a real CX II does after a reload: no handshake, and only message 1234 taken next.
+    const calc = new FakeCalc({ resume: 1234 });
+    const saved: number[] = [];
+    const h = await Handheld.over(new NnseLink(calc.pipe, { onSeq: (n) => saved.push(n) }), true);
+    expect(h.info.name).toBe("TI-Nspire CX II CAS");
+    expect((await h.list("/")).map((e) => e.name)).toEqual(["Examples"]);
+    // The number it got to is kept, so the next page starts there and needs one short run.
+    const next = saved.at(-1)!;
+    expect(next).toBe(calc.expected);
+    const later = new FakeCalc({ resume: next });
+    const again = await Handheld.over(new NnseLink(later.pipe, { seq: next }), true);
+    expect((await again.list("/Examples")).map((e) => e.name)).toEqual(["Welcome.tns"]);
+  }, 30_000);
 
   it("sends again when an acknowledgement goes missing", async () => {
     const { calc, h } = await connect();

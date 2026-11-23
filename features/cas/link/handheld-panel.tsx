@@ -164,7 +164,7 @@ export function HandheldPanel({
             {link.status !== "unsupported" && (
               <Button onClick={() => void pickHandheld()} disabled={link.status === "connecting"}>
                 <Usb aria-hidden />
-                {link.status === "connecting" ? "Connecting…" : "Connect handheld"}
+                {link.status === "connecting" ? "Connecting… (up to half a minute)" : "Connect handheld"}
               </Button>
             )}
             <p className="text-xs text-muted-foreground">

@@ -32,6 +32,26 @@ export function subscribe(f: () => void) {
   return () => listeners.delete(f);
 }
 
+/**
+ * The CX II's next message number, kept between visits: after a reload the calculator is
+ * still in the last session and takes only the number after its last (transport.ts).
+ */
+const SEQ_KEY = "axiom.handheld.seq";
+const savedSeq = () => {
+  try {
+    return Number(window.localStorage.getItem(SEQ_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+};
+const saveSeq = (n: number) => {
+  try {
+    window.localStorage.setItem(SEQ_KEY, String(n));
+  } catch {
+    // Without storage, resync finds it each time.
+  }
+};
+
 /** The connected handheld, or null. */
 export const connected = (): Handheld | null => (state.status === "connected" && !state.handheld.gone ? state.handheld : null);
 
@@ -40,7 +60,7 @@ async function openDevice(dev: UsbDevice) {
   set({ status: "connecting" });
   opening = (async () => {
     try {
-      set({ status: "connected", handheld: await Handheld.open(dev) });
+      set({ status: "connected", handheld: await Handheld.open(dev, { seq: savedSeq(), onSeq: saveSeq }) });
     } catch (e) {
       set({ status: "error", error: (e as Error).message || "The handheld couldn't be opened." });
     } finally {

@@ -186,7 +186,7 @@ Each app has a pure key or click model plus a view, so the logic can be tested w
 
 A TI-Nspire on a USB cable, through WebUSB (Chromium only), ported from libnspire (see NOTICE.md):
 - `wire.ts`: the bytes. The CX II's NNSE messages wrap NavNet packets; the original CX sends NavNet bare. Pure and tested.
-- `transport.ts`: one read loop per link (WebUSB reads can't be cancelled) that answers the CX II's handshake and acks and queues the packets.
+- `transport.ts`: one read loop per link (WebUSB reads can't be cancelled) that answers the CX II's handshake and acks and queues the packets. Checked on a real CX II: it offers its handshake only once per plug-in (about every 15 s until a host answers), then takes only the message numbered one after the last it took and silently ignores any other. So a reloaded page resyncs (a run of harmless probes; its acks give the number), and `manager.ts` keeps the number in `localStorage`.
 - `navnet.ts`: a session and its services: list, read, write, move, delete, folders, device info. One request at a time.
 - `handheld.ts` opens the device; `manager.ts` keeps the one connection (it reopens a handheld picked before when it's plugged in); `handheld-panel.tsx` is the Handheld dialog.
 - A document opened from the handheld lives in `My Documents/Handheld/…` with its record's `calc` path, and Save writes it back (`saveToHandheld` in `cas-app.tsx`).

@@ -21,8 +21,10 @@ export class FakeCalc {
   private seq = 0;
   /** What the conversation with the current service is doing. */
   private conv: { kind: "write"; path: string; size: number; got: number[] } | { kind: "read"; data: Uint8Array } | { kind: "list"; items: [string, number, boolean][] } | null = null;
-  /** Drop the host's next stream ack, to see it try again. */
+  /** Lose the host's next stream messages, to see it try again. */
   dropAck = 0;
+  /** The number of the host message it will take next (null until the first): it ignores any other, as the real one does. */
+  expected: number | null = null;
   sawRetry = false;
 
   pipe: Pipe = {
@@ -30,7 +32,12 @@ export class FakeCalc {
     write: async (b) => this.receive(b),
   };
 
-  constructor() {
+  /** resume: a calculator still in an earlier host's session, waiting for that message number; it offers no handshake. */
+  constructor(opts: { resume?: number } = {}) {
+    if (opts.resume !== undefined) {
+      this.expected = opts.resume;
+      return;
+    }
     // The calculator opens with its handshake: an address request, then the time.
     this.sendNnse(Svc.AddrReq, Uint8Array.from([0, ...new Array(64).fill(0x41)]));
     this.sendNnse(Svc.Time, Uint8Array.of(0));
@@ -58,12 +65,16 @@ export class FakeCalc {
     for (const raw of splitNnse(b).messages) {
       const m = decodeNnse(raw);
       if (!m) throw new Error("The host sent a damaged NNSE message");
-      if (m.service & Svc.Ack || m.service !== Svc.Stream) continue;
+      if (m.service & Svc.Ack) continue;
       if (m.reqAck === 0x09) this.sawRetry = true;
-      if (this.dropAck) {
+      if (m.service === Svc.Stream && this.dropAck) {
         this.dropAck--;
         continue;
       }
+      // Only the next number counts; anything else is ignored without a word.
+      if (this.expected !== null && m.seqno !== this.expected) continue;
+      this.expected = (m.seqno + 1) & 0xffff;
+      if (m.service !== Svc.Stream) continue;
       this.push(encodeNnse({ service: Svc.Stream | Svc.Ack, src: Addr.Calc, dest: Addr.Me, reqAck: 0, seqno: m.seqno, data: new Uint8Array(0) }));
       const p = decodeNavNet(m.data);
       if (!p) throw new Error("The host sent a damaged NavNet packet");
@@ -86,7 +97,7 @@ export class FakeCalc {
         v.setBigUint64(1, 50_000_000n);
         v.setBigUint64(9, 100_000_000n);
         info[33] = 0x7f;
-        info.set([6, 2, 0x01, 0x2c], 37);
+        info.set([6, 20, 0x01, 0x2c], 37);
         v.setUint16(1 + 58, 320);
         v.setUint16(1 + 60, 240);
         return this.reply(p, info);
