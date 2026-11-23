@@ -273,7 +273,12 @@ export function decodeTixc(data: Uint8Array): Uint8Array {
             state = 4;
           } else if (b === 0x2f) {
             out.push(0x2f);
-            state = token.length ? 9 : 10;
+            // <tag/ (self-closing) or </name> written out in full: once the tag
+            // dictionary holds 256 names (big Graphs pages), closing tags for
+            // names past it can't be referenced by index, so they're spelt out.
+            // State 9 copies through to the '>' either way. (TnsTools went to
+            // state 10 here, which only allows "/>", and failed on such files.)
+            state = 9;
           } else {
             if (!token.length) fail("empty tag before '>'");
             out.push(0x3e);
@@ -568,9 +573,12 @@ export function encodeTixc(xml: Uint8Array): Uint8Array {
     }
     if (body[i + 1] === 0x2f) {
       const end = indexOf(body, 0x3e, i + 2);
+      if (end < 0) throw new Error("unterminated close tag");
       const idx = tagIndex.get(key(body.subarray(i + 2, end)));
-      if (end < 0 || idx === undefined) throw new Error("close tag has no dictionary entry");
-      out.push(0x0e, idx);
+      if (idx !== undefined) out.push(0x0e, idx);
+      // A name past the full dictionary is closed in full, as TI's files do.
+      else if (tagIndex.size >= 256) out.add(body.subarray(i, end + 1));
+      else throw new Error("close tag has no dictionary entry");
       i = end + 1;
       continue;
     }
@@ -582,9 +590,8 @@ export function encodeTixc(xml: Uint8Array): Uint8Array {
     let idx = tagIndex.get(key(name));
     const usedRef = idx !== undefined;
     if (idx === undefined) {
-      if (tagIndex.size >= 256) throw new Error("tag dictionary exhausted");
-      idx = tagIndex.size;
-      tagIndex.set(key(name), idx);
+      // The dictionary holds 256 names; after that a new name is written out every time.
+      if (tagIndex.size < 256) tagIndex.set(key(name), tagIndex.size);
       out.push(0x3c);
       out.add(name);
     } else out.push(0x0c, idx);

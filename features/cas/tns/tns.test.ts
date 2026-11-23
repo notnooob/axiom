@@ -28,6 +28,13 @@ describe("TIXC and method 13", () => {
   it("round-trips XML through TIXC", () => {
     expect(dec.decode(decodeTixc(encodeTixc(enc.encode(SAMPLE))))).toBe(SAMPLE);
   });
+
+  it("round-trips more tag names than the 256-entry dictionary holds", () => {
+    // Big Graphs pages use more than 256 names: the ones past the dictionary are written (and closed) in full.
+    const many = Array.from({ length: 300 }, (_, i) => `<g:t${i}>${i}.5</g:t${i}><g:t${i}>again</g:t${i}>`).join("");
+    const xml = `<?xml version="1.0" encoding="UTF-8" ?><prob>${many}<g:t299 a="1"/></prob>`;
+    expect(dec.decode(decodeTixc(encodeTixc(enc.encode(xml))))).toBe(xml);
+  });
   it("round-trips a payload through method 13", () => {
     const tixc = encodeTixc(enc.encode(SAMPLE));
     expect(decryptMethod13(encryptMethod13(tixc))).toEqual(tixc);
