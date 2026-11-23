@@ -64,7 +64,8 @@ import { isReservedName, parse, type Ast } from "./math/ast";
 import { print } from "./math/print";
 import { RENAME_IN, translate } from "./engine/translate";
 import { DE_DEFAULTS, type RelationOp, type Slider } from "./state/document";
-import { CARET, emptyEdit, insertText, selectBetween, selection, selectionText, templateNode } from "./math/editor";
+import { CARET, emptyEdit, insertText, selectBetween, selectedNodes, selection, selectionText, templateNode } from "./math/editor";
+import { fromPaste as pasted, rowToLatex, rowToMathML } from "./math/latex";
 import { DefinedNames } from "./math/render";
 import { astToRow, chars, rowToLinear, type Row } from "./math/tree";
 import { calculatorMenu } from "./menus/calculator-menu";
@@ -2350,9 +2351,10 @@ export function CasApp() {
       else if (action.id === "editPaste")
         void navigator.clipboard
           ?.readText()
-          .then((t) => t.trim() && pageKey({ k: "paste", text: t.replace(/\s+/g, " ").trim() }))
+          .then((t) => t.trim() && pageKey({ k: "paste", text: pasted(t) }))
           .catch(() => setError("Error: The browser didn't allow reading the clipboard. Use Ctrl+V."));
       else if (action.id === "editDelete") pageKey({ k: "delete" });
+      else if (action.id === "editCopyLatex" || action.id === "editCopyMathml") copyAs(action.id === "editCopyLatex" ? "latex" : "mathml");
       else if (action.id === "pageSorter") setSorter(doc.active);
       else if (action.id === "problemRename")
         setWizard(openWizard({ kind: "wizard", title: "Rename Problem", arrows: false, fields: [{ label: "Name:", value: doc.problemNames?.[String(problemOf(page))] ?? "" }], build: "problemrename:{0}" }));
@@ -3528,6 +3530,32 @@ export function CasApp() {
     void navigator.clipboard?.writeText(text).catch(() => undefined);
   };
 
+  /**
+   * Edit → Copy as LaTeX / MathML: the selected part of the entry line or of a
+   * history item, else the selected history item, else the whole entry line,
+   * laid out as the screen shows it.
+   */
+  const copyAs = (format: "latex" | "mathml") => {
+    let row: Row | null = null;
+    if (page?.kind === "calculator" && page.sel) {
+      const h = page.history[page.sel.entry];
+      const caret = page.sel.caret;
+      if (caret && selection(caret)) row = selectedNodes(caret);
+      else if (h) row = page.sel.part === "input" ? h.input : h.output;
+    } else if (page?.kind === "calculator" || page?.kind === "graphs") {
+      row = selection(page.edit) ? selectedNodes(page.edit) : page.edit.row;
+    }
+    if (!row?.length) {
+      toast("Select an entry first: ▲ picks the last answer.");
+      return;
+    }
+    const text = format === "latex" ? rowToLatex(row) : rowToMathML(row);
+    void navigator.clipboard
+      ?.writeText(text)
+      .then(() => toast.success(format === "latex" ? "Copied as LaTeX" : "Copied as MathML"))
+      .catch(() => setError("Error: The browser didn't allow writing to the clipboard."));
+  };
+
   editOps.current = {
     copy: copySelection,
     cut: () => {
@@ -3588,7 +3616,7 @@ export function CasApp() {
 
   const onPaste = (e: ClipboardEvent) => {
     if ((e.target as HTMLElement).dataset.pyEditor !== undefined || (e.target as HTMLElement).closest?.("[data-notes-editor]")) return;
-    const text = e.clipboardData.getData("text").replace(/\s+/g, " ").trim();
+    const text = pasted(e.clipboardData.getData("text"));
     if (!text) return;
     e.preventDefault();
     if (wizard) handleKey({ k: "text", text });

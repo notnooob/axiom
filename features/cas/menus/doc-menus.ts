@@ -35,6 +35,9 @@ export const DOC_MENU: Menu = [
     { ...app("Copy", "editCopy"), hint: "Ctrl+C" },
     { ...app("Paste", "editPaste"), hint: "Ctrl+V" },
     app("Delete", "editDelete"),
+    // Not on the handheld: maths for homework write-ups and word processors, after its own items.
+    rule(app("Copy as LaTeX", "editCopyLatex")),
+    app("Copy as MathML", "editCopyMathml"),
   ]),
   sub("View", [app("Page Sorter", "pageSorter")]),
   sub("Insert", [

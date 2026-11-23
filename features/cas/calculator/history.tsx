@@ -57,6 +57,7 @@ export function HistoryRow({
       onPick: (c: Cursor) => onCaret?.(part, { row, cursor: c }),
       onSelect: (a: Cursor, b: Cursor) => onCaret?.(part, selectBetween({ row, cursor: a }, a, b)),
       onDoubleClick: () => onPick?.(part, true),
+      speak: true,
       cursor: mine ? caret.cursor : undefined,
       selection: mine ? selection(caret) : null,
       // Picked whole with the arrows, the part is highlighted; with a caret in it, only the selected stretch is.

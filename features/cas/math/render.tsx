@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
-import { createContext, useContext, useLayoutEffect, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
+import { createContext, useContext, useLayoutEffect, useMemo, useRef, type MouseEvent, type ReactNode, type RefObject } from "react";
 import { cn } from "@/shared/lib/utils";
 import { BUILTINS } from "./builtins";
 import { slotsOf, getSlot, type Cursor, type Step } from "./cursor";
+import { rowToMathML } from "./latex";
 import type { Node, Row } from "./tree";
 
 /**
@@ -22,6 +23,7 @@ export function MathView({
   onSelect,
   onClick,
   onDoubleClick,
+  speak,
 }: {
   row: Row;
   cursor?: Cursor;
@@ -34,8 +36,12 @@ export function MathView({
   onSelect?: (from: Cursor, to: Cursor) => void;
   onClick?: () => void;
   onDoubleClick?: () => void;
+  /** Give screen readers the maths as MathML (fractions, powers, roots read as such) instead of the drawn glyphs. */
+  speak?: boolean;
 }) {
   const box = useRef<HTMLSpanElement>(null);
+  const mathml = useMemo(() => (speak ? rowToMathML(row) : null), [speak, row]);
+  const drawn = <RowView row={row} path={[]} cursor={cursor} top pick={Boolean(onPick)} />;
   return (
     <span
       ref={box}
@@ -62,7 +68,16 @@ export function MathView({
       onDoubleClick={onDoubleClick}
     >
       <Selected.Provider value={selection ?? null}>
-        <RowView row={row} path={[]} cursor={cursor} top pick={Boolean(onPick)} />
+        {mathml ? (
+          <>
+            <span aria-hidden className="contents">
+              {drawn}
+            </span>
+            <span className="sr-only" dangerouslySetInnerHTML={{ __html: mathml }} />
+          </>
+        ) : (
+          drawn
+        )}
       </Selected.Provider>
     </span>
   );
