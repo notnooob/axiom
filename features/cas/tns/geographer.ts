@@ -111,9 +111,14 @@ export function readGeoGrapher(raw: RawObj[], onLost?: (o: RawObj) => void): Geo
     ids.set(ti, obj.id);
     shapes = null;
   };
+  // The file's own point names are kept, so an unnamed point made before A doesn't take A.
+  const NAME = /^[A-Z]\d*$/;
+  const reserved = new Set(raw.filter((o) => o.type === "point").map((o) => (o.fields.lbl ?? "").trim()).filter((l) => NAME.test(l)));
   const pointName = (lbl: string | undefined) => {
     const l = (lbl ?? "").trim();
-    return /^[A-Z]\d*$/.test(l) && !objects.some((o) => o.id === l) ? l : nextLabel(objects);
+    if (NAME.test(l) && !objects.some((o) => o.id === l)) return l;
+    // nextLabel skips names in use; the reserved ones count as in use.
+    return nextLabel([...objects, ...[...reserved].map((r) => ({ id: r, kind: "point" as const, x: 0, y: 0 }))]);
   };
   const id = (kind: GeoObj["kind"]) => nextId(objects, kind);
 

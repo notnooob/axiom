@@ -83,3 +83,15 @@ describe("readGeoGrapher", () => {
     expect(g.lost).toBe(1);
   });
 });
+
+describe("readGeoGrapher names", () => {
+  it("keeps the file's point names when an unnamed point comes first", () => {
+    const g = readGeoGrapher([
+      ...axes("0"),
+      o("point", { id: "10", point_: "", x: "50", y: "50", lbl: "" }),
+      o("point", { id: "11", point_: "", x: "51", y: "50", lbl: "A" }),
+      o("point", { id: "12", point_: "", x: "52", y: "50", lbl: "B" }),
+    ]);
+    expect(g.objects.map((x) => x.id)).toEqual(["C", "A", "B"]);
+  });
+});
