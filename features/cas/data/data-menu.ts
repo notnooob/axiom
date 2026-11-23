@@ -92,7 +92,7 @@ export function dataMenu(p: DataStatsPage, info: DataInfo = NO_INFO): Menu {
     ]),
     sub("Actions", [
       app("Remove", "dsRemoveAnalysis"),
-      off("Hide Text"),
+      app(p.hideText ? "Show Text" : "Hide Text", "dsHideText"),
       rule(app("Insert Text", "dsText")),
       app("Insert Slider", "dsSlider"),
       rule(shown && POINT_PLOTS.includes(plot) ? app("Select All Points", "dsSelectAll") : na("Select All Points", "for plots drawn as points")),

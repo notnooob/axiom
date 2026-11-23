@@ -2679,6 +2679,7 @@ export function CasApp() {
         else if (id === "dsResidSquares") setData((p) => ({ ...p, residualSquares: !p.residualSquares }));
         else if (id === "dsResidPlot") setData((p) => ({ ...p, residualPlot: !p.residualPlot }));
         else if (id === "dsLabels") setData((p) => ({ ...p, labels: !p.labels }));
+        else if (id === "dsHideText") setData((p) => ({ ...p, hideText: !p.hideText || undefined }));
         else if (id === "dsTrace") {
           setData((p) => ({ ...p, trace: p.trace ? undefined : { target: 0, i: 0 }, selected: undefined }));
           if (!page.trace) say("Graph Trace: ◄ ► move along, ▲ ▼ change what's traced, Esc ends");

@@ -282,6 +282,8 @@ export type DataStatsPage = {
   split?: string;
   /** Insert Text: notes on the plot, placed as fractions of its width and height. */
   texts?: { text: string; x: number; y: number }[];
+  /** Actions ▸ Hide Text: the analyses' equations and values (regressions, the movable line, functions, plotted values) are hidden, the lines stay. */
+  hideText?: boolean;
   /** The text selected (clicked), for Del to remove. */
   textSel?: number;
   /** Insert Slider: variables a plotted function or value can use. */

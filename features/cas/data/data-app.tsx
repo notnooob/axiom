@@ -917,7 +917,8 @@ export function DataStatsApp({
 
     screen();
     g.textAlign = "right";
-    labels.forEach((l, i) => {
+    // Hide Text: the lines and shading stay, what they say doesn't (a class can guess the equation first).
+    (page.hideText ? [] : labels).forEach((l, i) => {
       g.fillStyle = l.colour;
       g.fillText(l.text, size.w - fs * 0.5, fs * (1.3 + i * 1.25));
     });
