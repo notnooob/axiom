@@ -90,8 +90,11 @@ The `@/` import alias is the repo root (`vite.config.ts`, `tsconfig.json`).
 | `state/document.ts` | The document model: problems → pages (1.1, 1.2 …), the `Page` union (one variant per app), and `newPage(kind)`. |
 | `state/persist.ts` | The Scratchpad in `localStorage`. |
 | `state/setup.ts` | Handheld Setup (text size, haptics, keypad layout, start-up, animations) and Make Default's settings for new documents, kept with `pref`. |
+| `state/ptt.ts` | Press-to-Test: read once as the page loads (`PTT`); entering and ending it reload the page. While it's on, `files/store.ts` and `state/persist.ts` use their own test storage, `engine/restrict.ts` refuses the switched-off commands in every `evaluate()`, and files can't be brought in. |
 | `files/store.ts` | My Documents in IndexedDB. |
 | `files/home.tsx`, `files/browse.tsx` | The Home screen and the file browser. |
+| `files/share.ts` | Share links: the whole document, deflated, in the URL's `#doc=` fragment (never sent to the server); opened as a new unsaved document. |
+| `files/disk.ts` | Writing back to the computer's file the installed app was opened with (a record's `handle`); `public/sw.js` also takes files from the share sheet (`share_target`). |
 | `screen/screen.tsx` | The 4:3 screen frame and its top bar. All sizes are in `cqw` units, so the screen scales as one piece. |
 | `screen/capture.ts` | PNG screenshots. |
 | `screen/dialogs.tsx` | The bar under the screen, the engine pill, notices, the GPL line and the message, error and slider dialogs. |
@@ -121,6 +124,7 @@ Each other app's menu lives in its own folder: `geometry-menu.ts`, `data-menu.ts
 - `ast.ts`: the parser for linear text such as `solve(x^2=2,x)` into an AST.
 - `print.ts`: AST back to linear text.
 - `render.tsx`: draws the maths in a serif face with stacked fractions and growing brackets.
+- `latex.ts`: a row as LaTeX or MathML (Edit ▸ Copy as LaTeX / MathML, and MathML for screen readers in history), and pasted LaTeX turned into linear text (`fromPaste`).
 - `builtins.ts`: which names print upright.
 
 ### The engine: `engine/`
@@ -177,6 +181,16 @@ Each app has a pure key or click model plus a view, so the logic can be tested w
 - `import.ts` turns a decoded file into a document and `export.ts` does the reverse; export is experimental.
 - `geographer.ts` reads TI's Graphs & Geometry card (TI.GeoGrapher) into a Graphs or a Geometry page; objects it can't follow are counted and the student is told. An imported page keeps its card XML (`xml`), written back on export until it's edited.
 - **Not yet supported:** Graphs and Geometry pages made in Axiom aren't exported: writing a new GeoGrapher card needs checking against TI's software first.
+
+### A connected handheld: `link/`
+
+A TI-Nspire on a USB cable, through WebUSB (Chromium only), ported from libnspire (see NOTICE.md):
+- `wire.ts`: the bytes. The CX II's NNSE messages wrap NavNet packets; the original CX sends NavNet bare. Pure and tested.
+- `transport.ts`: one read loop per link (WebUSB reads can't be cancelled) that answers the CX II's handshake and acks and queues the packets.
+- `navnet.ts`: a session and its services: list, read, write, move, delete, folders, device info. One request at a time.
+- `handheld.ts` opens the device; `manager.ts` keeps the one connection (it reopens a handheld picked before when it's plugged in); `handheld-panel.tsx` is the Handheld dialog.
+- A document opened from the handheld lives in `My Documents/Handheld/…` with its record's `calc` path, and Save writes it back (`saveToHandheld` in `cas-app.tsx`).
+- `fake-calc.ts` is a simulated CX II for tests. It was written from the same reading of libnspire, so it can't stand in for a real calculator: check changes on a real one.
 
 ### The assistant: `ai/`
 
