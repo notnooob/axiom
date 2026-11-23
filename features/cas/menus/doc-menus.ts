@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
 import { app, off, rule, sub, type Menu } from "./types";
+import { PTT } from "../state/ptt";
 
 /** Ctrl+I's list of apps; the ones not built yet are greyed, as the handheld lists them. */
 export const ADD_PAGE: Menu = (
@@ -14,7 +15,8 @@ export const ADD_PAGE: Menu = (
     [off("Add Vernier DataQuest™"), "vernier"],
     [off("Add Widget"), "widget"],
     [off("Add Program Editor"), "program"],
-    [sub("Add Python", [app("New...", "addPython"), app("Shell", "addShell")]), "python"],
+    // Greyed while Press-to-Test switches Python off.
+    [PTT?.noPython ? off("Add Python") : sub("Add Python", [app("New...", "addPython"), app("Shell", "addShell")]), "python"],
   ] as const
 ).map(([item, icon]) => ({ ...item, icon }));
 
@@ -48,7 +50,7 @@ export const DOC_MENU: Menu = [
     app("Lists & Spreadsheet", "addLists"),
     app("Data & Statistics", "addData"),
     app("Notes", "addNotes"),
-    app("Python", "addPython"),
+    PTT?.noPython ? off("Python") : app("Python", "addPython"),
   ]),
   sub("Problem", [app("Rename...", "problemRename"), app("Delete", "problemDelete")]),
   sub("Page Layout", [
@@ -74,6 +76,8 @@ export const SETTINGS_MENU: Menu = [
   off("Login..."),
   off("Network..."),
   app("Restore Factory Defaults...", "factoryReset"),
+  // The handheld starts Press-to-Test from a key combination as it turns on; here it's after its Settings items.
+  app(PTT ? "Exit Press-to-Test..." : "Press-to-Test...", "pressToTest"),
 ];
 
 /** The menu key in My Documents. */

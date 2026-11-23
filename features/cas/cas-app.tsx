@@ -123,7 +123,10 @@ import { highlightsSaid, liveHighlights, type Highlight } from "./ai/highlights"
 import { ownsOpenDoc, restoreOf } from "./ai/threads";
 import type { AgentDialog, AgentHost } from "./ai/tools";
 import { registerWebMcp } from "./ai/webmcp";
-import { clearPrefs, load, pref, save, setPref, type Saved } from "./state/persist";
+import { clearPrefs, clearTestPrefs, load, pref, save, setPref, type Saved } from "./state/persist";
+import { blockedCommands, parsePtt, PTT, PTT_OPTIONS, pttLines, setPtt, type PressToTest } from "./state/ptt";
+import { setBlocked } from "./engine/restrict";
+import { PttPill } from "./screen/ptt-pill";
 import { docDefaults, loadSetup, parseSetup, SETUP_OPTIONS, TEXT_SCALE, type Setup } from "./state/setup";
 import { recordStep, undoStep, type UndoStacks } from "./state/undo";
 import {
@@ -1458,6 +1461,10 @@ export function CasApp() {
   // A new page is a clean sheet: a new Graphs page has no curves on it.
   const addPage = useCallback(
     (kind: "calculator" | "graphs" | "lists" | "python" | "pyshell" | "datastats" | "notes" | "geometry") => {
+      if (PTT?.noPython && (kind === "python" || kind === "pyshell")) {
+        setError("Error: Python is disabled in Press-to-Test");
+        return;
+      }
       const target = fillTarget.current;
       fillTarget.current = null;
       setDoc((d) => {
@@ -1597,6 +1604,10 @@ export function CasApp() {
   /** A new document, starting with the given app; it's in My Documents once it's saved. */
   const newDoc = useCallback(
     async (first: "calculator" | "graphs" | "lists" | "python" | "datastats" | "notes" | "geometry") => {
+      if (PTT?.noPython && first === "python") {
+        setError("Error: Python is disabled in Press-to-Test");
+        return;
+      }
       const doc = newDocument(first, "Untitled");
       if (first === "python") doc.pages.push(newPage("pyshell"));
       await openSaved({ doc, settings: docDefaults(), definitions: [] }, null);
@@ -1756,6 +1767,10 @@ export function CasApp() {
       const saved = readShareFragment(hash);
       // Off the address bar either way, so a reload doesn't open it again over the student's changes.
       history.replaceState(null, "", location.pathname + location.search);
+      if (PTT) {
+        toast.error(NO_FILES);
+        return;
+      }
       if (!saved) {
         toast.error("That link's document couldn't be read. It may have been cut short when it was sent.");
         return;
@@ -1845,6 +1860,7 @@ export function CasApp() {
         `My Documents uses ${kb(u.bytes)}`,
         ...(u.used !== undefined && u.quota ? [`This site's storage: ${kb(u.used)} of ${kb(u.quota)}`] : []),
         `Python: ${python().isolated ? "ready for live keys and input()" : "runs; live keys need a reload"}`,
+        ...(PTT ? ["", "Press-to-Test is on", ...pttLines(PTT)] : []),
       ],
       ok: () => undefined,
     });
@@ -2046,6 +2062,10 @@ export function CasApp() {
         setGraphs((q) => ({ ...q, view: "plane", axes: false, grid: "none", hideAnalytic: q.gsettings?.analyticInPlane === false }));
         return true;
       case "view3d":
+        if (PTT?.no3d) {
+          setError("Error: 3D Graphing is disabled in Press-to-Test");
+          return true;
+        }
         setGraphs((q) => ({ ...q, view: "3d", tool: null, editing: null }));
         return true;
       case "viewAnalytic":
@@ -2529,6 +2549,30 @@ export function CasApp() {
           }),
         );
       else if (action.id === "status") void showStatus();
+      else if (action.id === "pressToTest") {
+        if (PTT)
+          setConfirm({
+            title: "Exit Press-to-Test",
+            lines: ["End the test? Everything made during it is deleted, and your own documents come back."],
+            ok: () => undefined,
+            buttons: [
+              { label: "Exit Test", run: () => void endTest() },
+              { label: "Cancel", run: () => undefined },
+            ],
+          });
+        else
+          setWizard(
+            openWizard({
+              kind: "wizard",
+              title: "Press-to-Test",
+              fields: [
+                { label: "Angle Settings:", value: settings.angle === "deg" ? "Degree" : "Radian", options: ["Radian", "Degree"] },
+                ...PTT_OPTIONS.map((o) => ({ label: o.label, value: o.on ? "Yes" : "No", check: true })),
+              ],
+              build: `ptt:${[0, ...PTT_OPTIONS.map((_, i) => i + 1)].map((i) => `{${i}}`).join(":")}`,
+            }),
+          );
+      } else if (action.id === "factoryReset" && PTT) setError("Error: Not available in Press-to-Test");
       else if (action.id === "factoryReset")
         setConfirm({
           title: "Restore Factory Defaults",
@@ -3065,6 +3109,27 @@ export function CasApp() {
             })
             .catch((err: Error) => setError(`Error: ${err.message}`));
         }
+        return;
+      }
+      if (built.startsWith("ptt:")) {
+        const p = parsePtt(built);
+        setConfirm({
+          title: "Press-to-Test",
+          lines: ["Start Press-to-Test with:", ...pttLines(p).map((l) => `  ${l}`), "", "Your documents are put away until the test ends. Anything made during the test is deleted then."],
+          ok: () => undefined,
+          buttons: [
+            {
+              label: "Start Test",
+              run: () =>
+                void leaveOk().then(async (go) => {
+                  if (!go) return;
+                  await writeNow();
+                  enterTest(p);
+                }),
+            },
+            { label: "Cancel", run: () => undefined },
+          ],
+        });
         return;
       }
       if (built.startsWith("setup:")) {
@@ -3793,6 +3858,10 @@ export function CasApp() {
   const upload = useCallback(
     async (list: File[]) => {
       if (!list.length) return;
+      if (PTT) {
+        toast.error(NO_FILES);
+        return;
+      }
       const folder = view === "browse" ? targetFolder(rows, browse.sel) : files.ROOT;
       try {
         const n = await addFiles(folder, list);
@@ -3848,6 +3917,10 @@ export function CasApp() {
   // My Documents and opens; several, or a zip, are added as an upload is.
   const launch = useCallback(
     async (list: File[], handle?: FileSystemFileHandle) => {
+      if (PTT) {
+        toast.error(NO_FILES);
+        return;
+      }
       const f = list[0];
       if (list.length !== 1 || !f || !/\.(tns|py)$/i.test(f.name)) return upload(list);
       const bytes = new Uint8Array(await f.arrayBuffer());
@@ -4202,7 +4275,9 @@ export function CasApp() {
   const assistant = useAssistant(agent, binding);
   // The assistant's settings can stop offering the tools to browser agents; turning it back on offers them again.
   const shareTools = assistant.config.webmcp !== false;
-  useEffect(() => (shareTools ? registerWebMcp(agent) : undefined), [agent, shareTools]);
+  // Press-to-Test can switch the assistant off: its chat, AI mode and the WebMCP tools.
+  const noAssistant = Boolean(PTT?.noAssistant);
+  useEffect(() => (shareTools && !noAssistant ? registerWebMcp(agent) : undefined), [agent, shareTools, noAssistant]);
   // Back in AI mode with nothing open (a reload, say): the open chat's document comes back.
   useEffect(() => {
     if (ai === "immersive" && view !== "doc" && assistant.thread.doc) void docBinding.current.restore(assistant.thread);
@@ -4255,7 +4330,8 @@ export function CasApp() {
       <header className="mb-4 flex items-center justify-between gap-3 px-1">
         <span className="text-[17px] font-semibold tracking-[-0.019em] text-ink">Axiom</span>
         <div className="flex items-center gap-2">
-          <button
+          {PTT && <PttPill test={PTT} />}
+          {!noAssistant && <button
             type="button"
             onClick={() => setAi((a) => (a === "panel" ? "off" : "panel"))}
             aria-expanded={aiOpen}
@@ -4263,7 +4339,7 @@ export function CasApp() {
           >
             <Sparkles size={14} aria-hidden />
             Assistant
-          </button>
+          </button>}
           <EnginePill status={status} />
         </div>
       </header>
@@ -4317,6 +4393,7 @@ export function CasApp() {
           >
             {createPortal(
             <Screen
+              locked={Boolean(PTT)}
               variant={view === "new" ? "doc" : view}
               pageLabels={view === "doc" ? units(doc).map((u) => pageLabel(doc, u.pages[0]!)) : []}
               active={unitOf(doc, doc.active)}
@@ -4692,9 +4769,9 @@ export function CasApp() {
         </div>
       )}
     </div>
-    <AiPanel open={aiOpen} onClose={() => setAi("off")} onImmersive={() => setAi("immersive")} onSettings={() => setAiSettings(true)} assistant={assistant} doc={docActions} info={docInfo} />
+    <AiPanel open={aiOpen && !noAssistant} onClose={() => setAi("off")} onImmersive={() => setAi("immersive")} onSettings={() => setAiSettings(true)} assistant={assistant} doc={docActions} info={docInfo} />
     <AnimatePresence>
-      {ai === "immersive" && (
+      {ai === "immersive" && !noAssistant && (
         <AiMode
           key="ai-mode"
           assistant={assistant}
@@ -4716,6 +4793,24 @@ export function CasApp() {
 }
 
 /** Whether Esc has something to cancel on the page (a selection, a tool, an entry line, a cell, a running program). */
+// Press-to-Test's switched-off commands, for every evaluate() (state/ptt.ts, engine/restrict.ts).
+setBlocked(blockedCommands(PTT));
+const NO_FILES = "Files can't be brought in during Press-to-Test.";
+
+/** Start Press-to-Test: the page reloads into the test's own storage. */
+function enterTest(p: PressToTest) {
+  if (setPtt(p)) window.location.reload();
+  else toast.error("The browser didn't allow keeping the test's state, so Press-to-Test couldn't start.");
+}
+
+/** End Press-to-Test: what was made during it goes, and the page reloads with the student's own documents. */
+async function endTest() {
+  await files.clearTestFiles().catch(() => undefined);
+  clearTestPrefs();
+  setPtt(null);
+  window.location.reload();
+}
+
 /** The functions of a problem's Graphs pages, for a Lists & Spreadsheet function table. */
 function problemFunctions(doc: CasDocument, problem: number): TableFn[] {
   return doc.pages.flatMap((p) => (p.kind === "graphs" && problemOf(p) === problem ? graphFunctions(p) : []));

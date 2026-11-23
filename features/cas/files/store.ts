@@ -8,6 +8,7 @@
 import { createStore, del, delMany, entries, get, set, setMany } from "idb-keyval";
 import { strToU8, zipSync } from "fflate";
 import type { Saved } from "../state/persist";
+import { PTT } from "../state/ptt";
 
 export const ROOT = "My Documents";
 
@@ -31,7 +32,14 @@ export type FileRecord = {
   disk?: "yes" | "no";
 };
 
-const store = createStore("axiom-files", "files");
+// Press-to-Test keeps its own files, so the student's own are put away for the test (state/ptt.ts).
+const store = PTT ? createStore("axiom-ptt-files", "files") : createStore("axiom-files", "files");
+
+/** Press-to-Test's ending: everything made during the test goes. */
+export async function clearTestFiles(): Promise<void> {
+  const test = createStore("axiom-ptt-files", "files");
+  await delMany((await entries<string, FileRecord>(test)).map(([k]) => k), test);
+}
 
 export const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/"));
 export const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1);

@@ -7,6 +7,7 @@
  */
 import { DEFAULT_SETTINGS, type Settings } from "../engine/evaluate";
 import { pref } from "./persist";
+import { PTT } from "./ptt";
 
 export type Setup = {
   text: "Small" | "Medium" | "Large";
@@ -52,5 +53,6 @@ export function parseSetup(built: string): Setup {
 
 /** Document Settings' Make Default: what a new document starts with. */
 export function docDefaults(): Settings {
-  return { ...DEFAULT_SETTINGS, ...pref<Partial<Settings>>("docDefaults", {}) };
+  // Press-to-Test sets the angle for every document made during the test.
+  return { ...DEFAULT_SETTINGS, ...pref<Partial<Settings>>("docDefaults", {}), ...(PTT ? { angle: PTT.angle } : {}) };
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
+import { blockedIn } from "./restrict";
 import { isCommand, mapAst, parse, ParseError, sym, type Ast } from "../math/ast";
 import { print } from "../math/print";
 import { decimalArithmetic } from "./decimal";
@@ -89,6 +90,9 @@ export async function evaluate(
     io?: ProgramIO;
   },
 ): Promise<EvalResult> {
+  // Press-to-Test's switched-off commands (restrict.ts), refused before anything runs.
+  const off = blockedIn(text);
+  if (off) return { ok: false, error: `Error: ${off} is disabled in Press-to-Test` };
   // Whatever goes wrong inside, the entry answers with an error rather than throwing.
   try {
     return await evaluateText(text, giac, opts);

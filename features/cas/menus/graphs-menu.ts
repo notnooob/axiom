@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
 import { app, na, off, rule, sub, wiz, type Menu } from "./types";
+import { PTT } from "../state/ptt";
 
 /**
  * The Graphs app's menu. Item positions are the contract (see types.ts):
@@ -39,7 +40,7 @@ export function graphsMenu(s: GraphsMenuState): Menu {
     sub("View", [
       app("Graphing", "viewGraphing"),
       app("Plane Geometry", "viewPlane"),
-      app("3D Graphing", "view3d"),
+      PTT?.no3d ? off("3D Graphing") : app("3D Graphing", "view3d"),
       rule(app(s.hideAnalytic ? "Show Analytic Window" : "Hide Analytic Window", "viewAnalytic")),
       app(s.axes ? "Hide Axes" : "Show Axes", "viewHideAxes"),
       sub("Grid", [

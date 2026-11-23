@@ -20,7 +20,10 @@ export function Screen({
   onClose,
   children,
   overlay,
+  locked,
 }: {
+  /** Press-to-Test is on: a lock in the top bar, as the handheld shows. */
+  locked?: boolean;
   /** The home screen and My Documents have a plain bar: no page tabs. */
   variant?: "doc" | "home" | "browse";
   pageLabels: string[];
@@ -47,6 +50,7 @@ export function Screen({
           onSelectPage={onSelectPage}
           onToggleAngle={onToggleAngle}
           onClose={onClose}
+          locked={locked}
         />
         <div className="relative min-h-0 flex-1">{children}</div>
       </div>
@@ -66,7 +70,9 @@ function TopBar({
   onSelectPage,
   onToggleAngle,
   onClose,
+  locked,
 }: {
+  locked?: boolean;
   variant: "doc" | "home" | "browse";
   pageLabels: string[];
   active: number;
@@ -112,6 +118,13 @@ function TopBar({
       </div>
       <div className={cn("flex h-full max-w-[40cqw] items-center justify-center truncate px-[1cqw]", variant === "home" && "text-[4.6cqw] font-bold")}>{title}</div>
       <div className="flex h-full items-center justify-end gap-[1.2cqw] pr-[1.4cqw]">
+        {locked && (
+          <svg role="img" aria-label="Press-to-Test" viewBox="0 0 10 12" className="h-[3.2cqw] w-[2.7cqw]">
+            <title>Press-to-Test</title>
+            <path d="M2.5 5.5 V3.5 a2.5 2.5 0 0 1 5 0 V5.5" fill="none" stroke="currentColor" strokeWidth={1.2} />
+            <rect x={1} y={5.5} width={8} height={6} rx={1} fill="currentColor" />
+          </svg>
+        )}
         <button
           type="button"
           tabIndex={-1}
