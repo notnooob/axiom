@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * A TI-Nspire on a USB cable, through WebUSB (Chrome and Edge, on a
- * computer or Android): pick it once, and after that it's found again
- * whenever it's plugged in. Its documents can be listed, opened, sent,
+ * computer or Android). The browser's permission for it lasts until it's
+ * unplugged (a CX II has no USB serial number, and Chrome only remembers
+ * devices that do), so it's found again after a reload but must be picked
+ * again after it's plugged back in. Its documents can be listed, opened, sent,
  * renamed and deleted, as TI's own connect software does, and a document
  * opened from it saves back to it.
  *
@@ -10,7 +12,7 @@
  * Nothing goes anywhere but the cable.
  */
 import { NavNetError, Session, type DeviceInfo, type Entry } from "./navnet";
-import { LinkError, NnseLink, RawLink, type NnseOptions, type PacketLink, type Pipe } from "./transport";
+import { LinkError, NnseLink, RawLink, Restarted, type NnseOptions, type PacketLink, type Pipe } from "./transport";
 
 /** TI's vendor id; the original CX and the CX II's product ids. */
 const TI = 0x0451;
@@ -53,9 +55,10 @@ export const isHandheld = (d: UsbDevice) => FILTERS.some((f) => f.productId === 
 async function openPipe(dev: UsbDevice): Promise<Pipe> {
   if (!dev.opened) await dev.open();
   if (dev.configuration?.configurationValue !== 1) await dev.selectConfiguration(1);
-  // As libnspire does: a reset makes the handheld start its handshake afresh,
-  // even if an earlier session was left half way.
-  await dev.reset().catch(() => undefined);
+  // No reset, unlike libnspire: a CX II drops off the bus when reset and comes back as
+  // a new device, so the browser's handle to it is dead (claimInterface then fails
+  // with "the device was disconnected"). It wouldn't restart the handshake anyway;
+  // transport.ts resyncs instead.
   const iface = dev.configuration?.interfaces[0];
   if (!iface) throw new LinkError("The handheld has no link interface. Is it in its normal mode (not updating its OS)?");
   await dev.claimInterface(iface.interfaceNumber);
@@ -100,16 +103,25 @@ export class Handheld {
 
   /** Over any packet link: WebUSB in the app, a simulated calculator in tests. */
   static async over(link: PacketLink, cx2: boolean, device: UsbDevice | null = null): Promise<Handheld> {
-    const session = new Session(link, cx2);
-    await session.init();
-    const info = await session.info();
-    return new Handheld(device, session, link, info, cx2);
+    for (let attempt = 0; ; attempt++) {
+      const session = new Session(link, cx2);
+      try {
+        await session.init();
+        const info = await session.info();
+        return new Handheld(device, session, link, info, cx2);
+      } catch (e) {
+        // The handheld began a new session while this one was opening: open it again, once.
+        if (!(e instanceof Restarted) || attempt) throw e;
+      }
+    }
   }
 
   /** Open a handheld the browser has given us. */
   /** opts: where the CX II's message numbers start, and where to say they've moved on (transport.ts). */
   static async open(dev: UsbDevice, opts: NnseOptions = {}): Promise<Handheld> {
-    const pipe = await openPipe(dev);
+    const pipe = await openPipe(dev).catch((e: unknown) => {
+      throw friendly(e);
+    });
     const cx2 = dev.productId === PID_CX2;
     const link = cx2 ? new NnseLink(pipe, opts) : new RawLink(pipe);
     try {

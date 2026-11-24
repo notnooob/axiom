@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /**
  * The one connected handheld, outside React so a second render (StrictMode)
- * can't open the device twice. A handheld the student has picked before is
- * opened again by itself when it's plugged in; unplugging it is noticed.
+ * can't open the device twice. A handheld picked earlier in this visit, or
+ * before a reload, is opened again by itself; unplugging it is noticed, and
+ * the browser forgets it then (handheld.ts), so it's picked again after.
  */
 import { Handheld, isHandheld, usb, type UsbDevice } from "./handheld";
 import { FILTERS } from "./handheld";

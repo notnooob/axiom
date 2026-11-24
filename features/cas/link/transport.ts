@@ -13,6 +13,9 @@
  * it's plugged in, and afterwards takes only the message numbered one after
  * the last it took, ignoring any other without a word. A reloaded page starts
  * counting again, so it finds the number again (resync) and remembers it.
+ * Just plugged in, before its handshake, it acknowledges any message but
+ * answers none, so a request sent then is lost: the link waits for the
+ * handshake instead.
  */
 import { Addr, decodeNnse, encodeNavNet, encodeNnse, NAVNET_HEADER, NNSE_MAX, nnseSum, splitNnse, Svc } from "./wire";
 
@@ -31,6 +34,13 @@ export interface PacketLink {
 }
 
 export class LinkError extends Error {}
+
+/** The calculator started a new session part way through a request: ask again. */
+export class Restarted extends LinkError {
+  constructor() {
+    super("The handheld started its link again.");
+  }
+}
 
 /** How long to wait for the CX II's handshake: it comes round about every 15 seconds. */
 export const HANDSHAKE_MS = 35_000;
@@ -65,6 +75,11 @@ export class Inbox<T> {
   }
   fail(e: Error) {
     this.failed = e;
+    this.interrupt(e);
+  }
+  /** Stop the waits under way, and drop what's waiting, but stay usable. */
+  interrupt(e: Error) {
+    this.items = [];
     for (const w of this.waiting.splice(0)) w.reject(e);
   }
   take(timeoutMs: number, what: string): Promise<T> {
@@ -106,6 +121,8 @@ export class NnseLink implements PacketLink {
   /** Resync hears every acknowledgement while it runs. */
   private ackSeen: ((seq: number) => void) | null = null;
   private starting: Promise<void> | null = null;
+  /** Counts the calculator's new sessions, so a send under way when one starts knows it was lost. */
+  private sessions = 0;
 
   constructor(
     private pipe: Pipe,
@@ -168,10 +185,17 @@ export class NnseLink implements PacketLink {
     switch (m.service) {
       case Svc.AddrReq:
         if (m.data[0] !== 0) return;
-        // A new session (it's been plugged in again): count from 0, as the sessions seen
-        // working on a real CX II did, rather than from a number kept from an old one.
+        // A new session: count from 0, as the sessions seen working on a real CX II did,
+        // rather than from a number kept from an old one.
         this.seqno = 0;
         this.onSeq?.(0);
+        // Whatever was under way belonged to the old one, and won't be answered.
+        if (this.ready) {
+          this.ready = false;
+          this.sessions++;
+          for (const f of this.acks.values()) f();
+          this.streams.interrupt(new Restarted());
+        }
         // libnspire's note: the calculator sometimes ignores the first message after
         // reconnecting, so the answer goes twice; a second one it receives is ignored.
         for (let i = 0; i < 2; i++) void this.write(this.message(Svc.AddrReq, Uint8Array.of(0x80))).catch(() => undefined);
@@ -227,7 +251,13 @@ export class NnseLink implements PacketLink {
     if (this.broken) return Promise.reject(this.broken);
     return (this.starting ??= (async () => {
       if (await this.handshakeWithin(2500)) return;
-      if (await this.resync()) return;
+      const found = await this.resync();
+      if (this.ready) return;
+      // It took the very first number sent, which one still in a session wouldn't (it waits
+      // for its own): it's just been plugged in and hasn't offered its handshake yet. A real
+      // CX II acknowledges everything then but answers nothing, so wait for the handshake.
+      if (found === "fresh" && (await this.handshakeWithin(HANDSHAKE_MS))) return;
+      if (found) return this.becomeReady();
       if (await this.handshakeWithin(HANDSHAKE_MS)) return;
       if (this.broken) throw this.broken;
       throw new LinkError("The handheld didn't answer. Unplug it and plug it in again with its screen on, then connect.");
@@ -240,7 +270,7 @@ export class NnseLink implements PacketLink {
    * for and every one after, and its acknowledgements say which. The remembered number
    * goes first, then runs from 0 up.
    */
-  private async resync(): Promise<boolean> {
+  private async resync(): Promise<"synced" | "fresh" | null> {
     const seen: number[] = [];
     this.ackSeen = (seq) => seen.push(seq);
     try {
@@ -248,7 +278,7 @@ export class NnseLink implements PacketLink {
       const starts = [first];
       for (let from = 0; starts.length < WINDOWS; from += WINDOW) if (Math.abs(from - first) >= WINDOW) starts.push(from);
       for (const from of starts) {
-        if (this.ready || this.broken) return this.ready;
+        if (this.ready || this.broken) return null;
         for (let i = 0; i < WINDOW; i++) await this.write(encodeNnse({ service: Svc.Stream, src: Addr.Me, dest: Addr.Calc, reqAck: 1, seqno: (from + i) & 0xffff, data: PROBE }));
         // It works through the run slowly (a real CX II took seconds for a couple of hundred),
         // and the next number is only known once it's finished: wait until the acknowledgements stop.
@@ -264,11 +294,10 @@ export class NnseLink implements PacketLink {
           this.onSeq?.(this.seqno);
           // Anything said back to the probes isn't for the session about to start.
           this.streams.clear();
-          this.becomeReady();
-          return true;
+          return seen[0] === from ? "fresh" : "synced";
         }
       }
-      return false;
+      return null;
     } finally {
       this.ackSeen = null;
     }
@@ -277,6 +306,7 @@ export class NnseLink implements PacketLink {
   async send(packet: Uint8Array) {
     if (this.broken) throw this.broken;
     await this.whenReady();
+    const session = this.sessions;
     // Acknowledged within a few seconds. One more try, with the same number (it only takes
     // the next one) and flagged as a retry, before giving up.
     const msg = this.message(Svc.Stream, packet, 0x01);
@@ -299,6 +329,7 @@ export class NnseLink implements PacketLink {
       await this.write(msg);
       const ok = await acked;
       this.acks.delete(seq);
+      if (this.sessions !== session) throw new Restarted();
       if (ok) return;
       if (this.broken) throw this.broken;
     }

@@ -28,7 +28,7 @@ export type DeviceInfo = {
   ram: { free: number; total: number };
   battery: "powered" | "low" | "ok" | "unknown";
   charging: boolean;
-  /** The extension documents have (tns), and an OS update file's. */
+  /** The extension documents have (tns), and an OS update file's, without the dot. */
   ext: { file: string; os: string };
   hwType: number;
   lcd: { width: number; height: number };
@@ -245,7 +245,8 @@ export class Session {
       const name = new Scan(await this.read()).skip(1).str();
       await this.write(Uint8Array.of(0x03));
       const e = new Scan(await this.read()).skip(1);
-      const ext = { file: e.str(), os: e.str() };
+      // A real CX II says ".tns" and ".tcc2", with the dot.
+      const ext = { file: e.str().replace(/^\./, ""), os: e.str().replace(/^\./, "") };
       return {
         name,
         // The minor byte holds two digits: 5, 30, 564 is OS 5.3.0.564.

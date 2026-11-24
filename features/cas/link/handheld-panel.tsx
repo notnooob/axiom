@@ -168,7 +168,8 @@ export function HandheldPanel({
               </Button>
             )}
             <p className="text-xs text-muted-foreground">
-              Turn the handheld on and unlock it first. If it won't connect, close TI&apos;s own software, which holds the cable while it&apos;s open.
+              Turn the handheld on and unlock it first. Each time it&apos;s plugged back in, connect it here again: the browser forgets it when
+              it&apos;s unplugged. If it won&apos;t connect, close TI&apos;s own software, which holds the cable while it&apos;s open.
             </p>
           </div>
         ) : (
@@ -225,7 +226,8 @@ export function HandheldPanel({
                     {e.dir ? <FolderClosed className="size-4 shrink-0" aria-hidden /> : <File className="size-4 shrink-0" aria-hidden />}
                     <span className="min-w-0 flex-1 truncate">{e.name}</span>
                     {!e.dir && <span className="text-xs text-muted-foreground tabular-nums">{kb(e.size)}</span>}
-                    {e.date > 0 && <span className="hidden text-xs text-muted-foreground sm:inline">{new Date(e.date * 1000).toLocaleDateString()}</span>}
+                    {/* A CX II gives some files a count rather than a date (1 for NspireLogs.zip): show real dates only. */}
+                    {e.date > 946_684_800 && <span className="hidden text-xs text-muted-foreground sm:inline">{new Date(e.date * 1000).toLocaleDateString()}</span>}
                   </div>
                 ))
               )}

@@ -26,19 +26,35 @@ export class FakeCalc {
   /** The number of the host message it will take next (null until the first): it ignores any other, as the real one does. */
   expected: number | null = null;
   sawRetry = false;
+  /** Just plugged in, its handshake not offered yet: it acknowledges everything and answers nothing. */
+  private early = false;
 
   pipe: Pipe = {
     read: () => (this.out.length ? Promise.resolve(this.out.shift()!) : new Promise((r) => this.readers.push(r))),
     write: async (b) => this.receive(b),
   };
 
-  /** resume: a calculator still in an earlier host's session, waiting for that message number; it offers no handshake. */
-  constructor(opts: { resume?: number } = {}) {
+  /**
+   * resume: a calculator still in an earlier host's session, waiting for that message number; it offers no handshake.
+   * late: one just plugged in that offers its handshake only after this many ms, as a real CX II does (every 15 s).
+   */
+  constructor(opts: { resume?: number; late?: number } = {}) {
     if (opts.resume !== undefined) {
       this.expected = opts.resume;
       return;
     }
-    // The calculator opens with its handshake: an address request, then the time.
+    if (opts.late) {
+      this.early = true;
+      setTimeout(() => this.handshake(), opts.late);
+      return;
+    }
+    this.handshake();
+  }
+
+  /** An address request, then the time; after it, the first number the host sends is the one it counts from. */
+  private handshake() {
+    this.early = false;
+    this.expected = null;
     this.sendNnse(Svc.AddrReq, Uint8Array.from([0, ...new Array(64).fill(0x41)]));
     this.sendNnse(Svc.Time, Uint8Array.of(0));
   }
@@ -69,6 +85,10 @@ export class FakeCalc {
       if (m.reqAck === 0x09) this.sawRetry = true;
       if (m.service === Svc.Stream && this.dropAck) {
         this.dropAck--;
+        continue;
+      }
+      if (this.early) {
+        if (m.service === Svc.Stream) this.push(encodeNnse({ service: Svc.Stream | Svc.Ack, src: Addr.Calc, dest: Addr.Me, reqAck: 0, seqno: m.seqno, data: new Uint8Array(0) }));
         continue;
       }
       // Only the next number counts; anything else is ignored without a word.

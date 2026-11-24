@@ -103,6 +103,16 @@ describe("a handheld on the link", () => {
     expect((await again.list("/Examples")).map((e) => e.name)).toEqual(["Welcome.tns"]);
   }, 30_000);
 
+  it("waits for the handshake of one just plugged in, which acknowledges but doesn't answer before it", async () => {
+    // As a real CX II did: picked in the browser 9 s before its handshake came round.
+    const calc = new FakeCalc({ late: 4000 });
+    const saved: number[] = [];
+    const h = await Handheld.over(new NnseLink(calc.pipe, { onSeq: (n) => saved.push(n) }), true);
+    expect(h.info.name).toBe("TI-Nspire CX II CAS");
+    expect((await h.list("/")).map((e) => e.name)).toEqual(["Examples"]);
+    expect(saved.at(-1)).toBe(calc.expected);
+  }, 30_000);
+
   it("sends again when an acknowledgement goes missing", async () => {
     const { calc, h } = await connect();
     calc.dropAck = 1;
