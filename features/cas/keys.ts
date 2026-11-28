@@ -25,6 +25,10 @@ export type Key =
   | { k: "tab" }
   | { k: "esc" }
   | { k: "menu" }
+  /** ctrl then menu: the context menu for what's selected, where the page has one. */
+  | { k: "ctxmenu" }
+  /** The var key: the problem's variables to pick from. */
+  | { k: "vars" }
   | { k: "doc" }
   | { k: "clear" }
   | { k: "insertPage" }
@@ -54,7 +58,7 @@ export function keyFromEvent(e: KeyboardEvent | ReactKeyboardEvent): Key | null 
       case "enter":
         return { k: "approx" };
       case "m":
-        return { k: "menu" };
+        return e.shiftKey ? { k: "ctxmenu" } : { k: "menu" };
       case "k":
         return { k: "doc" };
       case "i":
@@ -113,7 +117,7 @@ export function keyFromEvent(e: KeyboardEvent | ReactKeyboardEvent): Key | null 
     case "Escape":
       return { k: "esc" };
     case "ContextMenu":
-      return { k: "menu" };
+      return { k: "ctxmenu" };
   }
   if (e.key.length === 1 && !e.altKey) return { k: "char", c: e.key };
   return null;

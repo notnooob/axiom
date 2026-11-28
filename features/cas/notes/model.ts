@@ -27,7 +27,7 @@ export const isMath = (r: NotesRun): r is NotesMath => typeof r === "object" && 
  * gives the caret somewhere to land at the end of a line.
  */
 export function mathBoxHtml(r: NotesMath, mark = false): string {
-  const flags = `${r.approx ? " data-approx" : ""}${r.hideIn ? " data-hide-in" : ""}${r.hideOut ? " data-hide-out" : ""}${mark ? " data-new" : ""}`;
+  const flags = `${r.approx ? " data-approx" : ""}${r.hideIn ? " data-hide-in" : ""}${r.hideOut ? " data-hide-out" : ""}${r.inactive ? " data-inactive" : ""}${r.warn ? ` data-warn="${esc(r.warn)}"` : ""}${mark ? " data-new" : ""}`;
   return (
     `<span data-math${flags} contenteditable="false" class="nb-box nb-math">` +
     `<span data-in contenteditable="true" spellcheck="false">${esc(r.math)}</span>` +
@@ -45,15 +45,22 @@ export function chemBoxHtml(text: string, mark = false): string {
 export const commentHtml = (text: string, by: "Teacher" | "Reviewer", mark = false) =>
   `<span data-comment="${by}"${mark ? " data-new" : ""} contenteditable="false" class="nb-comment"><span data-in contenteditable="true" spellcheck="false">${esc(text)}</span></span>​`;
 
+/** A slider's place in the text: an empty box the page draws the slider into, stepped over like a maths box. */
+export const sliderHtml = (name: string) => `<span data-slider="${esc(name)}" contenteditable="false" class="nb-slider"></span>​`;
+
 function runHtml(r: NotesRun): string {
   if (typeof r === "string") return esc(r);
   if ("text" in r) {
     let h = esc(r.text);
     for (const [k, tag] of STYLE_TAGS) if (r[k]) h = `<${tag}>${h}</${tag}>`;
+    if (r.color || r.fill) h = `<span style="${r.color ? `color:${esc(r.color)};` : ""}${r.fill ? `background-color:${esc(r.fill)};` : ""}">${h}</span>`;
+    // Format Text's font and size: the size relative to the page's 11 points.
+    if (r.size || r.serif) h = `<span style="${r.size ? `font-size:${r.size / 11}em;` : ""}${r.serif ? "font-family:var(--font-casmath);" : ""}">${h}</span>`;
     return h;
   }
   if ("math" in r) return mathBoxHtml(r);
   if ("chem" in r) return chemBoxHtml(r.chem);
+  if ("slider" in r) return sliderHtml(r.slider);
   return commentHtml(r.comment, r.by);
 }
 
@@ -65,8 +72,12 @@ export function notesHtml(paras: NotesRun[][]): string {
 
 type Acc = { paras: NotesRun[][]; fresh: boolean };
 
-const same = (a: NotesStyle, b: NotesStyle) => STYLE_TAGS.every(([k]) => Boolean(a[k]) === Boolean(b[k]));
-const plain = (st: NotesStyle) => STYLE_TAGS.every(([k]) => !st[k]);
+/** Every setting a run of text can carry: the tags' flags, colours, size and font. */
+const STYLE_KEYS: (keyof NotesStyle)[] = [...STYLE_TAGS.map(([k]) => k), "color", "fill", "size", "serif"];
+/** A style with only what's switched on, so false and unset compare alike. */
+const settled = (st: NotesStyle): NotesStyle => Object.fromEntries(STYLE_KEYS.filter((k) => st[k]).map((k) => [k, st[k]]));
+const same = (a: NotesStyle, b: NotesStyle) => STYLE_KEYS.every((k) => (a[k] || undefined) === (b[k] || undefined));
+const plain = (st: NotesStyle) => STYLE_KEYS.every((k) => !st[k]);
 
 function current(a: Acc): NotesRun[] {
   if (a.fresh || !a.paras.length) {
@@ -82,7 +93,7 @@ function addText(a: Acc, text: string, st: NotesStyle) {
   const last = para.at(-1);
   if (typeof last === "string" && plain(st)) para[para.length - 1] = last + text;
   else if (last && typeof last === "object" && "text" in last && same(last, st)) para[para.length - 1] = { ...last, text: last.text + text };
-  else para.push(plain(st) ? text : { text, ...Object.fromEntries(STYLE_TAGS.filter(([k]) => st[k]).map(([k]) => [k, true])) });
+  else para.push(plain(st) ? text : { text, ...settled(st) });
 }
 
 function styleOf(el: HTMLElement, st: NotesStyle): NotesStyle {
@@ -94,6 +105,16 @@ function styleOf(el: HTMLElement, st: NotesStyle): NotesStyle {
   if (tag === "s" || tag === "strike" || tag === "del" || el.style.textDecoration.includes("line-through")) next.s = true;
   if (tag === "sub") next.sub = true;
   if (tag === "sup") next.sup = true;
+  // Text color and Fill color, however the browser wrote them (a <font color>, or a span's style).
+  const color = el.getAttribute("color") || el.style.color;
+  const fill = el.style.backgroundColor;
+  if (color) next.color = color;
+  if (fill) next.fill = fill;
+  // Format Text's size (in em of the page's 11 points) and font.
+  const em = /^([\d.]+)em$/.exec(el.style.fontSize);
+  if (em) next.size = Math.round(Number(em[1]) * 11);
+  if (el.style.fontFamily.includes("casmath")) next.serif = true;
+  if (next.size === 11) delete next.size;
   return next;
 }
 
@@ -114,11 +135,17 @@ function walk(n: Node, st: NotesStyle, a: Acc) {
         ...(c.dataset.approx !== undefined ? { approx: true } : {}),
         ...(c.dataset.hideIn !== undefined ? { hideIn: true } : {}),
         ...(c.dataset.hideOut !== undefined ? { hideOut: true } : {}),
+        ...(c.dataset.inactive !== undefined ? { inactive: true } : {}),
+        ...(c.dataset.warn ? { warn: c.dataset.warn } : {}),
       });
       continue;
     }
     if (c.dataset.chem !== undefined) {
       current(a).push({ chem: text(c.querySelector("[data-in]")) });
+      continue;
+    }
+    if (c.dataset.slider) {
+      current(a).push({ slider: c.dataset.slider });
       continue;
     }
     if (c.dataset.comment) {
@@ -154,6 +181,7 @@ export function runText(r: NotesRun): string {
   if ("text" in r) return r.text;
   if ("math" in r) return `[${r.math}${r.out !== undefined ? ` → ${r.out}` : ""}]`;
   if ("chem" in r) return `[chem ${r.chem}]`;
+  if ("slider" in r) return `[slider ${r.slider}]`;
   return `[${r.by} comment: ${r.comment}]`;
 }
 
@@ -162,7 +190,7 @@ export function runText(r: NotesRun): string {
 /**
  * The page as TI's r2dtotree. Experimental, like all of export: text, its
  * formatting, and maths boxes with their results; chem boxes and comments go
- * as text.
+ * as text, and sliders are left out.
  */
 export function notesFmtxt(paras: NotesRun[][]): string {
   const styles: NotesStyle[] = [{}];
@@ -187,6 +215,8 @@ export function notesFmtxt(paras: NotesRun[][]): string {
           }
           if (typeof r === "string") return word(r, 0);
           if ("text" in r) return word(r.text, fmt(r));
+          // A slider has no place in TI's text: its variable is what's kept.
+          if ("slider" in r) return "";
           return word("chem" in r ? r.chem : `${r.by}: ${r.comment}`, 0);
         })
         .join("");
@@ -196,9 +226,12 @@ export function notesFmtxt(paras: NotesRun[][]): string {
   const entries = styles
     .map(
       (st, i) =>
-        `<formatEntry entryIndex="${i}" entryID="${i}" entryRefCnt="1" tc="0" fc="268435199" fs="11" fst="${(st.b ? 1 : 0) | (st.i ? 2 : 0)}" cc="0" ` +
-        `fest="${st.s ? 1 : 0}" feun="${st.u ? 1 : 0}" fesub="${st.sub ? 1 : 0}" fesup="${st.sup ? 1 : 0}" fn0="TI-Nspire Sans"></formatEntry>`,
+        `<formatEntry entryIndex="${i}" entryID="${i}" entryRefCnt="1" tc="0" fc="268435199" fs="${st.size ?? 11}" fst="${(st.b ? 1 : 0) | (st.i ? 2 : 0)}" cc="0" ` +
+        `fest="${st.s ? 1 : 0}" feun="${st.u ? 1 : 0}" fesub="${st.sub ? 1 : 0}" fesup="${st.sup ? 1 : 0}" fn0="${st.serif ? "TI-Nspire" : "TI-Nspire Sans"}"></formatEntry>`,
     )
     .join("");
   return `<r2dtotree version="1"><formatManager tableSize="${styles.length}" capacity="${styles.length}">${entries}</formatManager><node name="1doc">${body}</node></r2dtotree>`;
 }
+
+/** The sliders the text places, by name. */
+export const placedSliders = (paras: NotesRun[][]): Set<string> => new Set(paras.flatMap((p) => p.flatMap((r) => (typeof r === "object" && "slider" in r ? [r.slider] : []))));

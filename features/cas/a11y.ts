@@ -48,6 +48,7 @@ const APP_SAID: Record<Page["kind"], string> = {
   geometry: "Geometry",
   python: "Python",
   pyshell: "Python Shell",
+  program: "Program Editor",
   unsupported: "an app Axiom doesn't have yet",
 };
 

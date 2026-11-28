@@ -42,6 +42,12 @@ export type WizardField = {
   check?: boolean;
   /** The label on its own line and the field across the dialog under it, for a label that's a question. */
   stacked?: boolean;
+  /** OK refuses an empty field, as the handheld's Input Error does ("Required field is empty!"). */
+  required?: boolean;
+  /** What each of `options` puts in the command: a worded choice ("Ha: μ > μ0") that builds a code (1). */
+  codes?: string[];
+  /** Greyed and skipped, as the handheld shows a setting that doesn't apply here (Grid in Plane Geometry). */
+  disabled?: boolean;
 };
 
 export type MenuAction =
@@ -61,6 +67,12 @@ export type MenuAction =
       build: string;
       /** false: the arrow button only on dropdown fields (Window Settings). */
       arrows?: boolean;
+      /**
+       * A first step (Num of Lists, Data Input Method): OK opens the dialog
+       * this returns from its values instead of building, and Esc there
+       * comes back to this one, as on the handheld.
+       */
+      then?: (values: string[]) => Extract<MenuAction, { kind: "wizard" }>;
     }
   /** An app-level action handled by the app, e.g. "clearHistory". */
   | { kind: "app"; id: string };

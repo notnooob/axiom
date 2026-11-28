@@ -145,6 +145,8 @@ export type GraphsPage = {
   kind: "graphs";
   id: number;
   problem?: number;
+  /** View ▸ Hide Scale in the Plane Geometry view: the 1 cm bar at the top right is hidden. */
+  hideScale?: boolean;
   /** The imported card, written back unchanged on export while the page is unedited. */
   xml?: string;
   functions: GraphFunction[];
@@ -170,6 +172,10 @@ export type GraphsPage = {
   texts?: GraphText[];
   /** What Select ▸ Region picked: marks and texts by index, which del deletes. */
   selected?: { marks: number[]; texts: number[] };
+  /** The function last clicked, for its context menu (drawn bolder). */
+  pick?: number;
+  /** The context menu's Pin: the view stays where it is. */
+  pinAll?: boolean;
   /** MathDraw: a stroke drawn on the graph becomes the line or circle it looks like. */
   mathDraw?: boolean;
   /** View: Graphing (unset), Plane Geometry (no axes) or 3D Graphing. */
@@ -182,13 +188,23 @@ export type GraphsPage = {
   hideEndValues?: boolean;
   hideGuides?: boolean;
   /** Graphs & Geometry Settings, as the dialog's fields left them. */
-  gsettings?: { digits?: string; graphAngle?: string; geoAngle?: string; hideLabels?: boolean; tooltips?: boolean; poi?: boolean; intAngles?: boolean; labelPoints?: boolean; analyticInPlane?: boolean };
+  gsettings?: GeoSettings;
   /** Path Plot: a point running along a graph, drawing it as it goes. */
   pathPlot?: { kind: "fn" | "par"; n: number; started: number };
   /** Path Setup: how long a Path Plot takes, in seconds. */
   pathSeconds?: number;
   /** Geometry ▸ tools on the graph: a construction drawn over it, in its coordinates. */
-  geo?: { objects: GeoObj[]; tool?: { name: GeoTool; picked: string[] } | null; sel?: string | null };
+  geo?: {
+    objects: GeoObj[];
+    tool?: { name: GeoTool; picked: string[] } | null;
+    sel?: string | null;
+    /** As on a Geometry page: a label being typed or an object being redefined (the selected object's menu). */
+    mode?: GeoMode | null;
+    /** As on a Geometry page: the objects Geometry Trace follows, and the ones pinned in place. */
+    traced?: string[];
+    traceErased?: number;
+    pinned?: string[];
+  };
   /** Geometry Trace: a moved graph leaves its earlier positions drawn faintly; the number goes up on each Erase. */
   geoTrace?: boolean;
   traceErased?: number;
@@ -219,10 +235,46 @@ export type ListsPage = {
   problem?: number;
   cols: ListsColumn[];
   sel: ListsSel;
+  /** Actions ▸ Select (or ▲ from a column's name): the whole row or column of the selection is picked, for its context menu. Any key lets it go. */
+  pick?: "row" | "col";
   /** The cell being edited, or null. */
   edit: EditState | null;
-  /** Table ▸ Switch to Table: the page shows the problem's functions as a table, x from start in steps of step. */
-  table?: { start: number; step: number };
+  /**
+   * Table ▸ Switch to Table: the page shows the problem's functions as a
+   * table, x from start in steps of step. `fns`: the functions shown, by
+   * number, in column order (all of them when unset); `col`: the selected column.
+   */
+  table?: {
+    start: number;
+    step: number;
+    fns?: number[];
+    col?: number;
+    /** Function columns' widths set with Actions ▸ Resize, in cqw, by column; unset columns share what's left evenly. */
+    widths?: Record<number, number>;
+    /** Resize Column Width under way on the picked column: ◄ ► change it, Enter keeps it, Esc puts back `from`. */
+    resize?: { from?: number };
+  };
+  /** Column widths set with Resize, in cqw, by column; unset is the standard width. */
+  widths?: Record<number, number>;
+  /**
+   * A mode the arrows drive until Enter or Esc, as on the handheld: Move
+   * Column (to: the gap it goes into), Resize Column Width (from: the width
+   * before), Fill (how far the range reaches down and right).
+   */
+  mode?:
+    | { kind: "move"; to: number }
+    | { kind: "resize"; from: number }
+    | { kind: "fill"; rows: number; cols: number }
+    /** Resize Row Height: ▲ ▼ change the selected row's height. */
+    | { kind: "rowsize"; from: number }
+    /** Select Formula Range, while a formula is being edited: the arrows stretch a range from the cell, written into the formula at the cursor. */
+    | { kind: "range"; base: EditState; to: { row: number; col: number } };
+  /** Rows' heights (cqw) where Resize Row Height changed them. */
+  heights?: Record<number, number>;
+  /** Data ▸ Auto, Exact or Approximate for a column's formulas, in place of the document's setting. */
+  colModes?: Record<number, "auto" | "exact" | "approx">;
+  /** Color ▸ Fill Color and Text Color, by cell ("col:row" in the selection's rows). */
+  styles?: Record<string, { fill?: string; text?: string }>;
 };
 
 /**
@@ -251,7 +303,8 @@ export type DataStatsPage = {
   histScale?: HistScale;
   /** A regression command (LinRegMx, QuadReg …) shown with its equation. */
   regression?: string;
-  movable?: { m: number; b: number; lock?: boolean };
+  /** The movable line: y = m·x + b, or with one list a vertical line at x = vx, as the handheld draws it then. */
+  movable?: { m: number; b: number; lock?: boolean; vx?: number };
   /** Analyze ▸ Residuals: squares from each point to the curve, and a plot of the residuals under the data. */
   residualSquares?: boolean;
   residualPlot?: boolean;
@@ -259,8 +312,8 @@ export type DataStatsPage = {
   functions?: string[];
   /** Plot Value: expressions (mean(a) …) drawn as vertical lines. */
   values?: string[];
-  /** Shade Under Function: which plotted function (its index in functions) and the bounds, as typed. */
-  shade?: { fn: number; from: string; to: string };
+  /** Shade Under Function: which plotted function (its index in functions) and the bounds, as typed; Shade P value adds the other tail (also) and names the area (label). */
+  shade?: { fn: number; from: string; to: string; also?: { from: string; to: string }; label?: string };
   normalPdf?: boolean;
   /**
    * Add Y Summary List: how many of each x value (or category), in place of
@@ -301,6 +354,8 @@ export type DataStatsPage = {
   digits?: string;
   diagnostics?: boolean;
   xml?: string;
+  /** The context menu's Color ▸ Fill Color: the plot's fill (unset, the usual blue). */
+  fill?: string;
 };
 
 /** A Python program in the editor: one file per page, as on the handheld. */
@@ -310,19 +365,45 @@ export type ShellLine = { kind: "in" | "out" | "err"; text: string };
 export type PyShellPage = { kind: "pyshell"; id: number; problem?: number; lines: ShellLine[]; input: string };
 
 /** Text formatting in Notes. */
-export type NotesStyle = { b?: boolean; i?: boolean; u?: boolean; s?: boolean; sub?: boolean; sup?: boolean };
-export type NotesMath = { math: string; out?: string; approx?: boolean; hideIn?: boolean; hideOut?: boolean };
+/** Text formatting: Format text's buttons, and Text color and Fill color (CSS colours). */
+/** size: Format Text's size in points (11 unless set); serif: its TI-Nspire font rather than TI-Nspire Sans. */
+export type NotesStyle = { b?: boolean; i?: boolean; u?: boolean; s?: boolean; sub?: boolean; sup?: boolean; color?: string; fill?: string; size?: number; serif?: boolean };
+/** A maths box. inactive: Deactivate keeps its result as it is; warn: the warning its result came with (Show Warning Info). */
+export type NotesMath = { math: string; out?: string; approx?: boolean; hideIn?: boolean; hideOut?: boolean; inactive?: boolean; warn?: string };
 /**
  * A piece of a Notes paragraph: plain text (a string), formatted text, a maths
  * box (its input, and its result once worked out), a chem box, or a comment.
  */
-export type NotesRun = string | ({ text: string } & NotesStyle) | NotesMath | { chem: string } | { comment: string; by: "Teacher" | "Reviewer" };
-export type NotesPage = { kind: "notes"; id: number; problem?: number; paras: NotesRun[][]; xml?: string };
+export type NotesRun = string | ({ text: string } & NotesStyle) | NotesMath | { chem: string } | { comment: string; by: "Teacher" | "Reviewer" } | NotesSliderRun;
+/** Insert ▸ Slider: where in the text a page's slider (by name, from `sliders`) sits. */
+export type NotesSliderRun = { slider: string };
+/** hideAnswer: Templates ▸ Hide Answer (Q&A), the answers of a Q&A page hidden. */
+export type NotesPage = { kind: "notes"; id: number; problem?: number; paras: NotesRun[][]; xml?: string; hideAnswer?: boolean; sliders?: Slider[] };
 
 /**
  * A Geometry page: its construction, the tool in use (and what it has picked so
  * far), the selected object, and whether the axes and grid show.
  */
+/** Graphs & Geometry Settings, as the dialog's fields left them (one dialog for both apps, as on the handheld). */
+export type GeoSettings = { digits?: string; graphAngle?: string; geoAngle?: string; hideLabels?: boolean; tooltips?: boolean; poi?: boolean; intAngles?: boolean; labelPoints?: boolean; analyticInPlane?: boolean };
+
+type GeoPt = { x: number; y: number };
+/**
+ * A Geometry page's pointing mode other than a construction tool, as the
+ * handheld's Actions items work: Calculate (pick the expression, a value
+ * for each variable, then where the result goes), Redefine (pick a point,
+ * then where it goes), Set Conditions (pick an object), MathDraw, Select ▸
+ * Region and Zoom – Box (drag a box), and Label (typing an object's label
+ * in place).
+ */
+export type GeoMode =
+  | { kind: "calculate"; text?: number; expr?: string; names?: string[]; vars?: Record<string, string>; place?: GeoPt }
+  | { kind: "redefine"; id?: string }
+  | { kind: "conditions" }
+  | { kind: "mathdraw" }
+  | { kind: "region" | "zoombox"; from?: GeoPt; to?: GeoPt }
+  | { kind: "label"; id: string; text: string };
+
 export type GeometryPage = {
   kind: "geometry";
   id: number;
@@ -338,14 +419,43 @@ export type GeometryPage = {
   view?: { x: number; y: number; w: number };
   /** Texts placed with Actions ▸ Text, at a point of the plane (cm). */
   texts?: GraphText[];
+  /** View ▸ Hide Scale: the "1 cm" bar at the top right taken away. */
+  hideScale?: boolean;
+  /** View ▸ Hide Object Selection Guides: the tool's prompt and the page's hint taken away. */
+  hideGuides?: boolean;
+  /** Geometry Trace: these objects leave their earlier places drawn faintly as things move; Erase Geometry Trace counts up. */
+  traced?: string[];
+  traceErased?: number;
+  /** The context menu's Pin: these points stay where they are when dragged. */
+  pinned?: string[];
+  /** The page's own Pin: nothing drags and the view doesn't pan or zoom by pointing. */
+  pinAll?: boolean;
+  /** Trace ▸ Path Plot ▸ Path Setup: how long a Path Plot takes, in seconds, kept for when the page shows graphs. */
+  pathSeconds?: number;
+  /** Calculate, Redefine, Set Conditions, MathDraw, a box being dragged, or a label being typed. */
+  mode?: GeoMode | null;
+  /** What Select ▸ Region took in: Delete and Hide Selection act on them all. */
+  multi?: string[];
+  /** Insert Slider: variables the page's Calculate and conditions can use, shared with the problem. */
+  sliders?: Slider[];
+  gsettings?: GeoSettings;
+  /** Window Settings' view, for Zoom – User. */
+  userView?: { x: number; y: number; w: number };
   /** The imported card, written back unchanged on export while the page is unedited. */
   xml?: string;
 };
 
 /** A page from an app that isn't built yet (Lua, Widgets…), kept so the document stays whole. */
+/**
+ * The Program Editor: a function or program's text, Define line to End line,
+ * as it's being written. stored: the text as last stored in the problem (the
+ * name shows * while they differ); readOnly: opened with View; status: the
+ * header's message after Check Syntax or Store, until the next change.
+ */
+export type ProgramPage = { kind: "program"; id: number; problem?: number; name: string; source: string; stored?: string; readOnly?: boolean; status?: string };
 export type UnsupportedPage = { kind: "unsupported"; id: number; problem?: number; app: string; xml?: string };
 
-export type Page = CalculatorPage | GraphsPage | ListsPage | PythonPage | PyShellPage | NotesPage | UnsupportedPage | DataStatsPage | GeometryPage;
+export type Page = CalculatorPage | GraphsPage | ListsPage | PythonPage | PyShellPage | NotesPage | UnsupportedPage | DataStatsPage | GeometryPage | ProgramPage;
 
 export type CasDocument = {
   title: string;

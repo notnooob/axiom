@@ -39,7 +39,11 @@ import { RENAME_IN } from "../engine/translate";
 export const CURVE = [palette.casF1, palette.casF2, palette.casF3, palette.casF4, palette.casF5, palette.casF6];
 export const curveColour = (n: number) => CURVE[(n - 1) % CURVE.length]!;
 /** A function's colour: its Attributes' choice, or its place in the palette. */
-const fnColour = (page: GraphsPage, n: number) => NAMED_COLOURS[page.functions.find((f) => f.n === n)?.attrs?.colour ?? ""] ?? curveColour(n);
+const fnColour = (page: GraphsPage, n: number) => {
+  const c = page.functions.find((f) => f.n === n)?.attrs?.colour ?? "";
+  // A name from Attributes, or a hex value from the context menu's Color ▸.
+  return NAMED_COLOURS[c] ?? (c.startsWith("#") ? c : curveColour(n));
+};
 /** Relations take the next colours after the functions'. */
 const relColour = (page: GraphsPage, n: number) => curveColour(page.functions.length + n);
 /** Parametric curves take the colours after the relations'. */
@@ -69,6 +73,7 @@ export function GraphsApp({
   onToolX,
   onBox,
   onMathDraw,
+  onPick,
   onConfirm,
   onToolFn,
   onEditFn,
@@ -94,6 +99,8 @@ export function GraphsApp({
   onToolX: (x: number) => void;
   /** MathDraw: a finished stroke, in graph units. */
   onMathDraw?: (pts: [number, number][]) => void;
+  /** A click on a graph (its number) or on empty space (null). */
+  onPick?: (n: number | null) => void;
   /** Zoom – Box: the pointer moved the crosshair (set: false) or clicked a corner (set: true). */
   onBox?: (x: number, y: number, set: boolean) => void;
   /** A click that sets a bound at x, as Enter does. */
@@ -496,6 +503,11 @@ export function GraphsApp({
         else onToolX(traceAt(e));
         return;
       }
+      // The page's Pin holds the view still.
+      if (page.pinAll) {
+        onPick?.(graphAt(e) ?? null);
+        return;
+      }
       drag.current = { x: e.clientX, y: e.clientY, w, moved: false };
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     },
@@ -524,7 +536,9 @@ export function GraphsApp({
         if (n !== undefined && n !== tool.fn) onToolFn(n);
       } else if (tool) onToolX(tool.kind === "bounds" ? xAt(e.clientX) : traceAt(e));
     },
-    onPointerUp: () => {
+    onPointerUp: (e: ReactPointerEvent) => {
+      // A click (no drag) on a graph picks it, for its context menu; on empty space it lets it go.
+      if (drag.current && !drag.current.moved) onPick?.(graphAt(e) ?? null);
       drag.current = null;
       if (stroke) {
         if (stroke.length > 4) onMathDraw?.(stroke);
@@ -822,6 +836,13 @@ export function GraphsApp({
               </div>
             );
           })}
+        {/* Plane Geometry's scale at the top right, as the Geometry app shows it: a bar one unit (1 cm) long at this zoom. */}
+        {page.view === "plane" && !page.hideScale && size.w > 0 && (
+          <div aria-hidden className="pointer-events-none absolute top-[1.4cqw] right-[2cqw] flex flex-col items-center text-[2.8cqw] text-casInk">
+            <span className="h-[0.8cqw] border-x border-b border-casInk" style={{ width: `${size.w / (page.window.xmax - page.window.xmin)}px` }} />
+            <span className="italic">1 cm</span>
+          </div>
+        )}
         {sliders.map((sl, k) => (
           <SliderView
             key={sl.name}
@@ -1130,6 +1151,8 @@ export function FunctionTable({
   giac,
   ready,
   className,
+  selected,
+  widths,
 }: {
   fns: TableFn[];
   start: number;
@@ -1137,6 +1160,10 @@ export function FunctionTable({
   giac: Giac | null;
   ready: boolean;
   className?: string;
+  /** The column picked with ◄ ► (Lists & Spreadsheet's table), outlined. */
+  selected?: number;
+  /** Function columns' widths in cqw from Actions ▸ Resize, by column; the others share what's left. */
+  widths?: Record<number, number>;
 }) {
   const [cols, setCols] = useState<(TableFn & { ys: number[] })[]>([]);
   const key = `${fns.map((f) => `${f.name}:${f.text}`).join("|")}@${start}:${step}`;
@@ -1161,16 +1188,19 @@ export function FunctionTable({
       </div>
     );
   return (
-    <div className={cn("overflow-y-auto bg-casScreen font-casui text-[3.6cqw] scrollbar-none", className)}>
-      <div className="grid" style={{ gridTemplateColumns: `repeat(${cols.length + 1}, minmax(0, 1fr))` }}>
+    <div className={cn("overflow-auto bg-casScreen font-casui text-[3.6cqw] scrollbar-none", className)}>
+      <div
+        className="grid"
+        style={{ gridTemplateColumns: ["minmax(14cqw, 1fr)", ...cols.map((_, i) => (widths?.[i] !== undefined ? `${widths[i]}cqw` : "minmax(0, 1fr)"))].join(" ") }}
+      >
         {/* Two header rows, as on the handheld: the column name, then its definition. */}
         <div className="row-span-2 flex items-start justify-center border-b-[0.3cqw] border-r border-casRule bg-casRowAlt pt-[1.4cqw]">
           x
         </div>
-        {cols.map((c) => (
+        {cols.map((c, i) => (
           <div
             key={c.name}
-            className="border-r border-casRule bg-casRowAlt px-[1cqw] pt-[1.2cqw]"
+            className={cn("border-r border-casRule bg-casRowAlt px-[1cqw] pt-[1.2cqw]", i === selected && "outline-solid outline-[0.5cqw] outline-offset-[-0.5cqw] outline-casInk")}
             style={{ color: curveColour(c.n) }}
           >
             f{c.n}(x):=
@@ -1823,7 +1853,8 @@ function draw(
 
   // Curves, broken at gaps and at jumps across an asymptote.
   // An Analyze Graph tool's graph is drawn bolder, so it's clear which one it searches.
-  const searched = page.tool?.kind === "bounds" && samples.length > 1 ? page.tool.fn : undefined;
+  // A graph picked for its context menu is drawn bolder too.
+  const searched = page.tool?.kind === "bounds" && samples.length > 1 ? page.tool.fn : page.pick;
   for (const s of samples) {
     const attrs = page.functions.find((f) => f.n === s.n)?.attrs;
     g.strokeStyle = fnColour(page, s.n);

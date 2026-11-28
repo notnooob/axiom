@@ -142,7 +142,7 @@ const NAV_RIGHT: Spec[] = [
     { alt: "off", kbd: "Ctrl H" },
   ),
   key("doc ▾", "doc", { k: "doc" }, { ctrl: { k: "insertPage" }, alt: "+ page", kbd: "Ctrl K. Add a page: Ctrl I" }),
-  key("menu", "menu", { k: "menu" }, { ctrl: { k: "menu" }, kbd: "Ctrl M" }),
+  key("menu", "menu", { k: "menu" }, { ctrl: { k: "ctxmenu" }, kbd: "Ctrl M. Context menu: Ctrl Shift M" }),
 ];
 
 /** The ctrl, shift, var and del row, in the main grid's columns (null is a gap). */
@@ -150,7 +150,7 @@ const MODS: (Spec | null)[] = [
   key("ctrl", "ctrl", "ctrl", { tone: "ctrl" }),
   key("⇧ shift", "shift", "shift", { alt: "CAPS" }),
   null,
-  key("var", "var", null, { ctrl: { k: "text", text: "→" }, alt: "sto →", kbd: "store is typed ->" }),
+  key("var", "var", { k: "vars" }, { ctrl: { k: "text", text: "→" }, alt: "sto →", kbd: "store is typed ->" }),
   key(stacked("del", "←"), "del", { k: "backspace" }, { ctrl: { k: "clear" }, alt: "clear", kbd: "Backspace" }),
 ];
 

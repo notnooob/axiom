@@ -100,6 +100,7 @@ export function SliderView({
   onValue,
   onTyped,
   onMenu,
+  inline = false,
 }: {
   slider: Slider;
   index: number;
@@ -113,6 +114,8 @@ export function SliderView({
   /** A value typed in place of the shown one ("2.5", "π/4"), for the page to work out. */
   onTyped: (text: string) => void;
   onMenu: (x: number, y: number) => void;
+  /** In the flow of the page (a Notes page's sliders) rather than at a place on a graph. */
+  inline?: boolean;
 }) {
   const track = useRef<HTMLDivElement>(null);
   const [typing, setTyping] = useState<string | null>(null);
@@ -270,8 +273,8 @@ export function SliderView({
         endPress();
         onMenu(e.clientX, e.clientY);
       }}
-      className="absolute flex select-none flex-col items-start font-casui [-webkit-touch-callout:none]"
-      style={{ left: place.x * size.w, top: place.y * size.h, fontSize: fs * 0.85 }}
+      className={cn("flex select-none flex-col items-start font-casui [-webkit-touch-callout:none]", inline ? "relative" : "absolute")}
+      style={inline ? { fontSize: fs * 0.85 } : { left: place.x * size.w, top: place.y * size.h, fontSize: fs * 0.85 }}
     >
       {s.minimized ? (
         <div className="flex items-center gap-[0.4em]">

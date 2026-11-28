@@ -23,7 +23,8 @@ function commandOf(item: MenuItem): string | null {
   const a = item.action;
   if (!a) return null;
   if (a.kind === "insert") return /^([^\s(]+)\(?$/.exec(a.text.trim())?.[1] ?? null;
-  if (a.kind === "wizard") return /^([^\s(:]+)[\s(]/.exec(a.build)?.[1] ?? null;
+  // A first step (Num of Lists, Data Input Method) builds nothing itself: the dialog its defaults lead to says the command.
+  if (a.kind === "wizard") return /^([^\s(:]+)[\s(]/.exec(a.then ? a.then(a.fields.map((f) => f.value ?? f.options?.[0] ?? "")).build : a.build)?.[1] ?? null;
   if (a.kind === "template") return TEMPLATE_COMMANDS[a.template] ?? null;
   return null;
 }

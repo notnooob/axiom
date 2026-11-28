@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // The engine handle's restart and replay, against a stand-in worker (no Giac).
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { CasEngine } from "./client";
+import { CasEngine, definedNames } from "./client";
 import { DEFAULT_SETTINGS } from "./evaluate";
 
 /** A worker that answers each command with itself, and fails on any containing "bad". */
@@ -62,5 +62,12 @@ describe("CasEngine", () => {
     const w = FakeWorker.all.at(-1)!;
     expect(w.received.slice(-3)).toEqual(["a:=1", "c:=3", "a+c"]);
     expect(FakeWorker.all.length).toBe(3); // the first, the restart, and one more without the bad definition
+  });
+});
+
+describe("definedNames", () => {
+  it("gives back a variable whose name Giac reserves, and leaves out the engine's own", () => {
+    const names = definedNames(["len_:=5", "a:=1", "g12f1_(x):=x^2", "purge(a)"]);
+    expect([...names]).toEqual(["len"]);
   });
 });

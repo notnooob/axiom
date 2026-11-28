@@ -12,15 +12,16 @@ import { PTT } from "../state/ptt";
  */
 
 /** The page state the menu's labels depend on. */
-export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean; hideAnalytic?: boolean; hideEndValues?: boolean; hideGuides?: boolean };
+export type GraphsMenuState = { axes: boolean; entryLine: boolean; grid: "none" | "dot" | "line"; table: boolean; hideAnalytic?: boolean; hideEndValues?: boolean; hideGuides?: boolean; view?: "plane" | "3d"; hideScale?: boolean };
 
 /** A Geometry tool on the graph. */
 const geo = (label: string, tool: string) => app(label, `geoTool:${tool}`);
 
-/** An equation template: the relation entry opened with this form in it. */
-const tpl = (label: string, form: string) => app(label, `eqtpl:${form}`);
+/** An equation template: the relation entry opened with this form in it, shown beside its name as the handheld shows it. */
+const tpl = (label: string, form: string) => ({ ...app(label, `eqtpl:${form}`), hint: form.replace(/\*/g, "·") });
 
 export function graphsMenu(s: GraphsMenuState): Menu {
+  const plane = s.view === "plane";
   const grid = (label: string, id: string, kind: GraphsMenuState["grid"]) => (s.grid === kind ? na(label, "it's the grid shown now") : app(label, id));
   return [
     sub("Actions", [
@@ -37,19 +38,28 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       app("Insert Slider", "insertSlider"),
       rule(app("MathDraw", "mathDraw")),
     ]),
+    // The view showing is greyed. Plane Geometry has no axes, so its list is the Geometry app's, which is the same app on the handheld.
     sub("View", [
-      app("Graphing", "viewGraphing"),
-      app("Plane Geometry", "viewPlane"),
+      plane ? app("Graphing", "viewGraphing") : na("Graphing", "it's the view showing"),
+      plane ? na("Plane Geometry", "it's the view showing") : app("Plane Geometry", "viewPlane"),
       PTT?.no3d ? off("3D Graphing") : app("3D Graphing", "view3d"),
-      rule(app(s.hideAnalytic ? "Show Analytic Window" : "Hide Analytic Window", "viewAnalytic")),
-      app(s.axes ? "Hide Axes" : "Show Axes", "viewHideAxes"),
-      sub("Grid", [
-        grid("No Grid", "viewNoGrid", "none"),
-        grid("Dot Grid", "viewDotGrid", "dot"),
-        grid("Lined Grid", "viewLinedGrid", "line"),
-      ]),
-      { ...app(s.entryLine ? "Hide Entry Line" : "Show Entry Line", "viewEntryLine"), hint: "Ctrl+G" },
-      app(s.hideEndValues ? "Show Axes End Values" : "Hide Axes End Values", "viewEndValues"),
+      rule(
+        plane
+          ? app(s.hideAnalytic ? "Show Analytic Window" : "Hide Analytic Window", "viewAnalytic")
+          : na("Hide Analytic Window", "for the Plane Geometry view"),
+      ),
+      ...(plane
+        ? [app(s.hideScale ? "Show Scale" : "Hide Scale", "viewScale")]
+        : [
+            app(s.axes ? "Hide Axes" : "Show Axes", "viewHideAxes"),
+            sub("Grid", [
+              grid("No Grid", "viewNoGrid", "none"),
+              grid("Dot Grid", "viewDotGrid", "dot"),
+              grid("Lined Grid", "viewLinedGrid", "line"),
+            ]),
+            { ...app(s.entryLine ? "Hide Entry Line" : "Show Entry Line", "viewEntryLine"), hint: "Ctrl+G" },
+            app(s.hideEndValues ? "Show Axes End Values" : "Hide Axes End Values", "viewEndValues"),
+          ]),
       rule(app(s.hideGuides ? "Show Object Selection Guides" : "Hide Object Selection Guides", "viewGuides")),
     ]),
     rule(
@@ -58,7 +68,7 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         app("Relation", "entryRelation"),
         sub("Equation Templates", [
           // Each opens the relation entry with the form filled in; the letters left in it become sliders when it's plotted.
-          sub("Line", [tpl("Line Slope Intercept", "y=m*x+b"), tpl("Vertical Line", "x=a"), tpl("Line Standard", "a*x+b*y=c")]),
+          sub("Line", [tpl("Line Slope Intercept", "y=m*x+b"), tpl("Vertical Line", "x=c"), tpl("Line Standard", "a*x+b*y=c")]),
           sub("Parabola", [
             tpl("Vertex form", "y=a*(x-h)^2+k"),
             tpl("Standard form", "y=a*x^2+b*x+c"),
@@ -72,7 +82,7 @@ export function graphsMenu(s: GraphsMenuState): Menu {
         ]),
         app("Parametric", "entryParametric"),
         app("Polar", "entryPolar"),
-        wiz("Scatter Plot...", "Scatter Plot", [{ label: "x:", value: "" }, { label: "y:", value: "" }], "scatter:{0}:{1}"),
+        wiz("Scatter Plot", "Scatter Plot", [{ label: "x:", value: "" }, { label: "y:", value: "" }], "scatter:{0}:{1}"),
         sub("Sequence", [app("Sequence", "entrySequence"), app("Custom", "entryCustom")]),
         app("Diff Eq", "entryDiffEq"),
       ]),
@@ -170,5 +180,62 @@ export function graphsMenu(s: GraphsMenuState): Menu {
       ]),
     ),
     rule(app("Settings...", "graphSettings")),
+  ];
+}
+
+/** What the Graphs context menu needs from the page. */
+export type GraphsContextState = GraphsMenuState & { pick?: number; pinAll?: boolean; geoTrace?: boolean; traced?: boolean; conic?: boolean };
+
+/** Window / Zoom ▸, as the menu's. */
+const windowZoom = () => graphsMenu({ axes: true, entryLine: false, grid: "none", table: false })[3]!;
+
+/**
+ * ctrl menu on a Graphs page, as the handheld's: one for the graph last
+ * clicked, one for the page. recent: the menu items used lately.
+ */
+export function graphsContextMenu(s: GraphsContextState, recent: { label: string; id: string }[], palette: [string, string][]): Menu {
+  const recentSub = sub("Recent", recent.length ? recent.slice(0, 9).map((r) => app(r.label, r.id)) : [na("(none yet)", "no menu items used on this page yet")]);
+  if (s.pick !== undefined) {
+    const menu = graphsMenu(s);
+    const analyze = menu.find((m) => m.label === "Analyze Graph")!;
+    return [
+      recentSub,
+      na("Label", "a graph is labelled with its definition"),
+      app("Attributes", "attributes"),
+      app("Hide", "graphHidePick"),
+      app("Delete", "graphDeletePick"),
+      app("Edit Relation", "graphEditPick"),
+      sub("Trace", [app("Graph Trace", "graphTrace"), app("Trace All", "traceAll"), app("Trace Step...", "traceStep"), app("Path Plot", "pathFn"), app("Path Setup...", "pathSetup")]),
+      // A function's graph isn't a conic, so Analyze Conics is greyed on it, as on the handheld.
+      sub("Analyze Graph", (analyze.items ?? []).map((m) => (m.label === "Analyze Conics" && !s.conic ? na(m.label, "this graph isn't a conic") : m))),
+      sub("Table", [
+        { ...(s.table ? na("Split-screen Table", "the table is already showing") : app("Split-screen Table", "tableSplit")), hint: "Ctrl+T" },
+        { ...(s.table ? app("Remove Table", "tableSplit") : na("Remove Table", "no table is showing")), hint: "Ctrl+T" },
+      ]),
+      na("Pin", "a graph moves with the window, so it can't be pinned"),
+      sub("Color", [
+        sub("Line Color", [...palette.map(([name, hex]) => app(name, `graphColour:${hex}`)), app("Auto", "graphColour:")]),
+        na("Fill Color", "a graph has no inside to fill"),
+        na("Text Color", "a graph has no text"),
+      ]),
+      app("Conditions...", "setConditions"),
+    ];
+  }
+  const grid = (label: string, kind: GraphsMenuState["grid"], id: string) => (s.grid === kind ? na(label, "it's the grid shown now") : app(label, id));
+  return [
+    recentSub,
+    sub("Hide/Show", [
+      na("Hide Selection", "nothing is selected"),
+      grid("Hide Grid", "none", "viewNoGrid"),
+      grid("Show Dot Grid", "dot", "viewDotGrid"),
+      grid("Show Lined Grid", "line", "viewLinedGrid"),
+      app(s.entryLine ? "Hide Entry Line" : "Show Entry Line", "viewEntryLine"),
+    ]),
+    sub("Select", [app("Region", "selectRegion"), na("Image", "there's no image on this page"), s.grid === "none" ? na("Grid", "there's no grid showing") : app("Grid", "selectGrid")]),
+    windowZoom(),
+    app("Text", "graphText"),
+    app("Delete all", "deleteAll"),
+    s.traced ? app("Erase Geometry Trace", "geoTraceErase") : na("Erase Geometry Trace", "nothing is being traced"),
+    app(s.pinAll ? "Unpin" : "Pin", "graphPinAll"),
   ];
 }

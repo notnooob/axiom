@@ -7,6 +7,7 @@
  *   tabulator      Lists & Spreadsheet  <tb:column> globalName, cells (rowId, formula)
  *   TI.Notepad     Notes             rich text (r2dtotree) with maths boxes
  *   TI.PythonEditor / TI.PythonShell  the .py file is a separate container entry
+ *   TI.ProgramEditor Program Editor  the editor's text (r2dtotree) and the text as last stored
  *   TI.DataGrapher Data & Statistics (an x/y scatter becomes a Graphs page)
  *   TI.GeoGrapher  Graphs & Geometry (geographer.ts): a Graphs or a Geometry page
  *   TI.ScriptApp   Lua: not supported
@@ -16,6 +17,12 @@ import { astToRow, chars, type Row } from "../math/tree";
 import { newId, newPage, type CasDocument, type HistoryEntry, type NotesRun, type Page } from "../state/document";
 import type { TnsContents } from "./decode";
 import { readGeoGrapher, type RawObj } from "./geographer";
+import { readDefinition } from "../engine/program";
+import { sourceOf } from "../program/model";
+import type { PageGroup } from "../state/layout";
+
+/** TI's block text (lines joined by a carriage return and ":") as lines the editor and engine read. */
+const blockLines = (v: string) => v.replace(/\r\n?/g, "\n").replace(/\n:/g, "\n");
 
 const parser = () => new DOMParser();
 
@@ -130,7 +137,7 @@ const utf8 = new TextDecoder();
 
 /** One card's page: an app built here, or an "unsupported" page that keeps its XML. */
 function card(c: Element, problem: number, files: Map<string, Uint8Array>, sym: Map<string, SymEntry>, lost: { n: number }): Page {
-  const w = first(c, "wdgt");
+  const w = kids(c, "wdgt")[0];
   const type = w?.getAttribute("type") ?? "";
   if (!w) return { kind: "unsupported", id: newId(), problem, app: "Unknown" };
   if (type === "TI.Scratchpad") return calculator(w, problem);
@@ -140,6 +147,30 @@ function card(c: Element, problem: number, files: Map<string, Uint8Array>, sym: 
     const file = text(w, "name") || "program.py";
     const src = files.get(file);
     return { kind: "python", id: newId(), problem, file, source: src ? utf8.decode(src) : "" };
+  }
+  if (type === "TI.ProgramEditor") {
+    const name = text(w, "name").trim().toLowerCase() || "program";
+    const kind = text(w, "type") === "Func" ? "Func" : "Prgm";
+    let stored: string | undefined;
+    try {
+      const def = readDefinition(blockLines(text(w, "laststoredexpr")));
+      if (def) stored = sourceOf(def);
+    } catch {
+      stored = undefined;
+    }
+    // The editor's text as it was, stored or not: the Define line, then a node per body line.
+    let source = stored;
+    const raw = text(w, "editor");
+    if (raw) {
+      const tree = parser().parseFromString(raw, "application/xml");
+      const nodes = all(tree, "node");
+      const head = nodes.find((n) => n.getAttribute("name") === "0mlstatement");
+      const block = nodes.find((n) => n.getAttribute("name") === "0prgm" || n.getAttribute("name") === "0func");
+      const define = head ? kids(head, "node")[0]?.textContent?.trim() : undefined;
+      if (define && block) source = [define, kind, ...kids(block, "node").map((n) => n.textContent ?? ""), `End${kind}`].join("\n");
+    }
+    source ??= `Define ${name}()=\n${kind}\n\nEnd${kind}`;
+    return { kind: "program", id: newId(), problem, name, source, ...(stored ? { stored } : {}) };
   }
   if (type === "TI.PythonShell") return { kind: "pyshell", id: newId(), problem, lines: [], input: "" };
   if (type === "TI.DataGrapher") {
@@ -224,15 +255,19 @@ type SymEntry = { t: string; p?: string; v: string };
 
 /**
  * The problem's variables as statements to evaluate. Numbers, lists,
- * matrices and one-line functions come across; multi-line programs and
- * functions (Func … EndFunc, t 6/7 with line breaks) and stat.* results don't
- * yet, and are counted so the user can be told.
+ * matrices, functions and programs come across; stat.* results and anything
+ * else with line breaks don't yet, and are counted so the user can be told.
  */
 function statements(sym: Map<string, SymEntry>): { run: string[]; skipped: number } {
   const run: string[] = [];
   let skipped = 0;
   for (const [name, e] of sym) {
     if (name.includes(".")) continue;
+    // Functions and programs written as blocks (Func … EndFunc, Prgm … EndPrgm) come across as their Define.
+    if (/^\s*(Func|Prgm)\b/i.test(e.v)) {
+      run.push(`Define ${name}(${e.p ?? ""})=${blockLines(e.v)}`);
+      continue;
+    }
     if (/[\r\n]/.test(e.v) || e.t === "7") {
       skipped++;
       continue;
@@ -249,6 +284,7 @@ export type Imported = { doc: CasDocument; skipped: number; lostObjects: number 
 
 export function importTns(contents: TnsContents, title: string): Imported {
   const pages: Page[] = [];
+  const groups: PageGroup[] = [];
   const pendingSym: Record<string, string[]> = {};
   let skipped = 0;
   const lost = { n: 0 };
@@ -272,10 +308,27 @@ export function importTns(contents: TnsContents, title: string): Imported {
     const root = xml.documentElement;
     for (const c of kids(root, "card")) {
       if (text(c, "isDummyCard") === "1") continue;
-      pages.push(card(c, n, contents.files, sym, lost));
+      const apps = kids(c, "wdgt");
+      if (apps.length < 2) {
+        pages.push(card(c, n, contents.files, sym, lost));
+        continue;
+      }
+      // A page with several apps (Page Layout): each is a page of its own, grouped as the
+      // card lays them out. Each keeps a card of just its own app, so export doesn't repeat them.
+      const here = apps.map((w) => {
+        const single = c.cloneNode(false) as Element;
+        for (const k of Array.from(c.children)) if (k.localName !== "wdgt") single.appendChild(k.cloneNode(true));
+        single.appendChild(w.cloneNode(true));
+        for (const [a, v] of [["clay", "0"], ["h1", "10000"], ["h2", "10000"], ["w1", "10000"], ["w2", "10000"]]) single.setAttribute(a!, v!);
+        return card(single, n, contents.files, sym, lost);
+      });
+      pages.push(...here);
+      // Side by side when the first app is narrower than the page, else one over the other; three or four as the handheld's grids.
+      const side = Number(c.getAttribute("w1") ?? "10000") < 10000;
+      groups.push({ slots: here.map((p) => p.id), layout: here.length === 2 ? (side ? 2 : 3) : here.length === 3 ? 4 : 8 });
     }
   }
   if (!pages.length) pages.push(newPage("calculator"));
-  return { doc: { title, pages, active: 0, ...(Object.keys(pendingSym).length ? { pendingSym } : {}) }, skipped, lostObjects: lost.n };
+  return { doc: { title, pages, active: 0, ...(Object.keys(pendingSym).length ? { pendingSym } : {}), ...(groups.length ? { groups } : {}) }, skipped, lostObjects: lost.n };
 }
 

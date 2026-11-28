@@ -6,7 +6,7 @@ import type { Row } from "../math/tree";
 import type { Highlight } from "../ai/highlights";
 import { FlagBadge, flagRing } from "../screen/flag";
 import type { ListsPage, ListsSel } from "../state/document";
-import { cellLine, COLS, displayRow, letter, rowsUsed } from "./sheet";
+import { cellLine, COLS, displayRow, fillRange, heightOf, letter, rowsUsed, styleAt, textAt, widthOf } from "./sheet";
 
 /** Maths two or more lines tall (a fraction, a matrix …) is drawn smaller in a cell so it fits the row; the cell line shows it full size. */
 const tall = (row: Row) => /"t":"(frac|matrix|piecewise|system|integral|bigop|limit|deriv)"/.test(JSON.stringify(row));
@@ -54,8 +54,17 @@ export function ListsApp({
 
   const cell = (row: number, col: number) => {
     const on = page.sel.row === row && page.sel.col === col;
+    // Move Column's line: the gap the column will go into, at this column's left edge.
+    const gap = page.mode?.kind === "move" && page.mode.to === col;
+    // Fill and Select Formula Range both mark the cells they cover with a dotted outline.
+    const filling = (page.mode?.kind === "fill" || page.mode?.kind === "range") && fill.has(`${row}:${col}`);
+    const style = styleAt(page, row, col);
+    // A row or column picked with Actions ▸ Select is shaded, as the handheld marks it.
+    const picked = page.pick === "col" ? col === page.sel.col : page.pick === "row" && row === page.sel.row;
     const editing = on && page.edit;
-    const isFormula = row >= 2 && (page.cols[col]?.cells[row - 2] ?? "").startsWith("=");
+    // Text (a result's name, a category) reads as words on the left, as the handheld shows it.
+    const text = editing ? null : textAt(page, row, col);
+    const isFormula = row >= 2 && !text && (page.cols[col]?.cells[row - 2] ?? "").startsWith("=");
     // The assistant's highlight on this cell (its row counts from the first row of values).
     const flag = highlights.find((h) => h.target.kind === "cell" && h.target.col === col && h.target.row === row - 1);
     return (
@@ -64,19 +73,26 @@ export function ListsApp({
         {...(on ? { "data-sel": true } : {})}
         onMouseDown={(e) => e.preventDefault()}
         onClick={() => onSelect({ row, col })}
+        style={{ width: `${widthOf(page, col)}cqw`, height: `${heightOf(page, row)}cqw`, background: style?.fill, color: style?.text }}
         className={cn(
-          "relative flex h-[6.4cqw] w-[21cqw] shrink-0 items-center overflow-hidden whitespace-nowrap border-b border-r border-casRule px-[1cqw]",
-          row >= 2 ? "justify-end" : "justify-start",
+          "relative flex shrink-0 items-center overflow-hidden whitespace-nowrap border-b border-r border-casRule px-[1cqw]",
+          gap && "border-l-[0.7cqw] border-l-casSelect",
+          filling && !on && "outline-dotted outline-[0.4cqw] outline-offset-[-0.4cqw] outline-casSelect",
+          row >= 2 && text === null ? "justify-end" : "justify-start",
           row === 1 && "bg-casTab",
           on && !editing && "outline-solid outline-[0.5cqw] outline-offset-[-0.5cqw] outline-casInk",
-          editing && "bg-casSelectSoft",
+          (editing || picked) && "bg-casSelectSoft",
           isFormula && !on && "text-[#1b4fa8]",
         )}
       >
         {/* Each cell's contents as maths, as the handheld draws them (log typed shows as log₁₀ once entered). */}
-        <span className={cn(tall(editing ? page.edit!.row : displayRow(page, row, col)) && "text-[0.62em]")}>
-          {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <MathView row={displayRow(page, row, col)} className="font-casmath" />}
-        </span>
+        {text !== null ? (
+          <span className="truncate">{text}</span>
+        ) : (
+          <span className={cn(tall(editing ? page.edit!.row : displayRow(page, row, col)) && "text-[0.62em]")}>
+            {editing ? <MathView row={page.edit!.row} cursor={page.edit!.cursor} className="font-casmath" /> : <MathView row={displayRow(page, row, col)} className="font-casmath" />}
+          </span>
+        )}
         {flag && (
           <>
             <FlagBadge n={flag.n} tone={flag.tone} className="absolute top-1/2 left-[0.6cqw] -translate-y-1/2" />
@@ -87,6 +103,7 @@ export function ListsApp({
     );
   };
 
+  const fill = new Set(fillRange(page).map((c) => `${c.row}:${c.col}`));
   const line = cellLine(page);
   return (
     <div className="absolute inset-0 flex flex-col bg-casScreen font-casui text-[calc(4cqw*var(--axiom-text,1))] text-casInk">
@@ -104,10 +121,12 @@ export function ListsApp({
                 {...(on ? { "data-sel": true } : {})}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onSelect({ row: 0, col: c })}
+                style={{ width: `${widthOf(page, c)}cqw` }}
                 className={cn(
-                  "flex h-[6.4cqw] w-[21cqw] shrink-0 items-center gap-[1.4cqw] border-b border-r border-casRule px-[1cqw]",
+                  "flex h-[6.4cqw] shrink-0 items-center gap-[1.4cqw] border-b border-r border-casRule px-[1cqw]",
+                  page.mode?.kind === "move" && page.mode.to === c && "border-l-[0.7cqw] border-l-casSelect",
                   on && "outline-solid outline-[0.5cqw] outline-offset-[-0.5cqw] outline-casInk",
-                  on && page.edit && "bg-casSelectSoft",
+                  ((on && page.edit) || (page.pick === "col" && page.sel.col === c)) && "bg-casSelectSoft",
                 )}
               >
                 <span className="text-casLabel">{letter(c)}</span>
@@ -122,7 +141,13 @@ export function ListsApp({
         </div>
         {Array.from({ length: rows - 1 }, (_, i) => i + 1).map((row) => (
           <div key={row} className="flex">
-            <div className="sticky left-0 z-5 flex h-[6.4cqw] w-[8cqw] shrink-0 items-center justify-center border-b border-r border-casRule bg-[#e8e8e8] text-[0.85em] text-casLabel">
+            <div
+              style={{ height: `${heightOf(page, row)}cqw` }}
+              className={cn(
+                "sticky left-0 z-5 flex w-[8cqw] shrink-0 items-center justify-center border-b border-r border-casRule bg-[#e8e8e8] text-[0.85em] text-casLabel",
+                page.mode?.kind === "rowsize" && page.sel.row === row && "bg-casSelectSoft",
+              )}
+            >
               {row === 1 ? "◆" : row - 1}
             </div>
             {Array.from({ length: COLS }, (_, c) => cell(row, c))}

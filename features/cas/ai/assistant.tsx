@@ -12,6 +12,8 @@ import { getToolName, isToolUIPart, lastAssistantMessageIsCompleteWithToolCalls,
 import { Combobox } from "@base-ui/react/combobox";
 import { AnimatePresence, motion, useReducedMotionConfig } from "framer-motion";
 import {
+  MousePointerClickIcon,
+  SlidersHorizontalIcon,
   NotebookPenIcon,
   TriangleIcon,
   ArrowUpIcon,
@@ -470,6 +472,8 @@ const TOOL_ICONS: Record<string, LucideIcon> = {
   ask_user: MessageCircleQuestionIcon,
   look_at_screen: EyeIcon,
   analyze_graph: CrosshairIcon,
+  select: MousePointerClickIcon,
+  set_slider: SlidersHorizontalIcon,
 };
 
 /** Running and done, as a student reads them: "Typing solve(…)", "Typed solve(…)". */
@@ -501,6 +505,8 @@ const TOOL_VERBS: Record<string, [string, string]> = {
   look_at_screen: ["Looking at the screen", "Looked at the screen"],
   highlight: ["Highlighting", "Highlighted"],
   analyze_graph: ["Analysing", "Analysed"],
+  select: ["Selecting", "Selected"],
+  set_slider: ["Setting slider", "Set slider"],
 };
 
 /** Tools that only look (and asking the student): the rest change what's on screen, so AI mode shows them live. */
@@ -538,6 +544,10 @@ function toolSubject(name: string, input: Record<string, unknown> | undefined): 
       return ((a.path as string[]) ?? []).join(" ▸ ");
     case "type_keys":
       return String(a.keys ?? "");
+    case "select":
+      return a.clear ? "nothing" : ((a.objects as string[] | undefined)?.join(", ") ?? (a.graph !== undefined ? `f${a.graph}` : a.cell !== undefined ? String(a.cell) : a.entry !== undefined ? `entry ${a.entry}` : a.box !== undefined ? `maths box ${a.box}` : a.text !== undefined ? `"${a.text}"` : ""));
+    case "set_slider":
+      return `${a.name ?? ""} = ${a.value ?? ""}`;
     case "highlight": {
       // "entry 3 on 1.1, cell B4": what it marked (pages by index, as the tool takes them).
       if (a.clear && !Array.isArray(a.items)) return "nothing (cleared)";
@@ -1666,7 +1676,7 @@ export function AssistantChat({
       ...(note ? { note } : {}),
       ...(prefs ? { preferences: prefs } : {}),
     };
-    const context = contextBlock(state, s.view === "doc" ? pageContent(s.doc, s.doc.active) : null);
+    const context = contextBlock(state, s.view === "doc" ? pageContent(s.doc, s.doc.active, s.geoValues) : null);
     clearError();
     void sendMessage({ text: text.trim(), files, metadata: { context, ...(mode !== "solve" ? { mode } : {}) } });
     setDraft("");

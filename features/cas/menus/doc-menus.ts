@@ -14,7 +14,7 @@ export const ADD_PAGE: Menu = (
     [app("Add Notes", "addNotes"), "notes"],
     [off("Add Vernier DataQuest™"), "vernier"],
     [off("Add Widget"), "widget"],
-    [off("Add Program Editor"), "program"],
+    [sub("Add Program Editor", [app("New...", "prgmNew"), app("Open...", "prgmOpen"), app("Import...", "prgmImport"), app("View...", "prgmView")]), "program"],
     // Greyed while Press-to-Test switches Python off.
     [PTT?.noPython ? off("Add Python") : sub("Add Python", [app("New...", "addPython"), app("Shell", "addShell")]), "python"],
   ] as const

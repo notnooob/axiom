@@ -173,3 +173,27 @@ export function moveSplit(doc: CasDocument, step: number): CasDocument {
   groups[g] = { ...groups[g]!, split };
   return { ...doc, groups };
 }
+
+/**
+ * A new app beside the active page, as Quick Graph and Summary Plot split
+ * the spreadsheet's screen: the two share a page (layout 2) and the new one
+ * is active. In a page already laid out, it takes an empty region, or else
+ * comes as the next page.
+ */
+export function splitWith(doc: CasDocument, page: CasDocument["pages"][number]): CasDocument {
+  const here = doc.pages[doc.active];
+  if (!here) return doc;
+  const placed = { ...page, problem: problemOf(here) };
+  const g = groupIndex(doc, here.id);
+  if (g >= 0) {
+    const empty = doc.groups![g]!.slots.indexOf(null);
+    if (empty >= 0) return fillRegion(doc, g, empty, placed);
+    const last = Math.max(...doc.groups![g]!.slots.map((id) => doc.pages.findIndex((p) => p.id === id)));
+    const pages = doc.pages.slice();
+    pages.splice(last + 1, 0, placed);
+    return { ...doc, pages, active: last + 1 };
+  }
+  const pages = doc.pages.slice();
+  pages.splice(doc.active + 1, 0, placed);
+  return { ...doc, pages, groups: [...(doc.groups ?? []), { slots: [here.id, placed.id], layout: 2 }], active: doc.active + 1 };
+}

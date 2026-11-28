@@ -1,151 +1,124 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 VCE Hub. Part of the /cas calculator: https://github.com/vcehub/cas
 import { CARET as C } from "../math/editor";
-import { app, ins, MATRIX_WIZARD, off, rule, sub, tpl, wiz, type Menu, type MenuItem } from "./types";
+import { app, ins, MATRIX_WIZARD, na, off, rule, sub, tpl, wiz, type Menu, type MenuAction, type MenuItem, type WizardField } from "./types";
 
 /**
  * The Calculator app's menu. Item positions are the contract (see
  * types.ts): the same keystrokes reach the same command.
  */
 
+type Dialog = Extract<MenuAction, { kind: "wizard" }>;
+
+/**
+ * A statistics dialog's fields: each with no value yet is required, as the
+ * handheld's Input Error says ("Required field is empty!"), except those
+ * marked optional and the category fields.
+ */
+const OPTIONAL = new Set(["Category List:", "Include Categories:"]);
+const need = (fields: WizardField[]): WizardField[] =>
+  fields.map((f) => (f.value === undefined && !f.options && !f.check && !OPTIONAL.has(f.label) && f.hint !== "(optional)" ? { ...f, required: true } : f));
+const dialog = (title: string, fields: WizardField[], build: string): Dialog => ({ kind: "wizard", title, fields: need(fields), build });
+const item = (label: string, d: Dialog): MenuItem => ({ label, action: d });
+/** A statistics dialog as a menu item: its label is its title with "...". */
+const stat = (title: string, fields: WizardField[], build: string): MenuItem => item(`${title}...`, dialog(title, fields, build));
+
+/**
+ * A first step, as the handheld asks it before the dialog itself (Num of
+ * Lists, Data Input Method): its own small dialog, then the one `next` picks.
+ */
+const step = (title: string, fields: WizardField[], next: (v: string[]) => Dialog): MenuItem =>
+  item(`${title}...`, { kind: "wizard", title, fields, build: "", then: next });
+
+/** A count typed in a first step (Num of Lists), kept within what a dialog can hold. */
+const count = (v: string | undefined, min = 1) => Math.max(min, Math.min(20, Math.trunc(Number(v)) || min));
+const fieldsOf = (n: number, label: (i: number) => string): WizardField[] => Array.from({ length: n }, (_, i) => ({ label: label(i + 1) }));
+const refs = (from: number, n: number) => Array.from({ length: n }, (_, i) => `{${from + i}}`).join(",");
+
 const MU_SIGMA = [
   { label: "μ:", value: "0" },
   { label: "σ:", value: "1" },
 ];
+const F_NAMES = Array.from({ length: 9 }, (_, i) => `f${i + 1}`);
+const SAVE = { label: "Save RegEqn to:", value: "f1", options: F_NAMES };
+const FREQ = { label: "Frequency List:", value: "1" };
+const CATEGORY = [{ label: "Category List:" }, { label: "Include Categories:" }];
+const C_LEVEL = { label: "C Level:", value: "0.95" };
+/** Alternate Hyp, worded as the handheld words it; the command takes 1 (>), 0 (≠) or −1 (<). */
+const HYP = (a: string, b: string): WizardField => ({
+  label: "Alternate Hyp:",
+  value: `Ha: ${a} ≠ ${b}`,
+  options: [`Ha: ${a} > ${b}`, `Ha: ${a} ≠ ${b}`, `Ha: ${a} < ${b}`],
+  codes: ["1", "0", "-1"],
+});
+const POOLED = { label: "Pooled:", value: "No", options: ["No", "Yes"], codes: ["0", "1"] };
+/** Data Input Method: the data as lists, or its summary statistics. The handheld starts on Data. */
+const dataOrStats = (title: string, data: Dialog, stats: Dialog): MenuItem =>
+  step(title, [{ label: "Data Input Method:", value: "Data", options: ["Data", "Stats"] }], (v) => (v[0] === "Stats" ? stats : data));
 
 /**
- * A regression's dialog: the lists, where to save its equation, and
- * frequencies. It pastes the
- * command, CopyVar to save the equation, and stat.results to show them.
+ * A regression's dialog: the lists, where to save its equation, frequencies
+ * and categories. It pastes the command, CopyVar to save the equation, and
+ * stat.results to show them.
  */
 const regWizard = (title: string, command: string): MenuItem =>
-  wiz(
-    `${title}...`,
-    title,
-    [
-      { label: "X List:" },
-      { label: "Y List:" },
-      { label: "Save RegEqn to:", value: "f1", options: Array.from({ length: 9 }, (_, i) => `f${i + 1}`) },
-      { label: "Frequency List:", value: "1" },
-    ],
-    `${command} {0},{1},{3}: CopyVar stat.RegEqn,{2}: stat.results`,
-  );
-
-const F_NAMES = Array.from({ length: 9 }, (_, i) => `f${i + 1}`);
-const C_LEVEL = { label: "C Level:", value: "0.95" };
-// 0: ≠, −1: <, 1: >, as the commands take the alternative.
-const ALT = { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] };
-const POOLED = { label: "Pooled (0 no, 1 yes):", value: "0", options: ["0", "1"] };
+  stat(title, [{ label: "X List:" }, { label: "Y List:" }, SAVE, FREQ, ...CATEGORY], `${command} {0},{1},{3},{4},{5}: CopyVar stat.RegEqn,{2}: stat.results`);
 
 /** Logistic regression's dialog: as a regression's, with the iterations the fit may take. */
 const logisticWizard = (title: string, command: string): MenuItem =>
-  wiz(
-    `${title}...`,
+  stat(
     title,
-    [
-      { label: "X List:" },
-      { label: "Y List:" },
-      { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
-      { label: "Iterations:", value: "64" },
-      { label: "Frequency List:", value: "1" },
-    ],
+    [{ label: "X List:" }, { label: "Y List:" }, SAVE, { label: "Iterations:", value: "64" }, FREQ],
     `${command} {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results`,
   );
 
 /** A Mode setting's values, each pasting setMode with the handheld's numbers for it. */
 const modeMenu = (label: string, mode: number, values: string[]): MenuItem => sub(label, values.map((v, i) => ins(v, `setMode(${mode},${i + 1})`)));
 
-/** Distributions, under both Probability and Statistics. */
 /** The F distribution's two degrees of freedom, as its wizards ask for them. */
 const F_DF = [{ label: "Numerator df:" }, { label: "Denominator df:" }];
 
+/** Distributions, under both Probability and Statistics. */
 export const DISTRIBUTIONS: MenuItem[] = [
-  wiz("Normal Pdf...", "Normal Pdf", [{ label: "X Value:" }, ...MU_SIGMA], "normPdf({0},{1},{2})"),
-  wiz(
-    "Normal Cdf...",
-    "Normal Cdf",
-    [{ label: "Lower Bound:", value: "-∞" }, { label: "Upper Bound:" }, ...MU_SIGMA],
-    "normCdf({0},{1},{2},{3})",
-  ),
-  wiz("Inverse Normal...", "Inverse Normal", [{ label: "Area:" }, ...MU_SIGMA], "invNorm({0},{1},{2})"),
-  wiz("t Pdf...", "t Pdf", [{ label: "X Value:" }, { label: "Deg of Freedom, df:" }], "tPdf({0},{1})"),
-  wiz(
-    "t Cdf...",
-    "t Cdf",
-    [{ label: "Lower Bound:", value: "-∞" }, { label: "Upper Bound:" }, { label: "Deg of Freedom, df:" }],
-    "tCdf({0},{1},{2})",
-  ),
-  wiz("Inverse t...", "Inverse t", [{ label: "Area:" }, { label: "Deg of Freedom, df:" }], "invt({0},{1})"),
-  wiz("χ² Pdf...", "χ² Pdf", [{ label: "X Value:" }, { label: "Deg of Freedom, df:" }], "χ²Pdf({0},{1})"),
-  wiz(
-    "χ² Cdf...",
-    "χ² Cdf",
-    [{ label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }, { label: "Deg of Freedom, df:" }],
-    "χ²Cdf({0},{1},{2})",
-  ),
-  wiz("Inverse χ²...", "Inverse χ²", [{ label: "Area:" }, { label: "Deg of Freedom, df:" }], "invχ²({0},{1})"),
-  wiz(
-    "Binomial Pdf...",
-    "Binomial Pdf",
-    [{ label: "Num Trials, n:" }, { label: "Prob Success, p:" }, { label: "X Value:", hint: "(optional)" }],
-    "binomPdf({0},{1},{2})",
-  ),
-  wiz(
-    "Binomial Cdf...",
+  stat("Normal Pdf", [{ label: "X Value:" }, ...MU_SIGMA], "normPdf({0},{1},{2})"),
+  stat("Normal Cdf", [{ label: "Lower Bound:", value: "-∞" }, { label: "Upper Bound:" }, ...MU_SIGMA], "normCdf({0},{1},{2},{3})"),
+  stat("Inverse Normal", [{ label: "Area:" }, ...MU_SIGMA], "invNorm({0},{1},{2})"),
+  stat("t Pdf", [{ label: "X Value:" }, { label: "Deg of Freedom, df:" }], "tPdf({0},{1})"),
+  stat("t Cdf", [{ label: "Lower Bound:", value: "-∞" }, { label: "Upper Bound:" }, { label: "Deg of Freedom, df:" }], "tCdf({0},{1},{2})"),
+  stat("Inverse t", [{ label: "Area:" }, { label: "Deg of Freedom, df:" }], "invt({0},{1})"),
+  stat("χ² Pdf", [{ label: "X Value:" }, { label: "Deg of Freedom, df:" }], "χ²Pdf({0},{1})"),
+  stat("χ² Cdf", [{ label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }, { label: "Deg of Freedom, df:" }], "χ²Cdf({0},{1},{2})"),
+  stat("Inverse χ²", [{ label: "Area:" }, { label: "Deg of Freedom, df:" }], "invχ²({0},{1})"),
+  stat("Binomial Pdf", [{ label: "Num Trials, n:" }, { label: "Prob Success, p:" }, { label: "X Value:", hint: "(optional)" }], "binomPdf({0},{1},{2})"),
+  stat(
     "Binomial Cdf",
-    [
-      { label: "Num Trials, n:" },
-      { label: "Prob Success, p:" },
-      { label: "Lower Bound:", value: "0" },
-      { label: "Upper Bound:" },
-    ],
+    [{ label: "Num Trials, n:" }, { label: "Prob Success, p:" }, { label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }],
     "binomCdf({0},{1},{2},{3})",
   ),
-  wiz(
-    "Inverse Binomial...",
-    "Num Successes",
-    [{ label: "Cumulative Prob:" }, { label: "Num Trials, n:" }, { label: "Prob Success, p:" }],
-    "invBinom({0},{1},{2})",
-  ),
-  wiz(
-    "Inverse Binomial N...",
-    "Num Trials",
-    [{ label: "Cumulative Prob:" }, { label: "Prob Success, p:" }, { label: "Successes, x:" }],
-    "invBinomN({0},{1},{2})",
-  ),
-  wiz("F Pdf...", "F Pdf", [{ label: "X Value:" }, ...F_DF], "FPdf({0},{1},{2})"),
-  wiz("F Cdf...", "F Cdf", [{ label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }, ...F_DF], "FCdf({0},{1},{2},{3})"),
-  wiz("Inverse F...", "Inverse F", [{ label: "Area:" }, ...F_DF], "invF({0},{1},{2})"),
-  wiz("Geometric Pdf...", "Geometric Pdf", [{ label: "Prob Success, p:" }, { label: "X Value:" }], "geomPdf({0},{1})"),
-  wiz(
-    "Geometric Cdf...",
-    "Geometric Cdf",
-    [{ label: "Prob Success, p:" }, { label: "Lower Bound:", value: "1" }, { label: "Upper Bound:" }],
-    "geomCdf({0},{1},{2})",
-  ),
-  wiz("Poisson Pdf...", "Poisson Pdf", [{ label: "λ:" }, { label: "X Value:" }], "poissPdf({0},{1})"),
-  wiz(
-    "Poisson Cdf...",
-    "Poisson Cdf",
-    [{ label: "λ:" }, { label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }],
-    "poissCdf({0},{1},{2})",
-  ),
+  item("Inverse Binomial...", dialog("Num Successes", [{ label: "Cumulative Prob:" }, { label: "Num Trials, n:" }, { label: "Prob Success, p:" }], "invBinom({0},{1},{2})")),
+  item("Inverse Binomial N...", dialog("Num Trials", [{ label: "Cumulative Prob:" }, { label: "Prob Success, p:" }, { label: "Successes, x:" }], "invBinomN({0},{1},{2})")),
+  stat("F Pdf", [{ label: "X Value:" }, ...F_DF], "FPdf({0},{1},{2})"),
+  stat("F Cdf", [{ label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }, ...F_DF], "FCdf({0},{1},{2},{3})"),
+  stat("Inverse F", [{ label: "Area:" }, ...F_DF], "invF({0},{1},{2})"),
+  stat("Geometric Pdf", [{ label: "Prob Success, p:" }, { label: "X Value:" }], "geomPdf({0},{1})"),
+  stat("Geometric Cdf", [{ label: "Prob Success, p:" }, { label: "Lower Bound:", value: "1" }, { label: "Upper Bound:" }], "geomCdf({0},{1},{2})"),
+  stat("Poisson Pdf", [{ label: "λ:" }, { label: "X Value:" }], "poissPdf({0},{1})"),
+  stat("Poisson Cdf", [{ label: "λ:" }, { label: "Lower Bound:", value: "0" }, { label: "Upper Bound:" }], "poissCdf({0},{1},{2})"),
 ];
+
+/** Multiple regression's first step, as the handheld asks it: how many independent (x) lists. */
+const indVars = (title: string, next: (n: number) => Dialog): MenuItem => step(title, [{ label: "Num of Ind Vars:", value: "1" }], (v) => next(count(v[0])));
 
 /** Statistics ▸ Stat Calculations: the Calculator's, and Lists & Spreadsheet's (lists/lists-menu.ts). */
 export const STAT_CALCULATIONS: MenuItem[] = [
-  wiz(
-    "One-Variable Statistics...",
-    "One-Variable Statistics",
-    [{ label: "X1 List:" }, { label: "Frequency List:", value: "1" }],
-    "OneVar {0},{1}",
-  ),
-  wiz(
-    "Two-Variable Statistics...",
-    "Two-Variable Statistics",
-    [{ label: "X List:" }, { label: "Y List:" }, { label: "Frequency List:", value: "1" }],
-    "TwoVar {0},{1},{2}",
-  ),
+  // Num of Lists first; one list takes frequencies and categories, several take only the lists (OneVar n, List1, …).
+  step("One-Variable Statistics", [{ label: "Num of Lists:", value: "1" }], (v) => {
+    const n = count(v[0]);
+    return n === 1
+      ? dialog("One-Variable Statistics", [{ label: "X1 List:" }, FREQ, ...CATEGORY], "OneVar {0},{1},{2},{3}")
+      : dialog("One-Variable Statistics", fieldsOf(n, (i) => `X${i} List:`), `OneVar ${n},${refs(0, n)}`);
+  }),
+  stat("Two-Variable Statistics", [{ label: "X List:" }, { label: "Y List:" }, FREQ, ...CATEGORY], "TwoVar {0},{1},{2},{3},{4}"),
   regWizard("Linear Regression (mx+b)", "LinRegMx"),
   regWizard("Linear Regression (a+bx)", "LinRegBx"),
   regWizard("Median-Median Line", "MedMed"),
@@ -155,166 +128,148 @@ export const STAT_CALCULATIONS: MenuItem[] = [
   regWizard("Power Regression", "PowerReg"),
   regWizard("Exponential Regression", "ExpReg"),
   regWizard("Logarithmic Regression", "LnReg"),
-  wiz(
-    "Sinusoidal Regression...",
+  stat(
     "Sinusoidal Regression",
-    [
-      { label: "X List:" },
-      { label: "Y List:" },
-      { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
-      { label: "Iterations:", value: "8" },
-      { label: "Period:", hint: "(optional)" },
-    ],
+    [{ label: "X List:" }, { label: "Y List:" }, SAVE, { label: "Iterations:", value: "8" }, { label: "Period:", hint: "(optional)" }],
     "SinReg {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results",
   ),
   logisticWizard("Logistic Regression (d=0)", "Logistic"),
   logisticWizard("Logistic Regression (d≠0)", "LogisticD"),
-  wiz(
-    "Multiple Linear Regression...",
-    "Multiple Linear Regression",
-    [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }],
-    "MultReg {0},{1}: stat.results",
+  indVars("Multiple Linear Regression", (n) =>
+    dialog("Multiple Linear Regression", [{ label: "Y List:" }, ...fieldsOf(n, (i) => `X${i} List:`), SAVE], `MultReg ${refs(0, n + 1)}: CopyVar stat.RegEqn,{${n + 1}}: stat.results`),
   ),
   ins("Correlation Matrix", "corrMat("),
 ];
 
 /** Statistics ▸ Confidence Intervals, shared with Lists & Spreadsheet. */
 export const CONFIDENCE_INTERVALS: MenuItem[] = [
-  wiz(
-    "z Interval...",
+  dataOrStats(
     "z Interval",
-    [{ label: "σ:" }, { label: "x̄:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
-    "zInterval {0},{1},{2},{3}",
+    dialog("z Interval", [{ label: "σ:" }, { label: "List:" }, FREQ, C_LEVEL], "zInterval {0},{1},{2},{3}"),
+    dialog("z Interval", [{ label: "σ:" }, { label: "x̄:" }, { label: "n:" }, C_LEVEL], "zInterval {0},{1},{2},{3}"),
   ),
-  wiz(
-    "t Interval...",
+  dataOrStats(
     "t Interval",
-    [{ label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
-    "tInterval {0},{1},{2},{3}",
+    dialog("t Interval", [{ label: "List:" }, FREQ, C_LEVEL], "tInterval {0},{1},{2}"),
+    dialog("t Interval", [{ label: "x̄:" }, { label: "Sx:" }, { label: "n:" }, C_LEVEL], "tInterval {0},{1},{2},{3}"),
   ),
-  wiz(
-    "2-Sample z Interval...",
+  dataOrStats(
     "2-Sample z Interval",
-    [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, C_LEVEL],
-    "zInterval_2Samp {0},{1},{2},{3},{4},{5},{6}",
+    dialog(
+      "2-Sample z Interval",
+      [{ label: "σ1:" }, { label: "σ2:" }, { label: "List 1:" }, { label: "List 2:" }, { label: "Frequency 1:", value: "1" }, { label: "Frequency 2:", value: "1" }, C_LEVEL],
+      "zInterval_2Samp {0},{1},{2},{3},{4},{5},{6}",
+    ),
+    dialog("2-Sample z Interval", [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, C_LEVEL], "zInterval_2Samp {0},{1},{2},{3},{4},{5},{6}"),
   ),
-  wiz(
-    "2-Sample t Interval...",
+  dataOrStats(
     "2-Sample t Interval",
-    [{ label: "x̄1:" }, { label: "sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "sx2:" }, { label: "n2:" }, C_LEVEL, POOLED],
-    "tInterval_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
+    dialog(
+      "2-Sample t Interval",
+      [{ label: "List 1:" }, { label: "List 2:" }, { label: "Frequency 1:", value: "1" }, { label: "Frequency 2:", value: "1" }, C_LEVEL, POOLED],
+      "tInterval_2Samp {0},{1},{2},{3},{4},{5}",
+    ),
+    dialog(
+      "2-Sample t Interval",
+      [{ label: "x̄1:" }, { label: "Sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "Sx2:" }, { label: "n2:" }, C_LEVEL, POOLED],
+      "tInterval_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
+    ),
   ),
-  wiz(
-    "1-Prop z Interval...",
-    "1-Prop z Interval",
-    [{ label: "Successes, x:" }, { label: "n:" }, { label: "C Level:", value: "0.95" }],
-    "zInterval_1Prop {0},{1},{2}",
+  stat("1-Prop z Interval", [{ label: "Successes, x:" }, { label: "n:" }, C_LEVEL], "zInterval_1Prop {0},{1},{2}"),
+  stat("2-Prop z Interval", [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, C_LEVEL], "zInterval_2Prop {0},{1},{2},{3},{4}"),
+  // Slope or Response first: a response interval is at an x value, and its C Level comes after it.
+  step("Linear Reg t Intervals", [{ label: "Interval:", value: "Slope", options: ["Slope", "Response"] }], (v) =>
+    v[0] === "Response"
+      ? dialog(
+          "Linear Reg t Intervals",
+          [{ label: "X List:" }, { label: "Y List:" }, SAVE, FREQ, { label: "X Value:" }, C_LEVEL],
+          "LinRegtIntervals {0},{1},{3},1,{4},{5}: CopyVar stat.RegEqn,{2}: stat.results",
+        )
+      : dialog("Linear Reg t Intervals", [{ label: "X List:" }, { label: "Y List:" }, SAVE, FREQ, C_LEVEL], "LinRegtIntervals {0},{1},{3},0,{4}: CopyVar stat.RegEqn,{2}: stat.results"),
   ),
-  wiz(
-    "2-Prop z Interval...",
-    "2-Prop z Interval",
-    [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, C_LEVEL],
-    "zInterval_2Prop {0},{1},{2},{3},{4}",
-  ),
-  wiz(
-    "Linear Reg t Intervals...",
-    "Linear Reg t Intervals",
-    [
-      { label: "X List:" },
-      { label: "Y List:" },
-      { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
-      { label: "Frequency List:", value: "1" },
-      { label: "Interval (0 slope, 1 response):", value: "0", options: ["0", "1"] },
-      { label: "X Value:", value: "0" },
-      C_LEVEL,
-    ],
-    "LinRegtIntervals {0},{1},{3},{4},{5},{6}: CopyVar stat.RegEqn,{2}: stat.results",
-  ),
-  wiz(
-    "Multiple Reg Intervals...",
-    "Multiple Reg Intervals",
-    [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }, { label: "X Values:", hint: "{x1,x2,…}" }, C_LEVEL],
-    "MultRegIntervals {0},{1},{2},{3}",
+  indVars("Multiple Reg Intervals", (n) =>
+    dialog(
+      "Multiple Reg Intervals",
+      [{ label: "Y List:" }, ...fieldsOf(n, (i) => `X${i} List:`), { label: "X Values List:" }, SAVE, C_LEVEL],
+      `MultRegIntervals ${refs(0, n + 2)},{${n + 3}}: CopyVar stat.RegEqn,{${n + 2}}: stat.results`,
+    ),
   ),
 ];
 
 /** Statistics ▸ Stat Tests, shared with Lists & Spreadsheet. */
 export const STAT_TESTS: MenuItem[] = [
-  wiz(
-    "z Test...",
+  dataOrStats(
     "z Test",
-    [
-      { label: "μ0:" },
-      { label: "σ:" },
-      { label: "x̄:" },
-      { label: "n:" },
-      // 0: μ ≠ μ0, −1: μ < μ0, 1: μ > μ0, as the command takes it.
-      { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] },
-    ],
-    "zTest {0},{1},{2},{3},{4}",
+    dialog("z Test", [{ label: "μ0:" }, { label: "σ:" }, { label: "List:" }, FREQ, HYP("μ", "μ0")], "zTest {0},{1},{2},{3},{4}"),
+    dialog("z Test", [{ label: "μ0:" }, { label: "σ:" }, { label: "x̄:" }, { label: "n:" }, HYP("μ", "μ0")], "zTest {0},{1},{2},{3},{4}"),
   ),
-  wiz(
-    "t Test...",
+  dataOrStats(
     "t Test",
-    [{ label: "μ0:" }, { label: "x̄:" }, { label: "sx:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
-    "tTest {0},{1},{2},{3},{4}",
+    dialog("t Test", [{ label: "μ0:" }, { label: "List:" }, FREQ, HYP("μ", "μ0")], "tTest {0},{1},{2},{3}"),
+    dialog("t Test", [{ label: "μ0:" }, { label: "x̄:" }, { label: "Sx:" }, { label: "n:" }, HYP("μ", "μ0")], "tTest {0},{1},{2},{3},{4}"),
   ),
-  wiz(
-    "2-Sample z Test...",
+  dataOrStats(
     "2-Sample z Test",
-    [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, ALT],
-    "zTest_2Samp {0},{1},{2},{3},{4},{5},{6}",
+    dialog(
+      "2-Sample z Test",
+      [{ label: "σ1:" }, { label: "σ2:" }, { label: "List 1:" }, { label: "List 2:" }, { label: "Frequency 1:", value: "1" }, { label: "Frequency 2:", value: "1" }, HYP("μ1", "μ2")],
+      "zTest_2Samp {0},{1},{2},{3},{4},{5},{6}",
+    ),
+    dialog("2-Sample z Test", [{ label: "σ1:" }, { label: "σ2:" }, { label: "x̄1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "n2:" }, HYP("μ1", "μ2")], "zTest_2Samp {0},{1},{2},{3},{4},{5},{6}"),
   ),
-  wiz(
-    "2-Sample t Test...",
+  dataOrStats(
     "2-Sample t Test",
-    [{ label: "x̄1:" }, { label: "sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "sx2:" }, { label: "n2:" }, ALT, POOLED],
-    "tTest_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
+    dialog(
+      "2-Sample t Test",
+      [{ label: "List 1:" }, { label: "List 2:" }, { label: "Frequency 1:", value: "1" }, { label: "Frequency 2:", value: "1" }, HYP("μ1", "μ2"), POOLED],
+      "tTest_2Samp {0},{1},{2},{3},{4},{5}",
+    ),
+    dialog(
+      "2-Sample t Test",
+      [{ label: "x̄1:" }, { label: "Sx1:" }, { label: "n1:" }, { label: "x̄2:" }, { label: "Sx2:" }, { label: "n2:" }, HYP("μ1", "μ2"), POOLED],
+      "tTest_2Samp {0},{1},{2},{3},{4},{5},{6},{7}",
+    ),
   ),
-  wiz(
-    "1-Prop z Test...",
-    "1-Prop z Test",
-    [{ label: "p0:" }, { label: "Successes, x:" }, { label: "n:" }, { label: "Alternate Hyp (0 ≠, −1 <, 1 >):", value: "0", options: ["0", "-1", "1"] }],
-    "zTest_1Prop {0},{1},{2},{3}",
-  ),
-  wiz(
-    "2-Prop z Test...",
-    "2-Prop z Test",
-    [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, ALT],
-    "zTest_2Prop {0},{1},{2},{3},{4}",
-  ),
-  wiz(
-    "χ² GOF...",
-    "χ² GOF",
-    [{ label: "Observed List:" }, { label: "Expected List:" }, { label: "Deg of Freedom, df:" }],
-    "χ²GOF {0},{1},{2}",
-  ),
-  wiz("χ² 2-way Test...", "χ² 2-way Test", [{ label: "Observed Matrix:" }], "χ²2way {0}"),
-  wiz(
-    "2-Sample F Test...",
+  stat("1-Prop z Test", [{ label: "P0:" }, { label: "Successes, x:" }, { label: "n:" }, HYP("prop", "p0")], "zTest_1Prop {0},{1},{2},{3}"),
+  stat("2-Prop z Test", [{ label: "Successes, x1:" }, { label: "n1:" }, { label: "Successes, x2:" }, { label: "n2:" }, HYP("p1", "p2")], "zTest_2Prop {0},{1},{2},{3},{4}"),
+  stat("χ² GOF", [{ label: "Observed List:" }, { label: "Expected List:" }, { label: "Deg of Freedom, df:" }], "χ²GOF {0},{1},{2}"),
+  stat("χ² 2-way Test", [{ label: "Observed Matrix:" }], "χ²2way {0}"),
+  dataOrStats(
     "2-Sample F Test",
-    [{ label: "sx1:" }, { label: "n1:" }, { label: "sx2:" }, { label: "n2:" }, ALT],
-    "FTest_2Samp {0},{1},{2},{3},{4}",
+    dialog("2-Sample F Test", [{ label: "List 1:" }, { label: "List 2:" }, { label: "Frequency 1:", value: "1" }, { label: "Frequency 2:", value: "1" }, HYP("σ1", "σ2")], "FTest_2Samp {0},{1},{2},{3},{4}"),
+    dialog("2-Sample F Test", [{ label: "Sx1:" }, { label: "n1:" }, { label: "Sx2:" }, { label: "n2:" }, HYP("σ1", "σ2")], "FTest_2Samp {0},{1},{2},{3},{4}"),
   ),
-  wiz(
-    "Linear Reg t Test...",
-    "Linear Reg t Test",
+  stat("Linear Reg t Test", [{ label: "X List:" }, { label: "Y List:" }, SAVE, FREQ, HYP("β & ρ", "0")], "LinRegtTest {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results"),
+  indVars("Multiple Reg Tests", (n) =>
+    dialog("Multiple Reg Tests", [{ label: "Y List:" }, ...fieldsOf(n, (i) => `X${i} List:`), SAVE], `MultRegTests ${refs(0, n + 1)}: CopyVar stat.RegEqn,{${n + 1}}: stat.results`),
+  ),
+  // Data Input Method and the number of groups first; Stats takes each group as {n, x̄, Sx}, flagged with a final 1.
+  step(
+    "ANOVA",
     [
-      { label: "X List:" },
-      { label: "Y List:" },
-      { label: "Save RegEqn to:", value: "f1", options: F_NAMES },
-      { label: "Frequency List:", value: "1" },
-      ALT,
+      { label: "Data Input Method:", value: "Data", options: ["Data", "Stats"] },
+      { label: "Number of Groups:", value: "2" },
     ],
-    "LinRegtTest {0},{1},{3},{4}: CopyVar stat.RegEqn,{2}: stat.results",
+    (v) => {
+      const n = count(v[1], 2);
+      return v[0] === "Stats"
+        ? { ...dialog("ANOVA", fieldsOf(n, (i) => `Group ${i} Stats:`), `ANOVA ${refs(0, n)},1`), note: "Group Stats: {n, xbar, Sx}" }
+        : dialog("ANOVA", fieldsOf(n, (i) => `List ${i}:`), `ANOVA ${refs(0, n)}`);
+    },
   ),
-  wiz("Multiple Reg Tests...", "Multiple Reg Tests", [{ label: "Y List:" }, { label: "X Lists:", hint: "x1,x2,…" }], "MultRegTests {0},{1}"),
-  wiz("ANOVA...", "ANOVA", [{ label: "Lists:", hint: "list1,list2,…" }], "ANOVA {0}"),
-  wiz(
-    "ANOVA 2-Way...",
+  // Block design: a list for each level of the column factor. 2 Factor, Eq Reps: the same, and how many levels the rows have.
+  step(
     "ANOVA 2-Way",
-    [{ label: "Lists:", hint: "list1,list2,…" }, { label: "Levels of Row Factor:", value: "1" }],
-    "ANOVA2way {0},{1}",
+    [
+      { label: "Design:", value: "Block", options: ["Block", "2 Factor, Eq Reps"] },
+      { label: "Lvls of Col Factor:", value: "2" },
+    ],
+    (v) => {
+      const n = count(v[1], 2);
+      return v[0] === "Block"
+        ? dialog("ANOVA 2-Way", fieldsOf(n, (i) => `List ${i}:`), `ANOVA2way ${refs(0, n)}`)
+        : dialog("ANOVA 2-Way", [...fieldsOf(n, (i) => `List ${i}:`), { label: "Lvls of Row Factor:" }], `ANOVA2way ${refs(0, n + 1)}`);
+    },
   ),
 ];
 
@@ -376,7 +331,7 @@ export const calculatorMenu: Menu = [
     ins("Zeros", "zeros("),
     ins("Complete the Square", "completeSquare("),
     ins("Numerical Solve", "nSolve("),
-    sub("Solve a System of Equations", [
+    sub("Solve System of Equations", [
       wiz(
         "Solve System of Equations...",
         "Solve System of Equations",
@@ -638,3 +593,28 @@ export const calculatorMenu: Menu = [
     ins("Add New Line", ":"),
   ]),
 ];
+
+/**
+ * ctrl menu on a Calculator page, as the handheld's: on the entry line,
+ * editing and inserting; on a history entry (selected with ▲), its
+ * warning, copying and deleting.
+ */
+export function calculatorContextMenu(s: { entry: boolean; selection: boolean; warning: boolean; variables: string[] }): Menu {
+  if (!s.entry)
+    return [
+      s.warning ? app("Show Warning Info...", "calcShowWarning") : na("Show Warning Info...", "this entry has no warning"),
+      app("Clear History", "clearHistory"),
+      rule(app("Copy", "editCopy")),
+      app("Delete", "calcDeleteEntry"),
+    ];
+  return [
+    app("Clear History", "clearHistory"),
+    rule(s.selection ? app("Cut", "editCut") : na("Cut", "nothing is selected")),
+    s.selection ? app("Copy", "editCopy") : na("Copy", "nothing is selected"),
+    app("Paste", "editPaste"),
+    s.selection ? app("Delete", "editDelete") : na("Delete", "nothing is selected"),
+    sub("Select Variable", s.variables.length ? s.variables.map((v) => app(v, `varpick:${v}`)) : [na("(no variables)", "the problem has no variables yet")]),
+    app("Symbols...", "openSymbols"),
+    app("Math Templates...", "openTemplates"),
+  ];
+}

@@ -502,6 +502,25 @@ body {
 .nb-math[data-hide-out] [data-out] {
   display: none;
 }
+/* Deactivate: the box keeps its result and is drawn faded, as the handheld shows an inactive box. */
+.nb-math[data-inactive] {
+  opacity: 0.55;
+}
+/* A result that came with a warning: the handheld's ⚠ before it (Show Warning Info tells what it says). */
+.nb-math[data-warn] [data-out]:not(:empty)::after {
+  content: " ⚠";
+  color: #b26a00;
+}
+/* Hide Answer (Q&A): what follows "Answer:" in each answer paragraph, its text and its boxes. */
+[data-hide-answer] [data-answer] {
+  color: transparent;
+}
+[data-hide-answer] [data-answer] > b:first-child {
+  color: var(--color-casInk);
+}
+[data-hide-answer] [data-answer] > :not(b:first-child) {
+  visibility: hidden;
+}
 .nb-comment {
   color: #1f4fd8;
 }
@@ -516,4 +535,12 @@ body {
   display: inline-block;
   min-width: 0.6em;
   outline: none;
+}
+/* Insert ▸ Slider in Notes: the slider sits in the line like a word. */
+.nb-slider {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 0.3em;
+  white-space: normal;
+  user-select: none;
 }

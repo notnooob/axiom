@@ -23,11 +23,81 @@ import {
 } from "./program";
 import { giacName, translate } from "./translate";
 
-/** What a program can ask of the student while it runs. */
+/** One drawing step for the screen a program draws on (the same steps ti_draw's canvas replays). */
+export type DrawStep = { op: string; args: unknown[] };
+
+/** What a program can ask of the student while it runs, and the screen it draws on. */
 export type ProgramIO = {
   request?(prompt: string, text: boolean): Promise<string | null>;
   message?(text: string): Promise<void>;
+  draw?(step: DrawStep): void;
 };
+
+/**
+ * The drawing commands, each as the canvas step it makes from its worked-out
+ * arguments: pixels from the screen's top left (318 × 212), unless SetWindow
+ * set other coordinates. Pen widths 1–3 and styles 1 smooth, 2 dotted,
+ * 3 dashed; PlotXY's shapes all draw as a dot here.
+ */
+const DRAW = /^(DrawLine|DrawRect|FillRect|DrawCircle|FillCircle|DrawText|DrawArc|FillArc|DrawPoly|FillPoly|PlotXY|Clear|SetColor|SetPen|SetWindow|UseBuffer|PaintBuffer)\b\s*([\s\S]*)$/i;
+export const isDrawCommand = (line: string) => DRAW.test(line.trim());
+
+/** A drawing command as its canvas step; `value` works out one argument (its result as text). */
+export async function drawStep(line: string, value: (arg: string) => Promise<string>): Promise<DrawStep | null> {
+  const m = DRAW.exec(line.trim())!;
+  const cmd = m[1]!.toLowerCase();
+  const texts = await Promise.all(splitArgs(m[2]!).map(value));
+  const num = (i: number) => {
+    const v = Number((texts[i] ?? "").replace(/−/g, "-").replace(/\.$/, ""));
+    if (!Number.isFinite(v)) throw new Error("Error: Argument must be a number");
+    return v;
+  };
+  const list = (i: number) => (texts[i] ?? "").replace(/[{}]/g, "").split(",").map((x) => Number(x.replace(/−/g, "-")));
+  const all = (n: number) => Array.from({ length: n }, (_, i) => num(i));
+  switch (cmd) {
+    case "drawline":
+      return { op: "line", args: all(4) };
+    case "drawrect":
+      return { op: "rect", args: all(4) };
+    case "fillrect":
+      return { op: "fill_rect", args: all(4) };
+    case "drawcircle":
+      return { op: "circle", args: all(3) };
+    case "fillcircle":
+      return { op: "fill_circle", args: all(3) };
+    case "drawarc":
+      return { op: "arc", args: all(6) };
+    case "fillarc":
+      return { op: "fill_arc", args: all(6) };
+    case "drawtext":
+      // Strings as they are, anything else as its result, run together.
+      return { op: "text", args: [num(0), num(1), texts.slice(2).map((t) => t.replace(/^"([\s\S]*)"$/, "$1")).join("")] };
+    case "drawpoly":
+    case "fillpoly": {
+      // Two lists, or the points' coordinates one after another.
+      const two = texts.length === 2 && texts[0]!.startsWith("{");
+      const xs = two ? list(0) : texts.flatMap((_, i) => (i % 2 === 0 ? [num(i)] : []));
+      const ys = two ? list(1) : texts.flatMap((_, i) => (i % 2 === 1 ? [num(i)] : []));
+      return { op: cmd === "drawpoly" ? "poly" : "fill_poly", args: [xs, ys] };
+    }
+    case "plotxy":
+      return { op: "point", args: [num(0), num(1)] };
+    case "clear":
+      return texts.length >= 4 ? { op: "clear_rect", args: all(4) } : { op: "clear", args: [] };
+    case "setcolor":
+      return { op: "color", args: all(3) };
+    case "setpen": {
+      const [w, style] = [num(0), texts.length > 1 ? num(1) : 1];
+      return { op: "pen", args: [w >= 3 ? "thick" : w === 2 ? "medium" : "thin", style === 2 ? "dotted" : style === 3 ? "dashed" : "solid"] };
+    }
+    case "setwindow":
+      // SetWindow 0 (or "ZoomFit") puts pixel coordinates back.
+      return texts.length >= 4 ? { op: "window", args: all(4) } : { op: "window", args: [0, 318, 212, 0] };
+    default:
+      // UseBuffer and PaintBuffer: everything is shown as it's drawn here.
+      return null;
+  }
+}
 
 type Opts = { settings: Settings; ans?: Ast; io?: ProgramIO; inner?: boolean };
 type Evaluate = (text: string, giac: Giac, opts: Opts) => Promise<EvalResult>;
@@ -90,6 +160,15 @@ async function execute(
     let settings = opts.settings;
     const r = await runProgram(compiled, prog.params, args, {
       run: async (line) => {
+        if (isDrawCommand(line)) {
+          const step = await drawStep(line, async (arg) => {
+            const res = await evaluate(arg, giac, { settings, ans: opts.ans, io: opts.io });
+            if (!res.ok) throw new ProgramError(res.error);
+            return res.outputText;
+          });
+          if (step) opts.io?.draw?.(step);
+          return { output: sym("Done"), outputText: "Done", definitions: [] };
+        }
         const res = await evaluate(line, giac, { settings, ans: opts.ans, io: opts.io });
         if (!res.ok) throw new ProgramError(res.error);
         if (res.settings) settings = res.settings;

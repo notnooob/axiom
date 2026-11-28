@@ -42,7 +42,7 @@ import {
 } from "./plot";
 
 /** The regressions worked out by the statistics procedures (an iterative fit) rather than stats.ts's closed forms. */
-const ITERATIVE = new Set(["SinReg", "Logistic"]);
+const ITERATIVE = new Set(["SinReg", "Logistic", "LogisticD"]);
 
 /** A function sampled at even steps (Plot Function's points), read between them. */
 function sampled(f: [number, number][]): (x: number) => number {
@@ -59,6 +59,8 @@ function sampled(f: [number, number][]): (x: number) => number {
 }
 
 const PLOT = "#2c64c8";
+/** A box plot's fill, the handheld's blue. */
+const BOX_FILL = "#2e8ef0";
 const STRIP = "#b8509c";
 const FN = "#d6271c";
 const SELECTED = "#e0832a";
@@ -154,7 +156,7 @@ export function DataStatsApp({
   const [extra, setExtra] = useState<{
     fns: [number, number][][];
     values: { at: number; label: string }[];
-    shade?: { pts: [number, number][]; area: number };
+    shade?: { parts: [number, number][][]; area: number; label?: string };
   }>({ fns: [], values: [] });
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -315,19 +317,24 @@ export function DataStatsApp({
         }
       }
       // Shade Under Function: the curve between the bounds, and the area the engine works out under it.
-      let shade: { pts: [number, number][]; area: number } | undefined;
+      let shade: { parts: [number, number][][]; area: number; label?: string } | undefined;
       const s = page.shade;
       const f = s ? page.functions?.[s.fn] : undefined;
       if (s && f) {
         try {
-          const [a, b] = parseNumbers(await giac(`evalf([${toGiac(s.from)},${toGiac(s.to)}])`));
-          if (Number.isFinite(a) && Number.isFinite(b) && a !== b) {
+          const parts: [number, number][][] = [];
+          let total = 0;
+          for (const r of [s, ...(s.also ? [s.also] : [])]) {
+            const [a, b] = parseNumbers(await giac(`evalf([${toGiac(r.from)},${toGiac(r.to)}])`));
+            if (!(Number.isFinite(a) && Number.isFinite(b) && a !== b)) continue;
             const lo = Math.min(a!, b!);
             const step = (Math.max(a!, b!) - lo) / 100;
             const ys2 = parseNumbers(await giac(`evalf(seq(${toGiac(f)},x,${lo},${lo + 100 * step},${step}))`));
             const area = parseNumbers(await giac(`evalf(int(${toGiac(f)},x,${a},${b}))`))[0];
-            shade = { pts: ys2.slice(0, 101).map((y, i) => [lo + i * step, y]), area: area ?? NaN };
+            parts.push(ys2.slice(0, 101).map((y, i) => [lo + i * step, y]));
+            total += area ?? NaN;
           }
+          if (parts.length) shade = { parts, area: total, label: s.label };
         } catch {
           // Bounds that don't work out shade nothing.
         }
@@ -359,7 +366,7 @@ export function DataStatsApp({
   const against = useMemo<((x: number) => number) | null>(() => {
     if (one || counts) return null;
     if (reg) return equationFn(reg.eqn);
-    if (movable) return (x) => movable.m * x + movable.b;
+    if (movable && movable.vx === undefined) return (x) => movable.m * x + movable.b;
     if (firstFn?.length) return sampled(firstFn);
     return null;
   }, [one, counts, reg, movable, firstFn]);
@@ -375,13 +382,13 @@ export function DataStatsApp({
     }
     if (counts) return out;
     if (reg) out.push({ f: equationFn(reg.eqn), name: "regression" });
-    if (movable) out.push({ f: (x) => movable.m * x + movable.b, name: "movable line" });
+    if (movable && movable.vx === undefined) out.push({ f: (x) => movable.m * x + movable.b, name: "movable line" });
     extra.fns.forEach((f, i) => out.push({ f: sampled(f), name: `f(x) = ${page.functions?.[i]}` }));
     return out;
   }, [one, counts, reg, movable, extra.fns, page.functions]);
 
   // Movable line: dragging near its middle slides it, nearer an end turns it about the middle.
-  const drag = useRef<{ mode: "slide" | "turn"; cx: number } | { mode: "text"; i: number; dx: number; dy: number } | null>(null);
+  const drag = useRef<{ mode: "slide" | "turn" | "vslide"; cx: number } | { mode: "text"; i: number; dx: number; dy: number } | null>(null);
   const toWorld = (e: ReactPointerEvent) => {
     const r = canvas.current!.getBoundingClientRect();
     // With the residual plot under it, the data fills the top two thirds.
@@ -672,6 +679,10 @@ export function DataStatsApp({
         const mid = bandTop + bandH * 0.5;
         const half = bandH * 0.14;
         g.lineWidth = 1.5;
+        // Filled, with its lines in black, as the handheld draws a box plot.
+        g.fillStyle = page.fill ?? BOX_FILL;
+        g.fillRect(X(b.q1), mid - half, X(b.q3) - X(b.q1), half * 2);
+        g.strokeStyle = palette.casInk;
         g.strokeRect(X(b.q1), mid - half, X(b.q3) - X(b.q1), half * 2);
         g.beginPath();
         g.moveTo(X(b.median), mid - half);
@@ -702,7 +713,7 @@ export function DataStatsApp({
         const bins = page.bins ?? autoBins(vals);
         const bars = edges ? edgeBars(vals, edges, page.histScale) : histogramBars(vals, bins, page.histScale);
         for (const bin of bars) {
-          g.fillStyle = "#9dbfea";
+          g.fillStyle = page.fill ?? "#9dbfea";
           g.fillRect(X(bin.from), Y(bin.h), X(bin.to) - X(bin.from), Y(0) - Y(bin.h));
           g.strokeStyle = PLOT;
           g.strokeRect(X(bin.from), Y(bin.h), X(bin.to) - X(bin.from), Y(0) - Y(bin.h));
@@ -751,7 +762,7 @@ export function DataStatsApp({
     } else if (plot === "bar" && counts) {
       const half = (X(1) - X(0)) * 0.32;
       counts.forEach((c, i) => {
-        g.fillStyle = "#9dbfea";
+        g.fillStyle = page.fill ?? "#9dbfea";
         g.fillRect(X(i) - half, Y(c.n), half * 2, Y(0) - Y(c.n));
         g.strokeStyle = PLOT;
         g.strokeRect(X(i) - half, Y(c.n), half * 2, Y(0) - Y(c.n));
@@ -846,14 +857,29 @@ export function DataStatsApp({
       labels.push({ text: `y = ${reg.eqn.replace(/(-?\d+\.\d{5,})/g, (n) => shown(Number(n), page.digits)).replace(/\*/g, "·").replace(/\+[-−]/g, "−")}`, colour: "#1f4fd8" });
       if (page.diagnostics && reg.r2 !== undefined) labels.push({ text: `r² = ${shown(reg.r2, page.digits)}`, colour: "#1f4fd8" });
     }
-    if (page.movable) {
+    if (page.movable?.vx !== undefined) {
+      // One list's movable line: up the plot at its x, labelled with it.
+      const vx = page.movable.vx;
+      g.strokeStyle = palette.casInk;
+      g.lineWidth = 2;
+      g.beginPath();
+      g.moveTo(X(vx), Y(w.ymin));
+      g.lineTo(X(vx), Y(w.ymax));
+      g.stroke();
+      g.fillStyle = palette.casInk;
+      g.textAlign = "left";
+      g.font = `${fs}px "STIX Two Text Variable", serif`;
+      g.fillText(shown(vx, page.digits), X(vx) + fs * 0.6, Y((w.ymin + w.ymax) / 2));
+    } else if (page.movable) {
       const { m, b } = page.movable;
       curve((x) => m * x + b, "#555");
       labels.push({ text: `y = ${shown(m, page.digits)}·x ${b < 0 ? "−" : "+"} ${shown(Math.abs(b), page.digits)}`, colour: "#555" });
     }
     if (extra.shade) {
-      const sp = extra.shade.pts.filter(([, y]) => Number.isFinite(y));
-      if (sp.length > 1) {
+      let drawn = false;
+      for (const part of extra.shade.parts) {
+        const sp = part.filter(([, y]) => Number.isFinite(y));
+        if (sp.length < 2) continue;
         g.fillStyle = "rgba(214, 39, 28, 0.18)";
         g.beginPath();
         g.moveTo(X(sp[0]![0]), Y(0));
@@ -861,8 +887,10 @@ export function DataStatsApp({
         g.lineTo(X(sp.at(-1)![0]), Y(0));
         g.closePath();
         g.fill();
-        labels.push({ text: `Area = ${shown(extra.shade.area, page.digits)}`, colour: FN });
+        drawn = true;
       }
+      // Shade P value names its area as the test's P value; Shade Under Function shows the area it worked out.
+      if (drawn) labels.push({ text: extra.shade.label ?? `Area = ${shown(extra.shade.area, page.digits)}`, colour: FN });
     }
     extra.fns.forEach((f, i) => {
       g.strokeStyle = FN;
@@ -1017,8 +1045,15 @@ export function DataStatsApp({
                 e.currentTarget.setPointerCapture(e.pointerId);
                 return;
               }
-              // Then the movable line.
-              if (page.movable && w && !vertical) {
+              // Then the movable line: a vertical one slides along x.
+              if (page.movable?.vx !== undefined && w) {
+                const p = toWorld(e);
+                if (Math.abs(p.x - page.movable.vx) <= (w.xmax - w.xmin) * 0.04) {
+                  drag.current = { mode: "vslide", cx: 0 };
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  return;
+                }
+              } else if (page.movable && w && !vertical) {
                 const p = toWorld(e);
                 const { m, b } = page.movable;
                 if (Math.abs(m * p.x + b - p.y) <= (w.ymax - w.ymin) * 0.08) {
@@ -1051,6 +1086,7 @@ export function DataStatsApp({
               }
               if (!page.movable || !w) return;
               const p = toWorld(e);
+              if (d.mode === "vslide") return onPage((q) => (q.movable ? { ...q, movable: { ...q.movable, vx: Number(p.x.toPrecision(6)) } } : q));
               const { m, b, lock } = page.movable;
               const set = (m2: number, b2: number) => onPage((q) => (q.movable ? { ...q, movable: { ...q.movable, m: m2, b: b2 } } : q));
               if (lock) set(p.x ? p.y / p.x : m, 0);

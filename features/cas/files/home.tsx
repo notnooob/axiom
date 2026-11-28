@@ -47,7 +47,7 @@ const ICONS: Icon[] = [
 const MORE: Icon[] = [
   { app: "vernier", label: "Vernier DataQuest", colour: "#8cc63f", on: false, glyph: <FlaskGlyph /> },
   { app: "widget", label: "Widget", colour: "#6e4f9e", on: false, glyph: <WidgetGlyph /> },
-  { app: "program", label: "Program Editor", colour: "#e5555c", on: false, glyph: <BinaryGlyph /> },
+  { app: "program", label: "Program Editor", colour: "#e5555c", on: true, glyph: <BinaryGlyph /> },
 ];
 const BY_APP = new Map([...ICONS, ...MORE].map((ic) => [ic.app, ic]));
 

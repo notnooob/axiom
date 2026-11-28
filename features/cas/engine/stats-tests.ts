@@ -495,6 +495,8 @@ function multReg(a: Arg[]): StatResult {
       ["ŷList", fit.yhat],
       ["Resid", fit.resid],
     ],
+    // Save RegEqn to: the fitted equation in x1, x2 …, as the handheld saves it.
+    regEqn: multEqnOf(fit.b),
   };
 }
 
@@ -536,6 +538,7 @@ function multRegTests(a: Arg[]): StatResult {
       ["CookDist", cook],
       ["Leverage", lev],
     ],
+    regEqn: multEqnOf(fit.b),
   };
 }
 
@@ -570,6 +573,7 @@ function multRegIntervals(a: Arg[]): StatResult {
       ["bList", fit.b],
       ["Resid", fit.resid],
     ],
+    regEqn: multEqnOf(fit.b),
   };
 }
 

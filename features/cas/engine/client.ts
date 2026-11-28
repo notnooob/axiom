@@ -209,7 +209,9 @@ export function definedNames(defs: string[]): Set<string> {
       continue;
     }
     const m = /^([A-Za-z]\w*)\s*(?:\([^)]*\))?\s*:=/.exec(d);
-    if (m && !m[1]!.endsWith("_")) out.add(userName(m[1]!));
+    // Names ending _ are the engine's own (g12f1_), but only once a reserved name the student used (len → len_) is given back.
+    const name = m ? userName(m[1]!) : "";
+    if (name && !name.endsWith("_")) out.add(name);
   }
   return out;
 }

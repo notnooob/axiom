@@ -87,6 +87,7 @@ The `@/` import alias is the repo root (`vite.config.ts`, `tsconfig.json`).
 |---|---|
 | `cas-app.tsx` | **The shell** (~3,250 lines). It owns the document, settings, engine, menus, wizards, dialogs, undo, problems and file handling. Every key from the keyboard or keypad goes through `handleKey`, which sends it to the open menu or dialog, or else to the active page. Menu actions arrive in `runAction` (app ids like `geoTool:circle`) and wizard results in `wizardDone` (build strings like `saveas:…`, `geostore:…`). It also builds the `AgentHost` the AI tools use (`agentHost`). Search for those names to find your way around. |
 | `keys.ts` | The `Key` union. The keyboard (`keyFromEvent`) and the on-screen keypad produce the same keys, so apps never see raw DOM events. |
+| `text-box.ts` | Keypad keys in a plain text box (`textBoxKey`), shared by the Python editor and the Program Editor. |
 | `state/document.ts` | The document model: problems → pages (1.1, 1.2 …), the `Page` union (one variant per app), and `newPage(kind)`. |
 | `state/persist.ts` | The Scratchpad in `localStorage`. |
 | `state/setup.ts` | Handheld Setup (text size, haptics, keypad layout, start-up, animations) and Make Default's settings for new documents, kept with `pref`. |
@@ -156,6 +157,7 @@ Each app has a pure key or click model plus a view, so the logic can be tested w
 | Notes | `notes/` | `model.ts` | `notes-app.tsx` | A contenteditable page with maths boxes evaluated in the problem. |
 | Geometry | `geometry/` | `model.ts` | `geometry-app.tsx` | See below. |
 | Python | `python/` | n/a | `python-app.tsx` | `runner.ts` and `worker.ts` run Pyodide; `shims.ts` provides TI's `ti_draw`, `ti_system` and the other `ti_*` modules. |
+| Program Editor | `program/` | `model.ts` | `program-app.tsx` | A page that opens beside another; Store goes through the engine's `Define`, and `program-menu.ts` is its menu. |
 | Finance Solver | `finance/` | `tvm.ts` | `finance-solver.tsx` | A dialog, not a page. |
 | Catalog | `catalog/` | `commands.ts` | `catalog.tsx` | The A–Z list with syntax lines in our own words. |
 
@@ -180,6 +182,7 @@ Each app has a pure key or click model plus a view, so the logic can be tested w
 - `decode.ts` and `encode.ts` handle whole files.
 - `import.ts` turns a decoded file into a document and `export.ts` does the reverse; export is experimental.
 - `geographer.ts` reads TI's Graphs & Geometry card (TI.GeoGrapher) into a Graphs or a Geometry page; objects it can't follow are counted and the student is told. An imported page keeps its card XML (`xml`), written back on export until it's edited.
+- A page with several apps (one card, several `wdgt`) imports as grouped pages (Page Layout); two apps side by side export as one card again. Functions and programs travel in the problem's `<sym>` (t 6 and 7, lines joined by `&#13;:`), and a Program Editor page as `TI.ProgramEditor` with its editor text tree (checked in TI's software).
 - **Not yet supported:** Graphs and Geometry pages made in Axiom aren't exported: writing a new GeoGrapher card needs checking against TI's software first.
 
 ### A connected handheld: `link/`
@@ -197,7 +200,7 @@ A TI-Nspire on a USB cable, through WebUSB (Chromium only), ported from libnspir
 
 | File | What it is |
 |---|---|
-| `tools.ts` | **Every tool** an agent can call (read_page, look_at_screen, calculate, analyze_graph, construct_geometry, run_menu, type_keys …). Tools act through `AgentHost`, which `cas-app.tsx` implements, and work the calculator the way a student would. A tool that returns a picture returns a `Picture`; `look_at_screen` always describes the screen in words (`describeScreen`), and its picture reaches the model in the tool result through the AI SDK's `toModelOutput` (Anthropic, OpenAI, Google) or as a following message (`vision.ts`), and WebMCP as MCP image content. |
+| `tools.ts` | **Every tool** an agent can call (read_page, look_at_screen, calculate, analyze_graph, construct_geometry, select, set_slider, run_menu, type_keys …). `select` stands in for a click (an object, a graph, a cell, a history entry, a Notes box) so `run_menu` with menu `context` reaches the ctrl-menu items. Tools act through `AgentHost`, which `cas-app.tsx` implements, and work the calculator the way a student would. A tool that returns a picture returns a `Picture`; `look_at_screen` always describes the screen in words (`describeScreen`), and its picture reaches the model in the tool result through the AI SDK's `toModelOutput` (Anthropic, OpenAI, Google) or as a following message (`vision.ts`), and WebMCP as MCP image content. |
 | `webmcp.ts` | Registers every entry in `TOOLS` with `document.modelContext`. Adding a tool to `TOOLS` exposes it both to the in-app assistant and to browser agents through WebMCP. |
 | `prompt.ts` | The fixed system prompt: when to act versus ask, TI syntax, and reply format. It holds no state so providers can cache it; `contextBlock` adds the current state to each message. |
 | `agent.ts` | Model calls through the AI SDK (Anthropic, OpenAI, Google, OpenAI-compatible) using the student's key. Also defines the `ask_user` tool, the 40-step limit (the last step has no tools, and the reply is marked `limit` so the chat offers Continue), and the turn start the chat takes its Undo checkpoint at. |
@@ -227,7 +230,7 @@ A TI-Nspire on a USB cable, through WebUSB (Chromium only), ported from libnspir
 6. `ai/assistant.tsx`: `APP_NAMES`.
 7. `tns/import.ts` and `tns/export.ts`: either support the page or let it fall through as unsupported.
 
-**Add a menu item.** Put it in the app's menu file at the handheld's position; if the handheld has an item you aren't building, add it with `off()`. Give it an `app(label, id)` and handle the id in `runAction`. If it needs input, open a wizard whose `build` string you handle in `wizardDone`.
+**Add a menu item.** Put it in the app's menu file at the handheld's position; if the handheld has an item you aren't building, add it with `off()`. Give it an `app(label, id)` and handle the id in `runAction`. If it needs input, open a wizard whose `build` string you handle in `wizardDone`. A context menu (ctrl then menu, the `ctxmenu` key) is built the same way: `calculatorContextMenu`, `graphsContextMenu`, `listsContextMenu`, `dataContextMenu`, `geometryContextMenu` and `notesContextMenu` are opened in `handleKey` (the assistant reaches them with `run_menu` menu `context`), and a page without one gets its normal menu.
 
 **Add an AI tool.**
 1. Add the tool to `TOOLS` in `ai/tools.ts`: name, description, JSON schema and `run(args, host)`. Errors should say what to do next, and changes should be all or nothing.
@@ -244,5 +247,5 @@ WebMCP picks it up automatically.
 - **Pure models and thin views.** Key and click handlers return a new page, or an effect for the shell to run, so they can be tested with vitest without a DOM.
 - **React StrictMode is on.** State updaters run twice in development, so updaters must have no side effects. Side effects inside an updater are deferred (`setTimeout(() => onError(...))`), and undo recording guards against the double run.
 - **Styling.** Use Tailwind v4 with the theme in `src/index.css`. On the calculator screen use the `cas*` colours and `cqw` units; take hex values from `shared/lib/tokens.ts`.
-- **Line endings.** Keep each file's existing line endings; `features/cas/ai/tools.ts` uses CRLF.
+- **Line endings.** Keep each file's existing line endings (the repo is LF).
 - **Tests** sit beside the code (`*.test.ts`). There are no browser tests in the repo; check UI changes by running the app.

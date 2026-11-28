@@ -43,6 +43,8 @@ export type AgentSnapshot = {
   python: { status: PyStatus; prompt: string | null };
   /** The assistant's highlights still on screen (highlights.ts). */
   highlights: Highlight[];
+  /** The problem's variables that Geometry constructions use (Calculate's "=name", conditions), as numbers. */
+  geoValues: Record<string, number>;
 };
 
 /** What cas-app.tsx lends the tools: its state, read fresh each call, and its own handlers. */
@@ -78,7 +80,19 @@ export type AgentHost = {
   analyzeGraph(spec: { type: AnalyzeKind; fn: number; other?: number; a: number; b: number }): Promise<void>;
   /** Put the assistant's highlights on the calculator (replacing any), or take them off (null). */
   setHighlights(hs: Highlight[] | null): void;
+  /** Select on the active page, as a click or the arrows would (for its context menu and Delete); an error, or null. */
+  select(target: SelectTarget): string | null;
+  /** A slider on the active page set to a value (worked out, so π/4 is fine), as typing in it does; an error, or null. */
+  setSlider(name: string, value: string): Promise<string | null>;
 };
+
+/**
+ * What select picks: Geometry objects (several, as Select ▸ Region takes in),
+ * a Graphs page's graph or construction object, a spreadsheet cell, column
+ * (B) or row (3), a Calculator history entry (from 1), a Notes maths box
+ * (from 1) or text, or nothing.
+ */
+export type SelectTarget = { objects?: string[]; graph?: number; cell?: string; entry?: number; box?: number; text?: string; clear?: boolean };
 
 export type ToolImage = { data: string; mediaType: "image/png" };
 
@@ -137,6 +151,7 @@ const KIND_NAMES: Record<Page["kind"], string> = {
   pyshell: "Python shell",
   notes: "Notes",
   geometry: "Geometry",
+  program: "Program Editor",
   unsupported: "unsupported app",
 };
 
@@ -163,7 +178,7 @@ const short = (v: unknown) => (typeof v === "string" && v.length > 4000 ? `${v.s
 /** A coordinate as the assistant reads it. */
 const num = (v: number) => Number(v.toFixed(4));
 
-export function pageContent(doc: CasDocument, i: number): Record<string, unknown> {
+export function pageContent(doc: CasDocument, i: number, values: Record<string, number> = {}): Record<string, unknown> {
   const p = doc.pages[i]!;
   const base = { page: pageLabel(doc, i), index: i, app: KIND_NAMES[p.kind] };
   switch (p.kind) {
@@ -177,6 +192,7 @@ export function pageContent(doc: CasDocument, i: number): Record<string, unknown
           ...(e.warning ? { warning: e.warning.join(" ") } : {}),
         })),
         entryLine: rowToLinear(p.edit.row),
+        ...(p.sel ? { selectedEntry: p.sel.entry + 1 } : {}),
       };
     case "graphs":
       return {
@@ -190,6 +206,10 @@ export function pageContent(doc: CasDocument, i: number): Record<string, unknown
         window: p.window,
         marks: JSON.parse(JSON.stringify(p.marks, (k, v) => (k === "row" ? undefined : v))) as unknown,
         entryLine: p.editing === null ? null : { n: p.editing, kind: p.entryKind ?? "function", text: rowToLinear(p.edit.row) },
+        ...(p.pick !== undefined ? { selectedGraph: `f${p.pick}` } : {}),
+        // Geometry tools used on the graph: the construction over it, in the graph's coordinates.
+        ...(p.geo?.objects.length ? { construction: describeGeometry(p.geo.objects, { vars: { ...values, ...Object.fromEntries((p.sliders ?? []).map((sl) => [sl.name, sl.value])) } }) } : {}),
+        ...(p.geo?.sel ? { selectedObject: p.geo.sel } : {}),
       };
     case "lists":
       return {
@@ -199,31 +219,47 @@ export function pageContent(doc: CasDocument, i: number): Record<string, unknown
           .filter((c) => c.name || c.formula || c.cells.length),
         selected: { column: letter(p.sel.col), row: p.sel.row < 2 ? (p.sel.row ? "formula" : "name") : p.sel.row - 1 },
         ...(p.table ? { showing: `the function table (Table menu), x from ${p.table.start} in steps of ${p.table.step}` } : {}),
+        ...(p.pick ? { picked: p.pick === "col" ? "the whole column" : "the whole row" } : {}),
+        ...(p.mode ? { mode: p.mode.kind } : {}),
+        // Data ▸ Exact or Approximate on a column, in place of the document's setting.
+        ...(p.colModes && Object.keys(p.colModes).length ? { columnModes: Object.fromEntries(Object.entries(p.colModes).map(([c, m]) => [letter(Number(c)), m])) } : {}),
       };
     case "datastats":
       return { ...base, ...JSON.parse(JSON.stringify(p, (k, v) => (k === "xml" || k === "id" || k === "kind" ? undefined : v))) };
     case "python":
       return { ...base, file: p.file, source: short(p.source) };
+    case "program":
+      return { ...base, name: p.name, source: short(p.source), stored: p.source === p.stored, ...(p.readOnly ? { readOnly: true } : {}) };
     case "pyshell":
       return { ...base, lines: p.lines.slice(-150).map((l) => (l.kind === "in" ? `>>> ${l.text}` : l.kind === "err" ? `! ${l.text}` : l.text)) };
     case "notes":
       return {
         ...base,
         text: short(p.paras.map((runs) => runs.map(runText).join("")).join("\n")),
+        ...(p.sliders?.length ? { sliders: p.sliders.map((sl) => ({ name: sl.name, value: sl.value, min: sl.min, max: sl.max })) } : {}),
+        ...(p.hideAnswer ? { answersHidden: true } : {}),
       };
     case "geometry":
       return {
         ...base,
         units: `lengths in cm, angles in degrees; the page shows x from ${num((p.view?.x ?? 0) - (p.view?.w ?? 20) / 2)} to ${num((p.view?.x ?? 0) + (p.view?.w ?? 20) / 2)}, centred on y = ${num(p.view?.y ?? 0)}`,
-        objects: describeGeometry(p.objects),
+        objects: describeGeometry(p.objects, geoEnvOf(p, values)),
         ...(p.texts?.length ? { texts: p.texts } : {}),
         ...(p.tool ? { tool: p.tool } : {}),
+        ...(p.mode ? { mode: p.mode.kind } : {}),
+        ...(p.sel ? { selected: p.sel } : {}),
+        ...(p.multi?.length ? { selected: p.multi } : {}),
+        ...(p.sliders?.length ? { sliders: p.sliders.map((sl) => ({ name: sl.name, value: sl.value, min: sl.min, max: sl.max })) } : {}),
+        ...(p.gsettings?.geoAngle === "Radian" ? { angles: "radians (Geometry Angle setting)" } : {}),
         ...(p.axes ? { axes: true } : {}),
       };
     case "unsupported":
       return { ...base, app: p.app, note: "This app isn't built in Axiom; the page is kept so the document stays whole." };
   }
 }
+
+/** What a Geometry page's values are worked out with: the problem's variables, its own sliders over them, and its settings. */
+const geoEnvOf = (p: GeometryPage, values: Record<string, number>) => ({ vars: { ...values, ...Object.fromEntries((p.sliders ?? []).map((sl) => [sl.name, sl.value])) }, digits: p.gsettings?.digits, radians: p.gsettings?.geoAngle === "Radian" });
 
 export function stateOf(s: AgentSnapshot) {
   const d = s.doc;
@@ -305,13 +341,15 @@ export function describeScreen(s: AgentSnapshot): string {
       case "geometry": {
         const v = p.view ?? { x: 0, y: 0, w: 20 };
         out.push(`Showing x from ${said(v.x - v.w / 2)} to ${said(v.x + v.w / 2)} cm.${p.axes ? " Axes on." : ""}`);
-        const objs = describeGeometry(p.objects);
+        const objs = describeGeometry(p.objects, geoEnvOf(p, s.geoValues));
         out.push(objs.length ? `Objects: ${objs.slice(0, 20).map((o) => JSON.stringify(o)).join("; ")}${objs.length > 20 ? "; …" : ""}` : "The page is empty.");
         if (p.texts?.length) out.push(`Texts: ${p.texts.map((t) => `"${t.text}" at (${said(t.x)}, ${said(t.y)})`).join("; ")}`);
+        if (p.sliders?.length) out.push(`Sliders: ${p.sliders.map((x) => `${x.name} = ${x.value}`).join(", ")}.`);
         break;
       }
       case "notes":
         out.push(`Text: ${p.paras.map((runs) => runs.map(runText).join("")).join("\n").slice(0, 400) || "(empty)"}`);
+        if (p.sliders?.length) out.push(`Sliders: ${p.sliders.map((x) => `${x.name} = ${x.value}`).join(", ")}.`);
         break;
       case "datastats":
         out.push(
@@ -320,6 +358,9 @@ export function describeScreen(s: AgentSnapshot): string {
         break;
       case "python":
         out.push(`Program ${p.file}: ${p.source.slice(0, 300) || "(empty)"}`);
+        break;
+      case "program":
+        out.push(`Program Editor: ${p.name}${p.source === p.stored ? "" : " (changed, not stored)"}`);
         break;
       case "pyshell":
         out.push(`Shell: ${p.lines.slice(-8).map((l) => (l.kind === "in" ? `>>> ${l.text}` : l.text)).join(" / ") || "(empty)"}`);
@@ -361,7 +402,7 @@ function menuText(items: MenuItem[], depth = 0, max = 4): string[] {
   });
 }
 
-const MENU_KEYS = { page: { k: "menu" }, document: { k: "doc" }, add_page: { k: "insertPage" } } as const;
+const MENU_KEYS = { page: { k: "menu" }, context: { k: "ctxmenu" }, document: { k: "doc" }, add_page: { k: "insertPage" } } as const;
 
 async function openMenuOf(h: AgentHost, which: string): Promise<Menu> {
   const s = h.snapshot();
@@ -399,6 +440,8 @@ const SPECIAL: Record<string, Key> = {
   end: { k: "end" },
   clear: { k: "clear" },
   menu: { k: "menu" },
+  ctxmenu: { k: "ctxmenu" },
+  vars: { k: "vars" },
   doc: { k: "doc" },
   insertpage: { k: "insertPage" },
   prevpage: { k: "prevPage" },
@@ -429,7 +472,7 @@ export async function typeKeys(h: AgentHost, input: string) {
     const s = h.snapshot();
     const p = active(h);
     if (s.dialog?.kind === "dialog") h.key({ k: "text", text: part });
-    else if (!s.dialog && p && ["calculator", "graphs", "lists", "python", "pyshell"].includes(p.kind)) h.key({ k: "paste", text: part });
+    else if (!s.dialog && p && ["calculator", "graphs", "lists", "python", "pyshell", "program"].includes(p.kind)) h.key({ k: "paste", text: part });
     else
       for (const c of part) {
         h.key({ k: "char", c });
@@ -486,10 +529,10 @@ export const TOOLS: AgentTool[] = [
     run: async (a, h) => {
       const s = h.snapshot();
       if (s.view !== "doc") throw new Error(`No document is on screen (view: ${s.view}).`);
-      if (a.all) return s.doc.pages.map((_, i) => pageContent(s.doc, i));
+      if (a.all) return s.doc.pages.map((_, i) => pageContent(s.doc, i, s.geoValues));
       const i = typeof a.index === "number" ? a.index : s.doc.active;
       if (!s.doc.pages[i]) throw new Error(`No page ${i}; the document has ${s.doc.pages.length}.`);
-      return pageContent(s.doc, i);
+      return pageContent(s.doc, i, s.geoValues);
     },
   },
   {
@@ -736,7 +779,8 @@ export const TOOLS: AgentTool[] = [
       await tick(150);
       await settle(h);
       const p = active(h);
-      return p?.kind === "lists" ? pageContent(h.snapshot().doc, h.snapshot().doc.active) : "Done.";
+      const s = h.snapshot();
+      return p?.kind === "lists" ? pageContent(s.doc, s.doc.active, s.geoValues) : "Done.";
     },
   },
   {
@@ -751,7 +795,7 @@ export const TOOLS: AgentTool[] = [
         y: { type: "string" },
         summary: { type: "string", description: "A frequency list for x, in place of y" },
         plot: { type: "string", enum: ["dot", "box", "histogram", "normprob", "scatter", "xyline", "dotchart", "bar", "pie"] },
-        regression: { type: "string", enum: ["none", "LinRegMx", "LinRegBx", "QuadReg", "PowerReg", "ExpReg", "LnReg", "SinReg", "Logistic"] },
+        regression: { type: "string", enum: ["none", "LinRegMx", "LinRegBx", "QuadReg", "PowerReg", "ExpReg", "LnReg", "SinReg", "Logistic", "LogisticD"] },
         diagnostics: { type: "boolean" },
       },
     },
@@ -774,7 +818,7 @@ export const TOOLS: AgentTool[] = [
       if (a.diagnostics !== undefined) h.wizardDone(`ds:settings:${p.digits ?? "Auto"}:${a.diagnostics ? "Yes" : "No"}`);
       await settle(h);
       const s = h.snapshot();
-      return pageContent(s.doc, s.doc.active);
+      return pageContent(s.doc, s.doc.active, s.geoValues);
     },
   },
   {
@@ -843,14 +887,14 @@ export const TOOLS: AgentTool[] = [
       if (err) throw new Error(err);
       await settle(h);
       const s = h.snapshot();
-      return pageContent(s.doc, s.doc.active);
+      return pageContent(s.doc, s.doc.active, s.geoValues);
     },
   },
   {
     name: "construct_geometry",
     title: "Construct geometry",
     description:
-      "On the active Geometry page: add objects in order (each may use the ones before it), move free points (a point with an existing name moves, and everything built on it follows), remove objects (with what's built on them), or clear the page. Lengths are cm, angles degrees; unless the student has panned or zoomed (read_page says), the page shows x from -10 to 10 and y about -7 to 7, so keep figures inside that. Points are named with a capital letter (A, B, C1); a transformed point's image is named with a prime (A'). Refer to a line by its id (returned) or by two point names (\"AB\"). Measurements (length, area, perimeter, angle, slope) appear on the page and their values come back; store: a variable name keeps the value in that variable for the problem's Calculator pages, updated as the figure changes. Transformations (symmetry, reflection, translation, rotation, dilation) make a live image of each object in of. All or nothing: if one object fails, nothing is added and the error says which.",
+      "On the active Geometry page: add objects in order (each may use the ones before it), move free points (a point with an existing name moves, and everything built on it follows), remove objects (with what's built on them), or clear the page. Lengths are cm, angles degrees; unless the student has panned or zoomed (read_page says), the page shows x from -10 to 10 and y about -7 to 7, so keep figures inside that. Points are named with a capital letter (A, B, C1); a transformed point's image is named with a prime (A'). Refer to a line by its id (returned) or by two point names (\"AB\"). Measurements (length, area, perimeter, angle, slope) appear on the page and their values come back; store: a variable name keeps the value in that variable for the problem's Calculator pages, updated as the figure changes. Transformations (symmetry, reflection, translation, rotation, dilation) make a live image of each object in of. calculate (Actions ▸ Calculate) puts expr's value at x, y, kept up to date as the figure moves. redefine (Actions ▸ Redefine) gives point name a new definition: on the object to (a line, circle, polygon), merged into the point to, or free at x, y; what's built on it follows. All or nothing: if one object fails, nothing is added and the error says which.",
     inputSchema: {
       type: "object",
       properties: {
@@ -861,7 +905,7 @@ export const TOOLS: AgentTool[] = [
             properties: {
               type: {
                 type: "string",
-                enum: ["point", "segment", "line", "ray", "circle", "triangle", "polygon", "midpoint", "intersection", "perpendicular", "parallel", "perpendicular_bisector", "angle_bisector", "length", "area", "perimeter", "angle", "slope", "symmetry", "reflection", "translation", "rotation", "dilation"],
+                enum: ["point", "segment", "line", "ray", "circle", "triangle", "polygon", "midpoint", "intersection", "perpendicular", "parallel", "perpendicular_bisector", "angle_bisector", "length", "area", "perimeter", "angle", "slope", "symmetry", "reflection", "translation", "rotation", "dilation", "calculate", "redefine"],
               },
               name: { type: "string", description: "Points: a capital letter, optionally with digits. Others: optional id." },
               x: { type: "number" },
@@ -873,7 +917,9 @@ export const TOOLS: AgentTool[] = [
               radius: { type: "number" },
               angle: { type: "number", description: "rotation: degrees anticlockwise." },
               factor: { type: "number", description: "dilation: the scale factor (negative goes through the centre)." },
-              store: { type: "string", description: "A measurement: the variable to keep its value in (letters, digits, _)." },
+              store: { type: "string", description: "A measurement or calculate: the variable to keep its value in (letters, digits, _)." },
+              expr: { type: "string", description: "calculate: the expression, e.g. 2*a+b." },
+              vars: { type: "object", additionalProperties: { type: "string" }, description: "calculate: each variable's value, a measurement's (or another result's) id, or \"=name\" for the problem's variable; the page's sliders are used as they are." },
             },
             required: ["type"],
           },
@@ -903,7 +949,7 @@ export const TOOLS: AgentTool[] = [
       }));
       await settle(h);
       const s = h.snapshot();
-      return pageContent(s.doc, s.doc.active);
+      return pageContent(s.doc, s.doc.active, s.geoValues);
     },
   },
   {
@@ -1060,13 +1106,51 @@ export const TOOLS: AgentTool[] = [
     },
   },
   {
+    name: "select",
+    title: "Select",
+    description:
+      "Select on the active page, as a click or the arrows would, so the context menu (run_menu 'context') and Delete act on it: objects (Geometry object ids; several take them all in, as Select ▸ Region; on a Graphs page, one object of its construction), graph (n of fn on a Graphs page), cell (Lists: \"B3\", a whole column \"B\", a whole row \"3\"), entry (a Calculator history entry, from 1), box (Notes: the caret into maths box n, from 1), text (Notes: that text selected), or clear.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        objects: { type: "array", items: { type: "string" } },
+        graph: { type: "number" },
+        cell: { type: "string" },
+        entry: { type: "number" },
+        box: { type: "number" },
+        text: { type: "string" },
+        clear: { type: "boolean" },
+      },
+    },
+    run: async (a, h) => {
+      const err = h.select(a as SelectTarget);
+      if (err) throw new Error(err);
+      await settle(h);
+      const s = h.snapshot();
+      return pageContent(s.doc, s.doc.active, s.geoValues);
+    },
+  },
+  {
+    name: "set_slider",
+    title: "Set a slider",
+    description: "Set a slider on the active page (Graphs, Data & Statistics, Geometry, Notes) to a value, as typing in it does: its variable changes for the problem and what uses it follows. The range widens to take the value. Make a slider with the page's Insert Slider menu item first.",
+    inputSchema: { type: "object", properties: { name: { type: "string" }, value: { type: "string", description: "A number, or something worked out (pi/4)" } }, required: ["name", "value"] },
+    run: async (a, h) => {
+      const err = await h.setSlider(String(a.name), String(a.value));
+      if (err) throw new Error(err);
+      await settle(h);
+      const s = h.snapshot();
+      return { ...(s.dialog ? { dialog: s.dialog } : {}), page: pageContent(s.doc, s.doc.active, s.geoValues) };
+    },
+  },
+  {
     name: "list_menu",
     title: "Show a menu",
     description:
-      "List a menu's items as the student sees them: 'page' (the menu key on the active page: Calculator's Algebra/Calculus/…, Graphs, Lists, Data & Statistics), 'document' (File, Edit, Insert, Settings), 'add_page', or 'open' (whatever menu is open now). Give path to list one submenu.",
+      "List a menu's items as the student sees them: 'page' (the menu key on the active page: Calculator's Algebra/Calculus/…, Graphs, Lists, Data & Statistics), 'context' (ctrl menu: what's selected, so select it first, or the page's own), 'document' (File, Edit, Insert, Settings), 'add_page', or 'open' (whatever menu is open now). Give path to list one submenu.",
     inputSchema: {
       type: "object",
-      properties: { menu: { type: "string", enum: ["page", "document", "add_page", "open"] }, path: { type: "array", items: { type: "string" } } },
+      properties: { menu: { type: "string", enum: ["page", "context", "document", "add_page", "open"] }, path: { type: "array", items: { type: "string" } } },
       required: ["menu"],
     },
     readOnly: true,
@@ -1087,11 +1171,11 @@ export const TOOLS: AgentTool[] = [
     name: "run_menu",
     title: "Choose a menu item",
     description:
-      "Choose a menu item by its labels (or number keys), as the student would, e.g. menu 'page', path ['Calculus','Derivative']. It may insert a template, open a dialog (fill it with respond_to_dialog), or act at once. Use list_menu first if unsure of labels.",
+      "Choose a menu item by its labels (or number keys), as the student would, e.g. menu 'page', path ['Calculus','Derivative'], or menu 'context' for what's selected (select it first: Cut/Copy/Paste and colours on cells, Label/Pin/Redefine/Set Conditions on a Geometry object, Hide/Delete/Color on a graph, Delete Entry in the Calculator). It may insert a template, open a dialog (fill it with respond_to_dialog), or act at once. Use list_menu first if unsure of labels.",
     inputSchema: {
       type: "object",
       properties: {
-        menu: { type: "string", enum: ["page", "document", "add_page", "open"] },
+        menu: { type: "string", enum: ["page", "context", "document", "add_page", "open"] },
         path: { type: "array", items: { type: "string" }, minItems: 1 },
       },
       required: ["menu", "path"],
@@ -1118,7 +1202,7 @@ export const TOOLS: AgentTool[] = [
       h.pick(item.action);
       await settle(h);
       const s = h.snapshot();
-      return { chose: item.label, ...(s.dialog ? { dialog: s.dialog } : {}), page: s.view === "doc" ? pageContent(s.doc, s.doc.active) : stateOf(s) };
+      return { chose: item.label, ...(s.dialog ? { dialog: s.dialog } : {}), page: s.view === "doc" ? pageContent(s.doc, s.doc.active, s.geoValues) : stateOf(s) };
     },
   },
   {
@@ -1155,19 +1239,19 @@ export const TOOLS: AgentTool[] = [
       } else h.key({ k: "enter" });
       await settle(h);
       const s = h.snapshot();
-      return { ...(s.dialog ? { dialog: s.dialog } : {}), page: s.view === "doc" ? pageContent(s.doc, s.doc.active) : stateOf(s) };
+      return { ...(s.dialog ? { dialog: s.dialog } : {}), page: s.view === "doc" ? pageContent(s.doc, s.doc.active, s.geoValues) : stateOf(s) };
     },
   },
   {
     name: "type_keys",
     title: "Press keys",
     description:
-      "Press keys on the calculator, for anything the other tools don't cover. Text is typed; keys go in braces: {enter} {approx} {esc} {tab} {up} {down} {left} {right} {backspace} {del} {clear} {menu} {doc} {insertpage} {prevpage} {nextpage} {save} {homescreen} {selectall} {undo} {redo} {frac} {sqrt} {space}.",
+      "Press keys on the calculator, for anything the other tools don't cover. Text is typed; keys go in braces: {enter} {approx} {esc} {tab} {up} {down} {left} {right} {backspace} {del} {clear} {menu} {ctxmenu} {vars} {doc} {insertpage} {prevpage} {nextpage} {save} {homescreen} {selectall} {undo} {redo} {frac} {sqrt} {space}.",
     inputSchema: { type: "object", properties: { keys: { type: "string" } }, required: ["keys"] },
     run: async (a, h) => {
       await typeKeys(h, String(a.keys));
       const s = h.snapshot();
-      return { ...(s.dialog ? { dialog: s.dialog } : {}), ...(s.view === "doc" ? { page: pageContent(s.doc, s.doc.active) } : { state: stateOf(s) }) };
+      return { ...(s.dialog ? { dialog: s.dialog } : {}), ...(s.view === "doc" ? { page: pageContent(s.doc, s.doc.active, s.geoValues) } : { state: stateOf(s) }) };
     },
   },
 ];

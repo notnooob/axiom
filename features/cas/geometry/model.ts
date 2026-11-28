@@ -7,11 +7,23 @@
  */
 
 import { classify as classifyConic } from "../graphs/conics";
+import { evalNumber, geoFormat } from "./numeric";
 
 /** Actions ▸ Attributes: line weight, style and colour (a palette name); unset is the default. */
-export type GeoAttrs = { weight?: "Thin" | "Medium" | "Thick"; style?: "Continuous" | "Dotted" | "Dashed"; colour?: string };
-/** What every object can have: Hide/Show's flag (a hidden object is still worked out, for what's built on it) and its Attributes. */
-export type GeoCommon = { hidden?: boolean; attrs?: GeoAttrs };
+export type GeoAttrs = { weight?: "Thin" | "Medium" | "Thick"; style?: "Continuous" | "Dotted" | "Dashed"; colour?: string; fill?: string };
+/**
+ * Set Conditions' Conditional Attributes: expressions worked out as the
+ * figure moves. show: drawn only while it holds; line and fill: a colour
+ * number, 1 to 15 (the Colors… list).
+ */
+export type GeoCond = { show?: string; line?: string; fill?: string };
+/**
+ * What every object can have: Hide/Show's flag (a hidden object is still
+ * worked out, for what's built on it), its Attributes, the label the context
+ * menu's Label gave it (points are unnamed on screen until labelled, as on
+ * the handheld), and its conditions.
+ */
+export type GeoCommon = { hidden?: boolean; attrs?: GeoAttrs; label?: string; cond?: GeoCond };
 
 export type GeoObj = GeoCommon & (
   | { id: string; kind: "point"; x: number; y: number }
@@ -23,8 +35,14 @@ export type GeoObj = GeoCommon & (
   | { id: string; kind: "anglebisector"; a: string; b: string; c: string }
   | { id: string; kind: "circle"; centre: string; through?: string; r?: number }
   | { id: string; kind: "polygon"; pts: string[] }
-  /** store: the variable its value is kept in, for the problem's other pages. */
-  | { id: string; kind: "measure"; what: "length" | "area" | "perimeter" | "angle" | "slope" | "dangle"; of: string[]; store?: string }
+  /** store: the variable its value is kept in, for the problem's other pages. at: where Detach left it (unset, it sits beside what it measures). */
+  | { id: string; kind: "measure"; what: "length" | "area" | "perimeter" | "angle" | "slope" | "dangle"; of: string[]; store?: string; at?: Pt }
+  /**
+   * Actions ▸ Calculate: an expression's value with each of its variables
+   * read off the page (name → a measurement's or result's id) or from the
+   * problem ("=name"), placed at `at` and kept up to date as the figure moves.
+   */
+  | { id: string; kind: "calc"; expr: string; vars: Record<string, string>; at: Pt; store?: string }
   /**
    * An image of another object. by: symmetry [centre], reflection [line],
    * translation [from, to], rotation and dilation [centre] with amount (degrees
@@ -115,7 +133,14 @@ export function meet(s: Shape, u: Shape): Pt[] {
 }
 
 /** Every object worked out, in order (each is built only from ones before it); one that can't be (parallel lines' meeting) is left out. */
-export function resolve(objs: GeoObj[]): Map<string, Shape> {
+/**
+ * What the page's settings and the problem lend the figure: variables'
+ * values (sliders, the problem's variables) for Calculate and conditions,
+ * Display Digits for values, and the Geometry Angle.
+ */
+export type GeoEnv = { vars?: Record<string, number>; digits?: string; radians?: boolean };
+
+export function resolve(objs: GeoObj[], env: GeoEnv = {}): Map<string, Shape> {
   const out = new Map<string, Shape>();
   const pt = (id: string) => {
     const s = out.get(id);
@@ -192,11 +217,27 @@ export function resolve(objs: GeoObj[]): Map<string, Shape> {
         break;
       }
       case "measure":
-        s = measure(o, out);
+        s = measure(o, out, env);
+        // Detached (the context menu's Detach), it stays where it was left.
+        if (s?.t === "value" && o.at) s = { ...s, at: o.at, arc: s.arc };
         break;
       case "coords":
         s = coordsOf(out.get(o.of));
         break;
+      case "calc": {
+        // Each variable's value read off the page (a measurement, another result) or from the problem.
+        const vals: Record<string, number> = { ...env.vars };
+        for (const [name, from] of Object.entries(o.vars)) {
+          if (from.startsWith("=")) vals[name] = env.vars?.[from.slice(1)] ?? NaN;
+          else {
+            const v = out.get(from);
+            vals[name] = v?.t === "value" ? v.value : NaN;
+          }
+        }
+        const value = evalNumber(o.expr, vals, !env.radians);
+        s = { t: "value", value, text: Number.isFinite(value) ? geoFormat(value, env.digits) : "undef", at: o.at };
+        break;
+      }
       case "transform": {
         const f = mapping(o, out);
         const src = out.get(o.of);
@@ -285,11 +326,12 @@ function image(s: Shape, f: (p: Pt) => Pt, scale: number): Shape | undefined {
   return undefined;
 }
 
-function measure(o: Extract<GeoObj, { kind: "measure" }>, out: Map<string, Shape>): Shape | undefined {
+function measure(o: Extract<GeoObj, { kind: "measure" }>, out: Map<string, Shape>, env: GeoEnv): Shape | undefined {
   const of = o.of.map((id) => out.get(id));
   if (of.some((s) => !s)) return undefined;
   const [s, u, v] = of as Shape[];
-  const value = (n: number, unit: string, at: Pt): Extract<Shape, { t: "value" }> => ({ t: "value", value: n, text: `${round(n)}${unit}`, at });
+  // Written to the settings' Display Digits (Float 3 unless changed), as the handheld writes 14.8 cm.
+  const value = (n: number, unit: string, at: Pt): Extract<Shape, { t: "value" }> => ({ t: "value", value: n, text: `${geoFormat(n, env.digits)}${unit}`, at });
   // A length is written just off its segment (on the upper side), not over the line.
   const beside = (p: Pt, q: Pt): Pt => {
     const d = dist(p, q) || 1;
@@ -329,7 +371,10 @@ function measure(o: Extract<GeoObj, { kind: "measure" }>, out: Map<string, Shape
         if (sweep <= -Math.PI) sweep += 2 * Math.PI;
         const mid = a + sweep / 2;
         // A directed angle keeps its sign: anticlockwise from the first side is positive.
-        const deg = ((o.what === "dangle" ? sweep : Math.abs(sweep)) * 180) / Math.PI;
+        const turn = o.what === "dangle" ? sweep : Math.abs(sweep);
+        // In radians when the settings' Geometry Angle says so.
+        if (env.radians) return { ...value(turn, " rad", { x: u.p.x + 1.6 * Math.cos(mid), y: u.p.y + 1.6 * Math.sin(mid) }), arc: { c: u.p, from: a, sweep } };
+        const deg = (turn * 180) / Math.PI;
         return { ...value(deg, "°", { x: u.p.x + 1.6 * Math.cos(mid), y: u.p.y + 1.6 * Math.sin(mid) }), arc: { c: u.p, from: a, sweep } };
       }
       return undefined;
@@ -347,7 +392,7 @@ export function nextLabel(objs: GeoObj[]): string {
 
 /** A new object's id: its kind's letter and the next number (s1, l1, c1…). Points are named instead. */
 export function nextId(objs: GeoObj[], kind: GeoObj["kind"]): string {
-  const prefix = { segment: "s", line: "l", ray: "r", perpendicular: "l", parallel: "l", bisector: "l", anglebisector: "r", circle: "c", polygon: "p", measure: "m", tangent: "l", vector: "v", arc: "a", rectangle: "p", regpoly: "p", conic: "k", locus: "lo", compass: "c", coords: "e" }[kind as string] ?? "o";
+  const prefix = { segment: "s", line: "l", ray: "r", perpendicular: "l", parallel: "l", bisector: "l", anglebisector: "r", circle: "c", polygon: "p", measure: "m", tangent: "l", vector: "v", arc: "a", rectangle: "p", regpoly: "p", conic: "k", locus: "lo", compass: "c", coords: "e", calc: "n" }[kind as string] ?? "o";
   const used = new Set(objs.map((o) => o.id));
   let n = 1;
   while (used.has(`${prefix}${n}`)) n++;
@@ -360,7 +405,17 @@ const kindOf = (s: Shape): GeoObj["kind"] => (s.t === "circle" ? "circle" : s.t 
 /** Remove objects, and everything built on them. */
 export function remove(objs: GeoObj[], ids: string[]): GeoObj[] {
   const gone = new Set(ids);
-  const refs = (o: GeoObj): string[] => {
+  return objs.filter((o) => {
+    if (gone.has(o.id) || refsOf(o).some((r) => gone.has(r))) {
+      gone.add(o.id);
+      return false;
+    }
+    return true;
+  });
+}
+
+/** The objects an object is built on. */
+export function refsOf(o: GeoObj): string[] {
     switch (o.kind) {
       case "point":
         return [];
@@ -405,15 +460,9 @@ export function remove(objs: GeoObj[], ids: string[]): GeoObj[] {
         return [o.measure, o.onto, o.from];
       case "coords":
         return [o.of];
+      case "calc":
+        return Object.values(o.vars).filter((v) => !v.startsWith("="));
     }
-  };
-  return objs.filter((o) => {
-    if (gone.has(o.id) || refs(o).some((r) => gone.has(r))) {
-      gone.add(o.id);
-      return false;
-    }
-    return true;
-  });
 }
 
 // ---- Building from a description (the assistant's tool)
@@ -432,8 +481,11 @@ export type GeoSpec = {
   angle?: number;
   /** dilation: the scale factor. */
   factor?: number;
-  /** A measurement: the variable to keep its value in. */
+  /** A measurement or a calculate result: the variable to keep its value in. */
   store?: string;
+  /** calculate: the expression, and each of its variables' value: a measurement's or another result's id, or "=name" for the problem's variable. */
+  expr?: string;
+  vars?: Record<string, string>;
 };
 
 /** A name a measurement can be stored in. */
@@ -446,6 +498,19 @@ const TRANSFORMS = new Set<string>(["symmetry", "reflection", "translation", "ro
  * what's missing. Lines are referred to by id or by two point names ("AB").
  */
 export function addSpec(objs: GeoObj[], spec: GeoSpec): { objs: GeoObj[]; id: string } | { error: string } {
+  const r = addSpecRaw(objs, spec);
+  // The assistant's points are named in its replies, so they're labelled on screen too.
+  return "error" in r ? r : { ...r, objs: labelNewPoints(objs, r.objs) };
+}
+
+/** Points in `objs` that weren't in `before`, labelled with their names (Automatically label points, MathDraw, the assistant). */
+export function labelNewPoints(before: GeoObj[], objs: GeoObj[]): GeoObj[] {
+  const had = new Set(before.map((o) => o.id));
+  const shapes = resolve(objs);
+  return objs.map((o) => (!had.has(o.id) && !o.label && shapes.get(o.id)?.t === "pt" ? { ...o, label: o.id } : o));
+}
+
+function addSpecRaw(objs: GeoObj[], spec: GeoSpec): { objs: GeoObj[]; id: string } | { error: string } {
   const has = (id: string) => objs.some((o) => o.id === id);
   const needPts = (ids: string[] | undefined, n: number) => {
     const list = ids ?? [];
@@ -471,6 +536,30 @@ export function addSpec(objs: GeoObj[], spec: GeoSpec): { objs: GeoObj[]; id: st
   const type = spec.type.toLowerCase().replace(/[\s-]+/g, "_");
   const pts = spec.points ?? spec.of;
   switch (type) {
+    // Actions ▸ Calculate, without the pointing: the result placed at x, y and kept up to date.
+    case "calculate": {
+      if (!spec.expr?.trim()) return { error: "calculate needs expr" };
+      if (spec.x === undefined || spec.y === undefined) return { error: "calculate needs x and y (where its result goes)" };
+      if (spec.store !== undefined && !VAR_NAME.test(spec.store)) return { error: `store needs a variable name (letters, digits and _): not ${spec.store}` };
+      const vars = spec.vars ?? {};
+      const bad = Object.entries(vars).find(([, v]) => !v.startsWith("=") && !has(v));
+      if (bad) return { error: `${bad[0]} refers to ${bad[1]}, which isn't on the page (give a measurement's id, or "=name" for a variable)` };
+      return add({ id: spec.name ?? nextId(objs, "calc"), kind: "calc", expr: spec.expr, vars, at: { x: spec.x, y: spec.y }, ...(spec.store ? { store: spec.store } : {}) });
+    }
+    // Actions ▸ Redefine, without the pointing: the point onto an object (to), merged with another point (to), or free at x, y.
+    case "redefine": {
+      const name = spec.name ?? "";
+      if (!redefinable(objs.find((o) => o.id === name))) return { error: `${name || "name"} must be a free point, or a point on an object` };
+      if (spec.to !== undefined && !has(spec.to)) return { error: `there's no object ${spec.to}` };
+      const shapes = resolve(objs);
+      const s = spec.to ? shapes.get(spec.to) : undefined;
+      // Onto an object without x, y: where the point is now, put on it.
+      const here = shapes.get(name);
+      const at = spec.x !== undefined && spec.y !== undefined ? { x: spec.x, y: spec.y } : s?.t === "pt" ? s.p : here?.t === "pt" ? here.p : null;
+      if (!at) return { error: "redefine needs x and y, or to" };
+      if (spec.to && dependents(objs, name).has(spec.to)) return { error: `${spec.to} is built on ${name}, so ${name} can't go on it` };
+      return { objs: redefinePoint(objs, name, spec.to ?? null, at), id: spec.to && s?.t === "pt" ? spec.to : name };
+    }
     case "point": {
       if (spec.x === undefined || spec.y === undefined) return { error: "a point needs x and y" };
       const name = spec.name ?? nextLabel(objs);
@@ -479,7 +568,7 @@ export function addSpec(objs: GeoObj[], spec: GeoSpec): { objs: GeoObj[]; id: st
       if (at >= 0) {
         if (objs[at]!.kind !== "point") return { error: `${name} isn't a free point, so it can't be moved` };
         const next = objs.slice();
-        next[at] = { id: name, kind: "point", x: spec.x, y: spec.y };
+        next[at] = { ...objs[at]!, id: name, kind: "point", x: spec.x, y: spec.y };
         return { objs: next, id: name };
       }
       return add({ id: name, kind: "point", x: spec.x, y: spec.y });
@@ -571,7 +660,7 @@ export function addSpec(objs: GeoObj[], spec: GeoSpec): { objs: GeoObj[]; id: st
       } else if (!of.length || of.some((id) => !has(id))) return { error: `${type} needs of: the object (or two points for a length)` };
       if (spec.store !== undefined && !VAR_NAME.test(spec.store)) return { error: `store needs a variable name (letters, digits and _): not ${spec.store}` };
       const o: GeoObj = { id: spec.name ?? nextId(objs, "measure"), kind: "measure", what: type, of, ...(spec.store ? { store: spec.store } : {}) };
-      if (!measure(o, resolve(objs))) return { error: `can't measure the ${type} of ${of.join(", ")}` };
+      if (!measure(o, resolve(objs), {})) return { error: `can't measure the ${type} of ${of.join(", ")}` };
       // One measurement per variable: storing here unlinks it from any other.
       if (spec.store) objs = objs.map((m) => (m.kind === "measure" && m.store === spec.store ? { ...m, store: undefined } : m));
       return add(o);
@@ -618,19 +707,19 @@ export function addSpec(objs: GeoObj[], spec: GeoSpec): { objs: GeoObj[]; id: st
 }
 
 /** A construction as an agent reads it: each object, where it is now, and the measurements' values. */
-export function describe(objs: GeoObj[]): Record<string, unknown>[] {
-  const shapes = resolve(objs);
+export function describe(objs: GeoObj[], env: GeoEnv = {}): Record<string, unknown>[] {
+  const shapes = resolve(objs, env);
   const n = (v: number) => Number(v.toFixed(4));
   return objs.map((o) => {
     const s = shapes.get(o.id);
-    const { id, kind, hidden, attrs, ...def } = o;
+    const { id, kind, hidden, attrs, label, cond, ...def } = o;
     const now =
       !s ? { undefined: true }
       : s.t === "pt" ? { x: n(s.p.x), y: n(s.p.y) }
       : s.t === "circle" ? { centre: [n(s.c.x), n(s.c.y)], radius: n(s.r) }
       : s.t === "value" ? { value: Number.isFinite(s.value) ? n(s.value) : "undefined", shown: s.text }
       : {};
-    return { id, kind, ...(kind === "point" ? {} : def), ...now, ...(hidden ? { hidden: true } : {}), ...(attrs ? { attrs } : {}) };
+    return { id, kind, ...(kind === "point" ? {} : def), ...now, ...(hidden ? { hidden: true } : {}), ...(attrs ? { attrs } : {}), ...(label ? { label } : {}), ...(cond ? { conditions: cond } : {}) };
   });
 }
 
@@ -1161,4 +1250,57 @@ function finishMore(objs: GeoObj[], tool: GeoTool, picked: string[]): { objs: Ge
     default:
       return null;
   }
+}
+
+/** Everything built on `id`, however indirectly, in the list's order. */
+export function dependents(objs: GeoObj[], id: string): Set<string> {
+  const out = new Set<string>([id]);
+  for (const o of objs) if (refsOf(o).some((r) => out.has(r))) out.add(o.id);
+  out.delete(id);
+  return out;
+}
+
+/** Each reference to `from` in an object made a reference to `to` (its own id kept). */
+function renamed(o: GeoObj, from: string, to: string): GeoObj {
+  const swap = (v: unknown): unknown => (v === from ? to : Array.isArray(v) ? v.map(swap) : v);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (k === "id") out[k] = v;
+    else if (k === "vars" && v && typeof v === "object") out[k] = Object.fromEntries(Object.entries(v).map(([n, r]) => [n, r === from ? to : r]));
+    else if (k === "attrs" || k === "cond" || k === "at") out[k] = v;
+    else out[k] = swap(v);
+  }
+  return out as GeoObj;
+}
+
+/** Whether Redefine can take this object: a point that is free or on an object. */
+export const redefinable = (o: GeoObj | undefined): boolean => o?.kind === "point" || o?.kind === "pointon";
+
+/**
+ * Actions ▸ Redefine: a free point (or a point on an object) given a new
+ * definition where it's dropped. On another point, the two become one; on
+ * a line, circle, polygon or curve, it's a point on that object; anywhere
+ * else, a free point there. What's built on it follows. An object built on
+ * the point itself can't take it (that would go round in a circle), so the
+ * point is left free there instead.
+ */
+export function redefinePoint(objs: GeoObj[], id: string, hit: string | null, at: Pt): GeoObj[] {
+  const o = objs.find((x) => x.id === id);
+  if (!redefinable(o)) return objs;
+  const below = dependents(objs, id);
+  const target = hit && hit !== id && !below.has(hit) ? hit : null;
+  const shapes = resolve(objs);
+  const s = target ? shapes.get(target) : undefined;
+  const keep = { ...(o!.hidden ? { hidden: true } : {}), ...(o!.attrs ? { attrs: o!.attrs } : {}), ...(o!.label ? { label: o!.label } : {}), ...(o!.cond ? { cond: o!.cond } : {}) };
+  if (s?.t === "pt" && target) {
+    // Merged: everything on the point now sits on the other one.
+    return objs.filter((x) => x.id !== id).map((x) => renamed(x, id, target));
+  }
+  const next: GeoObj =
+    target && s && (s.t === "line" || s.t === "circle" || s.t === "poly" || s.t === "curve")
+      ? { id, kind: "pointon", on: target, t: paramAt(s, at), ...keep }
+      : { id, kind: "point", x: Number(at.x.toFixed(4)), y: Number(at.y.toFixed(4)), ...keep };
+  // The point and what's built on it go after what it now sits on, so each is worked out from what's before it.
+  const moved = objs.filter((x) => x.id === id || below.has(x.id)).map((x) => (x.id === id ? next : x));
+  return [...objs.filter((x) => x.id !== id && !below.has(x.id)), ...moved];
 }

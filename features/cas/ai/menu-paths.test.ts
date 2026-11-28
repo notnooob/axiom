@@ -33,6 +33,13 @@ describe("menuPathOf", () => {
       expect(p?.keys).toBe(keysFor(p!.path.split(" ▸ ")));
     }
   });
+  it("finds commands behind a first step (Num of Lists, Data Input Method)", () => {
+    expect(menuPathOf("OneVar")?.keys).toBe("menu 6 1 1");
+    expect(menuPathOf("MultReg")?.keys).toBe("menu 6 1 F");
+    expect(menuPathOf("zInterval")?.keys).toBe("menu 6 6 1");
+    expect(menuPathOf("tTest")?.keys).toBe("menu 6 7 2");
+    expect(menuPathOf("ANOVA")?.keys).toBe("menu 6 7 C");
+  });
   it("gives null for what isn't in the menu", () => {
     expect(menuPathOf("frobnicate")).toBeNull();
     expect(menuPathOf("")).toBeNull();

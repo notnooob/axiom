@@ -85,6 +85,36 @@ describe("export", () => {
     expect(p1).toContain('<e t="3" f="0" c="0"><n>a</n><v>3</v></e>');
     expect(p1).toContain('<e t="6" f="0" c="0"><n>g</n><p>x</p><v>x^2+1</v></e>');
   });
+
+  it("writes programs and Program Editor pages as TI keeps them", () => {
+    const src = "Define LibPub chk(n)=Prgm:Disp n:Disp 2:EndPrgm";
+    const stored = `src_chk_:="${btoa(src)}"`;
+    const doc: CasDocument = {
+      title: "t",
+      active: 0,
+      pages: [{ kind: "program", id: 1, problem: 1, name: "chk", source: "Define LibPub chk(n)=\nPrgm\nDisp n\nDisp 2\nEndPrgm", stored: "Define LibPub chk(n)=\nPrgm\nDisp n\nDisp 2\nEndPrgm" }],
+      pendingSym: { "1": ["Define f(x)=Func\nReturn x+1\nEndFunc"] },
+    };
+    const { bytes, dropped } = exportTns(doc, DEFAULT_SETTINGS, [stored]);
+    expect(dropped).toBe(0);
+    const p1 = decodeTns(bytes).xml.get("Problem1.xml")!;
+    expect(p1).toContain('<e t="7" f="0" c="0"><n>chk</n><p>n</p><v>Prgm&#13;:Disp n&#13;:Disp 2&#13;:EndPrgm</v></e>');
+    expect(p1).toContain('<e t="6" f="0" c="0"><n>f</n><p>x</p><v>Func&#13;:Return x+1&#13;:EndFunc</v></e>');
+    expect(p1).toContain('type="TI.ProgramEditor"');
+    expect(p1).toContain("<pe:dirty>0</pe:dirty><pe:name>chk</pe:name><pe:type>Prgm</pe:type><pe:laststoredexpr>Define LibPub chk(n)=\nPrgm&#13;:Disp n");
+    // The editor's text: the Define line with the name in bold, then a node per line.
+    expect(p1).toContain("&lt;node name=&quot;0prgm&quot; readonly=&quot;1&quot;&gt;");
+    expect(p1).toContain("pp0=&quot;6&quot;&gt;Disp n&lt;/leaf&gt;");
+  });
+
+  it("puts two apps side by side back on one card", () => {
+    const calc = newPage("calculator", 1);
+    const editor = { kind: "program" as const, id: 77, problem: 1, name: "p", source: "Define p()=\nPrgm\n\nEndPrgm" };
+    const doc: CasDocument = { title: "t", active: 0, pages: [calc, editor], groups: [{ slots: [calc.id, editor.id], layout: 2 }] };
+    const p1 = decodeTns(exportTns(doc, DEFAULT_SETTINGS).bytes).xml.get("Problem1.xml")!;
+    expect(p1.match(/<card /g)?.length).toBe(1);
+    expect(p1).toMatch(/<card clay="1"[^>]*w1="5000"[^>]*>.*type="TI.Scratchpad".*type="TI.ProgramEditor"/s);
+  });
 });
 
 describe.skipIf(!corpus || !existsSync(corpus))("user corpus", () => {

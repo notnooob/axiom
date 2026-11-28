@@ -14,7 +14,7 @@ import type { MenuAction } from "./types";
  */
 type Wizard = Extract<MenuAction, { kind: "wizard" }>;
 /** `fresh`: the focused field's contents are selected, so typing replaces them. `list`: a dropdown's open list. */
-export type WizardState = { wizard: Wizard; values: string[]; focus: number; fresh: boolean; list?: ListState | null };
+export type WizardState = { wizard: Wizard; values: string[]; focus: number; fresh: boolean; list?: ListState | null; back?: WizardState };
 
 export const openWizard = (wizard: Wizard): WizardState => ({
   wizard,
@@ -26,7 +26,14 @@ export const openWizard = (wizard: Wizard): WizardState => ({
 /** The command text a filled-in wizard builds, empty trailing arguments dropped. */
 export function buildWizard(w: WizardState): string {
   // Any number of fields: a long Hide/Show lists every object.
-  let out = w.wizard.build.replace(/\{(\d+)\}/g, (_, i: string) => w.values[Number(i)]?.trim() ?? "");
+  const value = (i: number) => {
+    const f = w.wizard.fields[i];
+    const v = w.values[i]?.trim() ?? "";
+    // A worded choice puts its code in the command.
+    const at = f?.codes && f.options ? f.options.indexOf(v) : -1;
+    return at >= 0 ? f!.codes![at]! : v;
+  };
+  let out = w.wizard.build.replace(/\{(\d+)\}/g, (_, i: string) => value(Number(i)));
   // Blank arguments at the end of a call or a command (before ":" or the end) are dropped.
   out = out.replace(/,+\)/g, ")").replace(/,+(?=\s*(:|$))/g, "");
   return out;
@@ -40,7 +47,13 @@ export function wizardPick(w: WizardState, i: number): WizardState {
   return { ...w, list: null, focus: l.field, fresh: true, values: w.values.map((x, k) => (k === l.field ? v : x)) };
 }
 
-export function wizardKeyPress(w: WizardState, key: Key): { state: WizardState | null; done?: string } {
+/** The first required field left empty, as the handheld's Input Error names it, or null. */
+export function missingField(w: WizardState): string | null {
+  const i = w.wizard.fields.findIndex((f, k) => f.required && !w.values[k]?.trim());
+  return i < 0 ? null : `Input Error: Required field is empty! Field # ${i + 1}: ${w.wizard.fields[i]!.label}`;
+}
+
+export function wizardKeyPress(w: WizardState, key: Key): { state: WizardState | null; done?: string; error?: string } {
   if (w.list) {
     const r = listKeyPress(w.list, w.wizard.fields[w.list.field]?.options ?? [], key);
     if (r.pick !== undefined) return { state: wizardPick(w, r.pick) };
@@ -53,14 +66,25 @@ export function wizardKeyPress(w: WizardState, key: Key): { state: WizardState |
   const n = w.wizard.fields.length;
   switch (key.k) {
     case "esc":
-      return { state: null };
-    case "enter":
+      return { state: w.back ?? null };
+    case "enter": {
+      const missing = missingField(w);
+      if (missing) return { state: w, error: missing };
+      if (w.wizard.then) return { state: { ...openWizard(w.wizard.then(w.values)), back: w } };
       return { state: null, done: buildWizard(w) };
+    }
     case "tab":
     case "down":
-      return { state: { ...w, focus: (w.focus + 1) % n, fresh: true } };
-    case "up":
-      return { state: { ...w, focus: (w.focus - 1 + n) % n, fresh: true } };
+    case "up": {
+      // A greyed field is passed over.
+      const d = key.k === "up" ? -1 : 1;
+      let f = w.focus;
+      for (let i = 0; i < n; i++) {
+        f = (f + d + n) % n;
+        if (!w.wizard.fields[f]?.disabled) break;
+      }
+      return { state: { ...w, focus: f, fresh: true } };
+    }
     case "left":
     case "right":
       if (field?.check) return set(w.values[w.focus] === "Yes" ? "No" : "Yes");
@@ -151,12 +175,13 @@ export function WizardDialog({
                   {f.label}
                 </button>
               ) : (
-              <div key={f.label} className="contents">
+              <div key={f.label} className={cn("contents", f.disabled && "[&>*]:pointer-events-none [&>*]:opacity-45")}>
                 <label className={cn("whitespace-nowrap text-casLabel", f.stacked ? "col-span-2 text-left" : "text-right")}>{f.label}</label>
                 <button
                   type="button"
                   tabIndex={-1}
                   data-field={i}
+                  aria-disabled={f.disabled || undefined}
                   {...(f.options ? { "aria-haspopup": "listbox" as const, "aria-expanded": list?.field === i } : {})}
                   onMouseDown={(e) => e.preventDefault()}
                   // A click on a dropdown opens its list, as on the handheld; a field that also takes typing opens it from its arrow.

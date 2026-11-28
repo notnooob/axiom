@@ -87,7 +87,7 @@ export type DrawOp = { op: string; args: unknown[] } | { op: "textAt"; row: numb
  * What ti_draw and ti_plotlib draw: replayed onto a 318×212 canvas (the
  * handheld's screen), over the Shell while a program draws.
  */
-export function PythonCanvas({ ops }: { ops: DrawOp[] }) {
+export function PythonCanvas({ ops, label = "Python drawing" }: { ops: DrawOp[]; label?: string }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = canvas.current?.getContext("2d");
@@ -199,7 +199,7 @@ export function PythonCanvas({ ops }: { ops: DrawOp[] }) {
   }, [ops]);
   return (
     <div className="absolute inset-0 bg-white">
-      <canvas ref={canvas} width={636} height={424} className="h-full w-full" aria-label="Python drawing" />
+      <canvas ref={canvas} width={636} height={424} className="h-full w-full" aria-label={label} />
     </div>
   );
 }

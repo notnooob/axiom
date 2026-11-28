@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 import { describe, expect, it } from "vitest";
-import { notesFmtxt, notesHtml, runText } from "./model";
+import { notesFmtxt, notesHtml, placedSliders, runText } from "./model";
 import type { NotesRun } from "../state/document";
 
 const page: NotesRun[][] = [
@@ -27,5 +27,35 @@ describe("notes", () => {
     expect(x).toContain('fst="1"');
     expect(x).toContain("<full>x=-2 or x=2</full>");
     expect(x).toContain('pp0="14">solve(x^2=4,x)</leaf>');
+  });
+});
+
+describe("notes formatting and boxes", () => {
+  it("writes a coloured run and an inactive box with its warning", () => {
+    const html = notesHtml([[{ text: "red", color: "#ff0000", fill: "#ffff00" }, { math: "x", out: "x", inactive: true, warn: "Domain may be wrong" }]]);
+    expect(html).toContain('style="color:#ff0000;background-color:#ffff00;"');
+    expect(html).toContain("data-inactive");
+    expect(html).toContain('data-warn="Domain may be wrong"');
+  });
+});
+
+describe("notes format text", () => {
+  const sized: NotesRun[][] = [["a ", { text: "big", size: 16, serif: true, b: true }]];
+  it("writes Format Text's size and font", () => {
+    expect(notesHtml(sized)).toContain('style="font-size:1.4545454545454546em;font-family:var(--font-casmath);"');
+    expect(notesFmtxt(sized)).toContain('fs="16" fst="1"');
+    expect(notesFmtxt(sized)).toContain('fn0="TI-Nspire"');
+  });
+});
+
+describe("notes sliders", () => {
+  const withSlider: NotesRun[][] = [["Speed ", { slider: "v1" }, " m/s"]];
+  it("keeps a slider's place in the text", () => {
+    expect(notesHtml(withSlider)).toContain('<span data-slider="v1" contenteditable="false" class="nb-slider"></span>');
+    expect(runText(withSlider[0]![1]!)).toBe("[slider v1]");
+    expect([...placedSliders(withSlider)]).toEqual(["v1"]);
+  });
+  it("leaves sliders out of TI's text", () => {
+    expect(notesFmtxt(withSlider)).not.toContain("v1");
   });
 });

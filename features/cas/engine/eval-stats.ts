@@ -175,8 +175,24 @@ export async function statistics(input: Extract<Ast, { k: "call" }>, giac: Giac,
       const args: Arg[] = [];
       for (const a of input.args) args.push(await arg(a));
       result = statProcedure(input.f, args);
-    } else if (input.f === "OneVar") result = oneVar(asList(await values(a0)), (await values(a1)) ?? 1);
-    else {
+    } else if (input.f === "OneVar") {
+      const first = await values(a0);
+      // OneVar n, List1, …, Listn (the wizard's Num of Lists): each list's results, a column of the table each.
+      if (typeof first === "number" && Number.isInteger(first) && first >= 1 && first === input.args.length - 1) {
+        const each: StatResult[] = [];
+        for (const a of input.args.slice(1)) each.push(oneVar(asList(await values(a))));
+        result = each[0]!;
+        const definition = await storeStats(result, giac);
+        const output: Ast = {
+          k: "mat",
+          rows: result.rows.map(([label], i) => [{ k: "str", v: label }, ...each.map((r) => statCell(r.rows[i]![1], settings.digits, (v) => listAst(v, settings.digits)))]),
+        };
+        return { ok: true, input, output, outputText: print(output), definition };
+      }
+      // OneVar List[, Freq[, Category, Include]].
+      const xs = asList(first);
+      result = oneVar(xs, await included(xs, (await values(a1)) ?? 1, a2, a3));
+    } else {
       // TwoVar and the regressions: X, Y[, [Freq][, Category, Include]].
       const [xs, ys] = [asList(await values(a0)), asList(await values(a1))];
       const freq = await included(xs, (await values(a2)) ?? 1, a3, a4);
@@ -215,9 +231,12 @@ const isMatrix = (v: StatRow[1]): v is number[][] => Array.isArray(v) && Array.i
 
 /** The results as the two-column matrix stat.results is: [["Title",…]["x̄",22.6364]…]. */
 function statTable(rows: StatRow[], digits: number, list: (v: number[]) => Ast): Ast {
-  const cell = (v: StatRow[1]): Ast =>
-    typeof v === "string" ? { k: "str", v } : isMatrix(v) ? { k: "mat", rows: v.map((r) => r.map((x) => numCell(x, digits))) } : Array.isArray(v) ? list(v as number[]) : numCell(v, digits);
-  return { k: "mat", rows: rows.map(([label, v]) => [{ k: "str", v: label }, cell(v)]) };
+  return { k: "mat", rows: rows.map(([label, v]) => [{ k: "str", v: label }, statCell(v, digits, list)]) };
+}
+
+/** One result as a cell of the table: text, a number at the display digits, a list or a matrix. */
+function statCell(v: StatRow[1], digits: number, list: (v: number[]) => Ast): Ast {
+  return typeof v === "string" ? { k: "str", v } : isMatrix(v) ? { k: "mat", rows: v.map((r) => r.map((x) => numCell(x, digits))) } : Array.isArray(v) ? list(v as number[]) : numCell(v, digits);
 }
 
 /**
